@@ -1,0 +1,217 @@
+"""
+LLM Client Module for VLLM Integration
+Handles communication with VLLM server with retry logic and error handling
+"""
+
+import requests
+import json
+import time
+import logging
+from typing import Dict, Any, Optional, Tuple
+from dataclasses import dataclass
+import backoff
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class LLMResponse:
+    success: bool
+    content: str
+    prompt_tokens: int = 0
+    response_tokens: int = 0
+    processing_time_ms: int = 0
+    error_message: str = ""
+
+class LLMClient:
+    def __init__(self, endpoint: str = "http://localhost:8100/generate"):
+        self.endpoint = endpoint
+        self.session = requests.Session()
+        self.session.headers.update({
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        })
+        self.max_retries = 3
+        self.rate_limit_delay = 1.0  # 1 second between calls
+        self.last_call_time = 0
+    
+    def _apply_rate_limit(self):
+        """Apply rate limiting between LLM calls"""
+        current_time = time.time()
+        time_since_last_call = current_time - self.last_call_time
+        
+        if time_since_last_call < self.rate_limit_delay:
+            sleep_time = self.rate_limit_delay - time_since_last_call
+            logger.info(f"Rate limiting: sleeping for {sleep_time:.2f} seconds")
+            time.sleep(sleep_time)
+        
+        self.last_call_time = time.time()
+    
+    @backoff.on_exception(
+        backoff.expo,
+        (requests.exceptions.RequestException, requests.exceptions.Timeout),
+        max_tries=3,
+        max_time=60
+    )
+    def call_llm(self, prompt: str, max_tokens: int = 2000, temperature: float = 0.1) -> LLMResponse:
+        """
+        Call VLLM endpoint with retry logic and error handling
+        """
+        self._apply_rate_limit()
+        
+        start_time = time.time()
+        
+        try:
+            payload = {
+                "prompt": prompt,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stop": ["</analysis>", "END_OF_RESPONSE"],
+                "stream": False
+            }
+            
+            logger.info(f"Calling LLM endpoint: {self.endpoint}")
+            logger.debug(f"Prompt length: {len(prompt)} characters")
+            
+            response = self.session.post(
+                self.endpoint,
+                json=payload,
+                timeout=60
+            )
+            
+            processing_time = int((time.time() - start_time) * 1000)
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                # Extract response content
+                if 'choices' in result and len(result['choices']) > 0:
+                    content = result['choices'][0].get('text', '').strip()
+                elif 'text' in result:
+                    content = result['text'].strip()
+                elif 'response' in result:
+                    content = result['response'].strip()
+                else:
+                    content = str(result)
+                
+                # Extract token usage if available
+                usage = result.get('usage', {})
+                prompt_tokens = usage.get('prompt_tokens', len(prompt) // 4)  # Estimate
+                completion_tokens = usage.get('completion_tokens', len(content) // 4)  # Estimate
+                
+                logger.info(f"LLM call successful - Tokens: {prompt_tokens}+{completion_tokens}, Time: {processing_time}ms")
+                
+                return LLMResponse(
+                    success=True,
+                    content=content,
+                    prompt_tokens=prompt_tokens,
+                    response_tokens=completion_tokens,
+                    processing_time_ms=processing_time
+                )
+            else:
+                error_msg = f"HTTP {response.status_code}: {response.text}"
+                logger.error(f"LLM call failed: {error_msg}")
+                
+                return LLMResponse(
+                    success=False,
+                    content="",
+                    processing_time_ms=processing_time,
+                    error_message=error_msg
+                )
+                
+        except requests.exceptions.Timeout:
+            error_msg = "LLM request timeout"
+            logger.error(error_msg)
+            return LLMResponse(
+                success=False,
+                content="",
+                processing_time_ms=int((time.time() - start_time) * 1000),
+                error_message=error_msg
+            )
+            
+        except requests.exceptions.ConnectionError:
+            error_msg = f"Cannot connect to LLM server at {self.endpoint}"
+            logger.error(error_msg)
+            return LLMResponse(
+                success=False,
+                content="",
+                processing_time_ms=int((time.time() - start_time) * 1000),
+                error_message=error_msg
+            )
+            
+        except Exception as e:
+            error_msg = f"Unexpected error calling LLM: {str(e)}"
+            logger.error(error_msg)
+            return LLMResponse(
+                success=False,
+                content="",
+                processing_time_ms=int((time.time() - start_time) * 1000),
+                error_message=error_msg
+            )
+    
+    def extract_json_from_response(self, response_content: str) -> Optional[Dict[Any, Any]]:
+        """Extract JSON from LLM response content"""
+        try:
+            # Try to parse the entire response as JSON
+            return json.loads(response_content)
+        except json.JSONDecodeError:
+            # Look for JSON blocks in the response
+            import re
+            
+            # Pattern to find JSON blocks
+            json_pattern = r'```json\s*(.*?)\s*```'
+            matches = re.findall(json_pattern, response_content, re.DOTALL)
+            
+            if matches:
+                try:
+                    return json.loads(matches[0])
+                except json.JSONDecodeError:
+                    pass
+            
+            # Try to find JSON objects directly
+            brace_patterns = [
+                r'\{.*\}',  # Find JSON objects
+                r'\[.*\]'   # Find JSON arrays
+            ]
+            
+            for pattern in brace_patterns:
+                matches = re.findall(pattern, response_content, re.DOTALL)
+                if matches:
+                    for match in matches:
+                        try:
+                            return json.loads(match)
+                        except json.JSONDecodeError:
+                            continue
+            
+            logger.warning("Could not extract JSON from LLM response")
+            return None
+    
+    def call_with_structured_output(self, prompt: str, expected_structure: str = "json") -> Tuple[bool, Dict]:
+        """
+        Call LLM and expect structured output (JSON)
+        """
+        enhanced_prompt = f"{prompt}\n\nRespond with valid JSON only. No additional text or explanations."
+        
+        response = self.call_llm(enhanced_prompt)
+        
+        if not response.success:
+            return False, {"error": response.error_message}
+        
+        parsed_json = self.extract_json_from_response(response.content)
+        
+        if parsed_json is None:
+            return False, {
+                "error": "Could not parse JSON from response",
+                "raw_response": response.content[:500]  # First 500 chars for debugging
+            }
+        
+        return True, parsed_json
+    
+    def health_check(self) -> bool:
+        """Check if LLM server is healthy"""
+        try:
+            test_prompt = "Hello, respond with 'OK' if you can process this request."
+            response = self.call_llm(test_prompt, max_tokens=10)
+            return response.success and "OK" in response.content.upper()
+        except Exception as e:
+            logger.error(f"LLM health check failed: {str(e)}")
+            return False
