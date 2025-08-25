@@ -20,38 +20,86 @@ class ComponentExtractor:
     
     def extract_components(self, session_id: str, file_content: str, file_name: str, file_type: str) -> List[Dict]:
         """Extract all components from uploaded file"""
-        logger.info(f"Extracting components from {file_name}")
+        logger.info(f"🔧 Starting component extraction for {file_name} (Type: {file_type})")
+        logger.info(f"📝 File statistics: {len(file_content)} chars, {len(file_content.split())} words, {len(file_content.splitlines())} lines")
         
         try:
             components = []
             
             if file_type.upper() == 'COBOL':
+                logger.info("🏗️  Processing as COBOL program...")
                 components = self._extract_cobol_components(session_id, file_content, file_name)
+                
             elif file_type.upper() == 'JCL':
+                logger.info("📋 Processing as JCL job...")
                 components = self._extract_jcl_components(session_id, file_content, file_name)
+                
             elif file_type.upper() == 'COPYBOOK':
+                logger.info("📚 Processing as copybook...")
                 components = self._extract_copybook_components(session_id, file_content, file_name)
+                
             else:
-                # Generic analysis
+                logger.info(f"🔍 Processing as generic {file_type} file...")
                 components = self._extract_generic_components(session_id, file_content, file_name, file_type)
             
-            logger.info(f"Extracted {len(components)} components from {file_name}")
+            logger.info(f"✅ Component extraction completed: {len(components)} components extracted")
+            
+            # Log component summary
+            if components:
+                main_components = [c for c in components if c.get('type') in ['PROGRAM', 'JCL', 'COPYBOOK']]
+                derived_components = [c for c in components if c.get('type') not in ['PROGRAM', 'JCL', 'COPYBOOK']]
+                
+                logger.info(f"📈 Component summary:")
+                logger.info(f"   • Main components: {len(main_components)}")
+                logger.info(f"   • Derived components: {len(derived_components)}")
+                
+                for component in main_components:
+                    derived_count = len(component.get('derived_components', []))
+                    logger.info(f"   📦 {component['name']} → {derived_count} derived components")
+            
             return components
             
         except Exception as e:
-            logger.error(f"Error extracting components: {str(e)}")
+            logger.error(f"❌ Error extracting components from {file_name}: {str(e)}")
+            logger.error(f"📍 Stack trace: {traceback.format_exc()}")
             return []
     
     def _extract_cobol_components(self, session_id: str, content: str, filename: str) -> List[Dict]:
         """Extract components from COBOL program"""
+        logger.info(f"🔍 Parsing COBOL structure for {filename}...")
         components = []
         
         try:
             # Use COBOL parser for initial parsing
+            logger.info("📖 Running COBOL parser...")
+            start_time = time.time()
             parsed_data = self.cobol_parser.parse_cobol_file(content, filename)
+            parse_time = time.time() - start_time
+            
+            logger.info(f"📊 COBOL parsing completed in {parse_time:.2f}s:")
+            logger.info(f"   • Total lines: {parsed_data.get('total_lines', 0)}")
+            logger.info(f"   • Executable lines: {parsed_data.get('executable_lines', 0)}")
+            logger.info(f"   • Comment lines: {parsed_data.get('comment_lines', 0)}")
+            logger.info(f"   • Divisions: {len(parsed_data.get('divisions', []))}")
+            logger.info(f"   • Record layouts: {len(parsed_data.get('record_layouts', []))}")
+            logger.info(f"   • File operations: {len(parsed_data.get('file_operations', []))}")
+            logger.info(f"   • CICS operations: {len(parsed_data.get('cics_operations', []))}")
+            logger.info(f"   • MQ operations: {len(parsed_data.get('mq_operations', []))}")
+            logger.info(f"   • XML operations: {len(parsed_data.get('xml_operations', []))}")
             
             # Generate LLM summary for the main program
+            logger.info("🤖 Generating LLM business summary...")
+            summary_start = time.time()
             program_summary = self._generate_component_summary(session_id, parsed_data, 'PROGRAM')
+            summary_time = time.time() - summary_start
+            logger.info(f"🧠 LLM summary generated in {summary_time:.2f}s")
+            
+            # Log business insights
+            if program_summary:
+                logger.info(f"💼 Business analysis:")
+                logger.info(f"   • Domain: {program_summary.get('business_domain', 'Unknown')}")
+                logger.info(f"   • Function: {program_summary.get('primary_function', 'Unknown')}")
+                logger.info(f"   • Complexity: {program_summary.get('complexity_score', 0):.1%}")
             
             # Create main program component with LLM summary
             program_component = {
@@ -76,9 +124,13 @@ class ComponentExtractor:
                 'derived_components': []  # Will store derived component names
             }
             components.append(program_component)
+            logger.info(f"📦 Created main program component: {program_component['name']}")
             
             # Extract record layouts as separate components with summaries
-            for layout in parsed_data['record_layouts']:
+            logger.info(f"🏗️  Processing {len(parsed_data['record_layouts'])} record layouts...")
+            for i, layout in enumerate(parsed_data['record_layouts'], 1):
+                logger.info(f"📋 Processing record layout {i}/{len(parsed_data['record_layouts'])}: {layout.name}")
+                
                 layout_summary = self._generate_layout_summary(session_id, layout, parsed_data)
                 
                 layout_component = {
@@ -98,6 +150,8 @@ class ComponentExtractor:
                 components.append(layout_component)
                 program_component['derived_components'].append(layout.name)
                 
+                logger.info(f"   ✅ Record layout {layout.name}: {len(layout.fields)} fields")
+                
                 # Store record layout in database
                 self.db_manager.store_record_layout(session_id, {
                     'name': layout.name,
@@ -110,18 +164,21 @@ class ComponentExtractor:
                 }, program_component['name'])
             
             # Extract copybook references as components
-            for copybook in parsed_data['copybooks']:
-                copybook_component = {
-                    'name': copybook['copybook_name'],
-                    'friendly_name': copybook['friendly_name'],
-                    'type': 'COPYBOOK_REFERENCE',
-                    'parent_program': program_component['name'],
-                    'line_number': copybook['line_number'],
-                    'line_content': copybook['line_content'],
-                    'business_purpose': f"Copybook include providing shared data structures or procedures"
-                }
-                components.append(copybook_component)
-                program_component['derived_components'].append(copybook['copybook_name'])
+            if parsed_data['copybooks']:
+                logger.info(f"📚 Processing {len(parsed_data['copybooks'])} copybook references...")
+                for copybook in parsed_data['copybooks']:
+                    copybook_component = {
+                        'name': copybook['copybook_name'],
+                        'friendly_name': copybook['friendly_name'],
+                        'type': 'COPYBOOK_REFERENCE',
+                        'parent_program': program_component['name'],
+                        'line_number': copybook['line_number'],
+                        'line_content': copybook['line_content'],
+                        'business_purpose': f"Copybook include providing shared data structures or procedures"
+                    }
+                    components.append(copybook_component)
+                    program_component['derived_components'].append(copybook['copybook_name'])
+                    logger.info(f"   📖 Copybook reference: {copybook['copybook_name']}")
             
             # Extract CICS file operations as logical file components
             cics_files = {}
@@ -134,6 +191,106 @@ class ComponentExtractor:
                             'friendly_name': self.cobol_parser.generate_friendly_name(file_name, 'CICS File'),
                             'type': 'CICS_FILE',
                             'parent_program': program_component['name'],
+                            'operations': [],
+                            'access_pattern': 'UNKNOWN',
+                            'io_operations': {
+                                'read_ops': [],
+                                'write_ops': [],
+                                'rewrite_ops': [],
+                                'delete_ops': []
+                            }
+                        }
+                    cics_files[file_name]['operations'].append(cics_op)
+                    
+                    # Categorize operations by type
+                    op_type = cics_op.get('operation', '').upper()
+                    if 'READ' in op_type:
+                        cics_files[file_name]['io_operations']['read_ops'].append(cics_op)
+                    elif 'WRITE' in op_type:
+                        cics_files[file_name]['io_operations']['write_ops'].append(cics_op)
+                    elif 'REWRITE' in op_type:
+                        cics_files[file_name]['io_operations']['rewrite_ops'].append(cics_op)
+                    elif 'DELETE' in op_type:
+                        cics_files[file_name]['io_operations']['delete_ops'].append(cics_op)
+            
+            # Add CICS files as components with proper I/O classification
+            if cics_files:
+                logger.info(f"🔄 Processing {len(cics_files)} CICS files...")
+                for file_name, file_info in cics_files.items():
+                    # Determine comprehensive access pattern
+                    io_ops = file_info['io_operations']
+                    has_read = len(io_ops['read_ops']) > 0
+                    has_write = len(io_ops['write_ops']) > 0
+                    has_rewrite = len(io_ops['rewrite_ops']) > 0
+                    has_delete = len(io_ops['delete_ops']) > 0
+                    
+                    # Classify access pattern based on operations
+                    if has_rewrite or has_delete:
+                        file_info['access_pattern'] = 'INPUT_OUTPUT'
+                        file_info['io_classification'] = 'BIDIRECTIONAL'
+                    elif has_read and has_write:
+                        file_info['access_pattern'] = 'READ_WRITE'
+                        file_info['io_classification'] = 'BIDIRECTIONAL'
+                    elif has_read:
+                        file_info['access_pattern'] = 'READ_ONLY'
+                        file_info['io_classification'] = 'INPUT_ONLY'
+                    elif has_write:
+                        file_info['access_pattern'] = 'WRITE_ONLY'
+                        file_info['io_classification'] = 'OUTPUT_ONLY'
+                    
+                    # Generate business purpose based on I/O pattern
+                    operation_summary = []
+                    if has_read:
+                        operation_summary.append(f"{len(io_ops['read_ops'])} read operation(s)")
+                    if has_write:
+                        operation_summary.append(f"{len(io_ops['write_ops'])} write operation(s)")
+                    if has_rewrite:
+                        operation_summary.append(f"{len(io_ops['rewrite_ops'])} rewrite operation(s)")
+                    if has_delete:
+                        operation_summary.append(f"{len(io_ops['delete_ops'])} delete operation(s)")
+                    
+                    file_info['business_purpose'] = f"CICS managed file with {', '.join(operation_summary)} - {file_info['io_classification'].lower().replace('_', ' ')} access pattern"
+                    file_info['operation_count'] = len(file_info['operations'])
+                    
+                    components.append(file_info)
+                    program_component['derived_components'].append(file_name)
+                    
+                    logger.info(f"   🗄️  CICS file {file_name}: {file_info['access_pattern']} ({len(file_info['operations'])} ops)")
+            
+            # Check if content needs LLM chunking for large files
+            if self.token_manager.needs_chunking(content):
+                logger.info("📄 File is large, using LLM chunked analysis...")
+                chunk_start = time.time()
+                enhanced_components = self._llm_analyze_large_program(session_id, content, filename)
+                chunk_time = time.time() - chunk_start
+                logger.info(f"🔄 Chunked LLM analysis completed in {chunk_time:.2f}s")
+                components.extend(enhanced_components)
+            
+            # Extract field relationships and store in database
+            logger.info("🔗 Extracting field relationships...")
+            relationship_start = time.time()
+            self._extract_and_store_field_relationships(session_id, components, filename)
+            relationship_time = time.time() - relationship_start
+            logger.info(f"🔗 Field relationships extracted in {relationship_time:.2f}s")
+            
+            total_time = time.time() - start_time
+            logger.info(f"✅ COBOL component extraction completed in {total_time:.2f}s")
+            
+        except Exception as e:
+            logger.error(f"❌ Error extracting COBOL components from {filename}: {str(e)}")
+            logger.error(f"📍 Stack trace: {traceback.format_exc()}")
+            # Fallback to basic parsing
+            components = [{
+                'name': filename,
+                'friendly_name': self.cobol_parser.generate_friendly_name(filename, 'Program'),
+                'type': 'PROGRAM',
+                'content': content,
+                'total_lines': len(content.split('\n')),
+                'llm_summary': {'business_purpose': 'Analysis failed - manual review required'},
+                'error': str(e)
+            }]
+        
+        return components
                             'operations': [],
                             'access_pattern': 'UNKNOWN',
                             'io_operations': {
@@ -341,8 +498,18 @@ Please provide a JSON response with:
                 'usage_pattern': 'UNKNOWN',
                 'field_analysis': {},
                 'complexity_score': 0.5
-            }
-            
+            } {str(e)}")
+            # Fallback to basic parsing
+            components = [{
+                'name': filename,
+                'friendly_name': self.cobol_parser.generate_friendly_name(filename, 'Program'),
+                'type': 'PROGRAM',
+                'content': content,
+                'total_lines': len(content.split('\n')),
+                'error': str(e)
+            }]
+        
+        return components
     
     def _extract_jcl_components(self, session_id: str, content: str, filename: str) -> List[Dict]:
         """Extract components from JCL"""

@@ -47,6 +47,7 @@ class TokenManager:
         Intelligently chunk COBOL code preserving structure
         """
         if not self.needs_chunking(code):
+            logger.info("📄 Content fits in single chunk, no chunking needed")
             return [ChunkInfo(
                 content=code,
                 chunk_number=1,
@@ -54,15 +55,27 @@ class TokenManager:
                 estimated_tokens=self.estimate_tokens(code)
             )]
         
+        logger.info(f"📄 Content too large ({self.estimate_tokens(code)} tokens), starting chunking process...")
+        logger.info(f"🎯 Target chunk size: {self.EFFECTIVE_CONTENT_LIMIT} tokens")
+        
         chunks = []
         
         if preserve_structure:
+            logger.info("🏗️  Using structure-preserving chunking...")
             chunks = self._chunk_by_structure(code)
         else:
+            logger.info("📝 Using size-based chunking...")
             chunks = self._chunk_by_size(code)
         
+        logger.info(f"✂️  Created {len(chunks)} chunks")
+        
         # Add overlap between chunks
+        logger.info(f"🔗 Adding {self.CHUNK_OVERLAP_TOKENS} token overlap between chunks...")
         chunks = self._add_context_overlap(chunks)
+        
+        # Log chunk statistics
+        for i, chunk in enumerate(chunks, 1):
+            logger.info(f"   📊 Chunk {i}: ~{chunk.estimated_tokens} tokens, overlap: {len(chunk.context_overlap)} chars")
         
         return chunks
     

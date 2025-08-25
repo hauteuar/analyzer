@@ -82,6 +82,10 @@ class LLMClient:
         if temperature is None:
             temperature = self.default_temperature
         
+        logger.info(f"🤖 Making LLM call to {self.endpoint}")
+        logger.info(f"📊 Request params: max_tokens={max_tokens}, temperature={temperature}")
+        logger.info(f"📝 Prompt length: {len(prompt)} characters (~{len(prompt)//4} tokens)")
+        
         start_time = time.time()
         
         try:
@@ -93,8 +97,7 @@ class LLMClient:
                 "stream": False
             }
             
-            logger.info(f"Calling LLM endpoint: {self.endpoint}")
-            logger.debug(f"Prompt length: {len(prompt)} characters, max_tokens: {max_tokens}")
+            logger.debug("📤 Sending request to VLLM server...")
             
             response = self.session.post(
                 self.endpoint,
@@ -105,6 +108,7 @@ class LLMClient:
             processing_time = int((time.time() - start_time) * 1000)
             
             if response.status_code == 200:
+                logger.info(f"✅ LLM request successful in {processing_time}ms")
                 result = response.json()
                 
                 # Extract response content
@@ -122,7 +126,8 @@ class LLMClient:
                 prompt_tokens = usage.get('prompt_tokens', len(prompt) // 4)  # Estimate
                 completion_tokens = usage.get('completion_tokens', len(content) // 4)  # Estimate
                 
-                logger.info(f"LLM call successful - Tokens: {prompt_tokens}+{completion_tokens}, Time: {processing_time}ms")
+                logger.info(f"📈 Token usage: {prompt_tokens} prompt + {completion_tokens} response = {prompt_tokens + completion_tokens} total")
+                logger.info(f"📄 Response length: {len(content)} characters")
                 
                 return LLMResponse(
                     success=True,
@@ -133,7 +138,7 @@ class LLMClient:
                 )
             else:
                 error_msg = f"HTTP {response.status_code}: {response.text}"
-                logger.error(f"LLM call failed: {error_msg}")
+                logger.error(f"❌ LLM request failed: {error_msg}")
                 
                 return LLMResponse(
                     success=False,
@@ -144,7 +149,7 @@ class LLMClient:
                 
         except requests.exceptions.Timeout:
             error_msg = f"LLM request timeout after {self.timeout}s"
-            logger.error(error_msg)
+            logger.error(f"⏰ {error_msg}")
             return LLMResponse(
                 success=False,
                 content="",
@@ -154,7 +159,7 @@ class LLMClient:
             
         except requests.exceptions.ConnectionError:
             error_msg = f"Cannot connect to LLM server at {self.endpoint}"
-            logger.error(error_msg)
+            logger.error(f"🔌 {error_msg}")
             return LLMResponse(
                 success=False,
                 content="",
@@ -164,7 +169,7 @@ class LLMClient:
             
         except Exception as e:
             error_msg = f"Unexpected error calling LLM: {str(e)}"
-            logger.error(error_msg)
+            logger.error(f"💥 {error_msg}")
             return LLMResponse(
                 success=False,
                 content="",

@@ -25,9 +25,24 @@ from modules.chat_manager import ChatManager
 app = Flask(__name__)
 CORS(app)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging with more detailed output
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Console output
+        logging.FileHandler('mainframe_analyzer.log', mode='a')  # File output
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# Set specific loggers to INFO level
+logging.getLogger('modules.component_extractor').setLevel(logging.INFO)
+logging.getLogger('modules.field_analyzer').setLevel(logging.INFO) 
+logging.getLogger('modules.cobol_parser').setLevel(logging.INFO)
+logging.getLogger('modules.llm_client').setLevel(logging.INFO)
+logging.getLogger('modules.token_manager').setLevel(logging.INFO)
+logging.getLogger('modules.database_manager').setLevel(logging.INFO)
 
 class MainframeAnalyzer:
     def __init__(self, llm_endpoint: str = "http://localhost:8100/generate"):
@@ -165,43 +180,115 @@ class MainframeAnalyzer:
     
     def upload_file(self, session_id: str, file_content: str, file_name: str, file_type: str) -> Dict:
         """Upload and analyze mainframe file"""
+        logger.info(f"🚀 Starting analysis of {file_name} ({file_type}) - Session: {session_id[:8]}...")
+        logger.info(f"📏 File size: {len(file_content)} characters, {len(file_content.split())} words")
+        
         try:
             # Parse file to extract components
+            logger.info(f"🔍 Extracting components from {file_name}...")
+            start_time = time.time()
+            
             components = self.component_extractor.extract_components(session_id, file_content, file_name, file_type)
             
-            # Store analysis results
+            extraction_time = time.time() - start_time
+            logger.info(f"✅ Component extraction completed in {extraction_time:.2f}s - Found {len(components)} components")
+            
+            # Log component breakdown
+            component_types = {}
             for component in components:
+                comp_type = component.get('type', 'UNKNOWN')
+                component_types[comp_type] = component_types.get(comp_type, 0) + 1
+            
+            logger.info(f"📊 Component breakdown: {dict(component_types)}")
+            
+            # Store analysis results
+            logger.info(f"💾 Storing analysis results in database...")
+            storage_start = time.time()
+            
+            for i, component in enumerate(components, 1):
+                logger.debug(f"Storing component {i}/{len(components)}: {component['name']} ({component['type']})")
                 self.db_manager.store_component_analysis(
                     session_id, component['name'], component['type'], 
                     file_name, component
                 )
             
+            storage_time = time.time() - storage_start
+            logger.info(f"💾 Database storage completed in {storage_time:.2f}s")
+            
+            total_time = time.time() - start_time
+            logger.info(f"🎉 Analysis of {file_name} completed successfully in {total_time:.2f}s")
+            
             return {
                 'success': True,
                 'components': components,
-                'message': f'Successfully analyzed {len(components)} components from {file_name}'
+                'message': f'Successfully analyzed {len(components)} components from {file_name}',
+                'processing_time': total_time,
+                'component_breakdown': component_types
             }
+            
         except Exception as e:
-            logger.error(f"Error uploading file: {str(e)}")
+            logger.error(f"❌ Error analyzing {file_name}: {str(e)}")
+            logger.error(f"📍 Error details: {traceback.format_exc()}")
             return {
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'file_name': file_name
             }
     
     def analyze_field_mapping(self, session_id: str, target_file: str) -> Dict:
         """Analyze field mapping for target file"""
+        logger.info(f"🎯 Starting field mapping analysis for target file: {target_file}")
+        logger.info(f"📂 Session: {session_id[:8]}...")
+        
         try:
+            start_time = time.time()
+            
+            # Find relevant programs
+            logger.info(f"🔍 Finding programs that interact with {target_file}...")
+            components = self.db_manager.get_session_components(session_id)
+            relevant_programs = self.field_analyzer._find_programs_for_file(session_id, target_file, components)
+            
+            logger.info(f"📋 Found {len(relevant_programs)} relevant programs: {[p['component_name'] for p in relevant_programs]}")
+            
+            if not relevant_programs:
+                logger.warning(f"⚠️  No programs found that interact with {target_file}")
+                return {
+                    'success': True,
+                    'field_mappings': [],
+                    'message': f'No programs found that interact with {target_file}'
+                }
+            
+            # Analyze field mappings
+            logger.info(f"🔬 Analyzing field mappings across {len(relevant_programs)} programs...")
             mapping_results = self.field_analyzer.analyze_field_mapping(session_id, target_file)
+            
+            analysis_time = time.time() - start_time
+            logger.info(f"✅ Field mapping analysis completed in {analysis_time:.2f}s")
+            logger.info(f"📊 Generated {len(mapping_results)} field mappings")
+            
+            # Log field mapping summary
+            if mapping_results:
+                logic_types = {}
+                for mapping in mapping_results:
+                    logic_type = mapping.business_logic_type
+                    logic_types[logic_type] = logic_types.get(logic_type, 0) + 1
+                logger.info(f"🧠 Business logic breakdown: {dict(logic_types)}")
+            
             return {
                 'success': True,
                 'field_mappings': mapping_results,
-                'message': f'Successfully analyzed field mappings for {target_file}'
+                'message': f'Successfully analyzed field mappings for {target_file}',
+                'processing_time': analysis_time,
+                'programs_analyzed': len(relevant_programs)
             }
+            
         except Exception as e:
-            logger.error(f"Error analyzing field mapping: {str(e)}")
+            logger.error(f"❌ Error analyzing field mapping for {target_file}: {str(e)}")
+            logger.error(f"📍 Error details: {traceback.format_exc()}")
             return {
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'target_file': target_file
             }
     
     def get_field_matrix(self, session_id: str, record_layout: str = None, program_name: str = None) -> Dict:
@@ -435,5 +522,30 @@ def fix_database_locks():
             'error': str(e)
         }), 500
 
+@app.route('/api/llm-config', methods=['POST'])
+def update_llm_config():
+    """Update LLM configuration"""
+    try:
+        data = request.json
+        success = analyzer.update_llm_config(data)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'LLM configuration updated successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to update LLM configuration'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error updating LLM config: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e) 
+        }), 500
+    
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
