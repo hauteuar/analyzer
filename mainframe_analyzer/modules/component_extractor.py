@@ -341,18 +341,8 @@ Please provide a JSON response with:
                 'usage_pattern': 'UNKNOWN',
                 'field_analysis': {},
                 'complexity_score': 0.5
-            } {str(e)}")
-            # Fallback to basic parsing
-            components = [{
-                'name': filename,
-                'friendly_name': self.cobol_parser.generate_friendly_name(filename, 'Program'),
-                'type': 'PROGRAM',
-                'content': content,
-                'total_lines': len(content.split('\n')),
-                'error': str(e)
-            }]
-        
-        return components
+            }
+            
     
     def _extract_jcl_components(self, session_id: str, content: str, filename: str) -> List[Dict]:
         """Extract components from JCL"""
