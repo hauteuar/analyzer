@@ -1,26 +1,4 @@
-@app.route('/api/llm-config', methods=['POST'])
-def update_llm_config():
-    """Update LLM configuration"""
-    try:
-        data = request.json
-        success = analyzer.update_llm_config(data)
-        
-        if success:
-            return jsonify({
-                'success': True,
-                'message': 'LLM configuration updated successfully'
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': 'Failed to update LLM configuration'
-            }), 500
-            
-    except Exception as e:
-        logger.error(f"Error updating LLM config: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(efrom flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import sqlite3
 import json
