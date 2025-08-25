@@ -1,9 +1,34 @@
-from flask import Flask, request, jsonify, render_template
+@app.route('/api/llm-config', methods=['POST'])
+def update_llm_config():
+    """Update LLM configuration"""
+    try:
+        data = request.json
+        success = analyzer.update_llm_config(data)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'LLM configuration updated successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to update LLM configuration'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error updating LLM config: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(efrom flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import sqlite3
 import json
 import uuid
 import datetime
+import time
+import requests
+import os
 from typing import Dict, List, Optional, Tuple
 import logging
 from dataclasses import dataclass
@@ -38,6 +63,121 @@ class MainframeAnalyzer:
         
         # Initialize database
         self.db_manager.initialize_database()
+    
+    def update_llm_config(self, config: Dict) -> bool:
+        """Update LLM client configuration"""
+        try:
+            # Update LLM client endpoint
+            self.llm_client.endpoint = config.get('endpoint', self.llm_client.endpoint)
+            
+            # Update token manager limits
+            max_tokens = config.get('maxTokens', 6000)
+            self.token_manager.MAX_TOKENS_PER_CALL = max_tokens
+            self.token_manager.EFFECTIVE_CONTENT_LIMIT = max_tokens - 500  # Reserve for system prompts
+            
+            # Update LLM client settings
+            if hasattr(self.llm_client, 'default_max_tokens'):
+                self.llm_client.default_max_tokens = max_tokens
+            if hasattr(self.llm_client, 'default_temperature'):
+                self.llm_client.default_temperature = config.get('temperature', 0.1)
+            if hasattr(self.llm_client, 'timeout'):
+                self.llm_client.timeout = config.get('timeout', 60)
+            if hasattr(self.llm_client, 'max_retries'):
+                self.llm_client.max_retries = config.get('retries', 3)
+                
+            logger.info(f"Updated LLM configuration: endpoint={self.llm_client.endpoint}, max_tokens={max_tokens}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating LLM config: {str(e)}")
+            return False
+    
+    def test_llm_connection(self, config: Dict) -> Dict:
+        """Test connection to LLM server with provided configuration"""
+        try:
+            # Create temporary LLM client with new config
+            test_client = LLMClient(config.get('endpoint', 'http://localhost:8100/generate'))
+            
+            # Test with simple prompt
+            test_prompt = "Hello! Please respond with 'VLLM_TEST_OK' to confirm you are working properly."
+            
+            start_time = time.time()
+            response = test_client.call_llm(
+                test_prompt,
+                max_tokens=config.get('maxTokens', 100),
+                temperature=config.get('temperature', 0.1)
+            )
+            response_time = int((time.time() - start_time) * 1000)
+            
+            if response.success:
+                # Try to get model information
+                model_info = self._get_model_info(test_client)
+                
+                return {
+                    'success': True,
+                    'response_time_ms': response_time,
+                    'model_name': model_info.get('model_name', 'Unknown'),
+                    'max_context_length': model_info.get('max_context_length', 'Unknown'),
+                    'response_preview': response.content[:100] + ('...' if len(response.content) > 100 else ''),
+                    'prompt_tokens': response.prompt_tokens,
+                    'response_tokens': response.response_tokens
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': response.error_message,
+                    'response_time_ms': response_time
+                }
+                
+        except Exception as e:
+            logger.error(f"Error testing LLM connection: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'response_time_ms': 0
+            }
+    
+    def _get_model_info(self, llm_client: LLMClient) -> Dict:
+        """Try to get model information from LLM server"""
+        try:
+            # Try different endpoints to get model info
+            info_endpoints = ['/v1/models', '/models', '/info']
+            
+            for endpoint in info_endpoints:
+                try:
+                    base_url = llm_client.endpoint.replace('/generate', '')
+                    info_url = f"{base_url}{endpoint}"
+                    
+                    response = requests.get(info_url, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        
+                        # Extract model information
+                        if 'data' in data and isinstance(data['data'], list) and len(data['data']) > 0:
+                            model = data['data'][0]
+                            return {
+                                'model_name': model.get('id', 'Unknown'),
+                                'max_context_length': model.get('max_model_len', 'Unknown')
+                            }
+                        elif 'model' in data:
+                            return {
+                                'model_name': data.get('model', 'Unknown'),
+                                'max_context_length': data.get('max_context_length', 'Unknown')
+                            }
+                except:
+                    continue
+            
+            # Fallback - return basic info
+            return {
+                'model_name': 'VLLM Server',
+                'max_context_length': 'Unknown'
+            }
+            
+        except Exception as e:
+            logger.warning(f"Could not retrieve model info: {str(e)}")
+            return {
+                'model_name': 'Unknown',
+                'max_context_length': 'Unknown'
+            }
     
     def create_session(self, project_name: str) -> str:
         """Create new analysis session"""
@@ -203,22 +343,119 @@ def get_session_metrics(session_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/api/export/<session_id>/<export_type>')
-def export_data(session_id, export_type):
-    """Export analysis data"""
+@app.route('/api/db-health', methods=['GET'])
+def check_database_health():
+    """Check database health and fix common issues"""
     try:
-        if export_type == 'field_mapping':
-            data = analyzer.db_manager.export_field_mappings(session_id)
-        elif export_type == 'components':
-            data = analyzer.db_manager.export_components(session_id)
-        elif export_type == 'dependencies':
-            data = analyzer.db_manager.export_dependencies(session_id)
-        else:
-            return jsonify({'success': False, 'error': 'Invalid export type'})
+        health_info = {
+            'status': 'healthy',
+            'issues': [],
+            'recommendations': []
+        }
         
-        return jsonify({'success': True, 'data': data})
+        # Check database file permissions
+        db_path = analyzer.db_manager.db_path
+        
+        if not os.path.exists(db_path):
+            health_info['issues'].append('Database file does not exist')
+            health_info['recommendations'].append('Database will be created automatically on first use')
+        else:
+            # Check file permissions
+            if not os.access(db_path, os.R_OK):
+                health_info['issues'].append('Database file not readable')
+                health_info['status'] = 'error'
+            
+            if not os.access(db_path, os.W_OK):
+                health_info['issues'].append('Database file not writable')
+                health_info['status'] = 'error'
+                health_info['recommendations'].append('Check file permissions: chmod 664 mainframe_analyzer.db')
+        
+        # Check directory permissions
+        db_dir = os.path.dirname(os.path.abspath(db_path))
+        if not os.access(db_dir, os.W_OK):
+            health_info['issues'].append('Database directory not writable')
+            health_info['status'] = 'error'
+            health_info['recommendations'].append(f'Check directory permissions: chmod 755 {db_dir}')
+        
+        # Check for lock files
+        lock_files = [
+            db_path + "-wal",
+            db_path + "-shm", 
+            db_path + "-journal"
+        ]
+        
+        active_locks = []
+        for lock_file in lock_files:
+            if os.path.exists(lock_file):
+                try:
+                    size = os.path.getsize(lock_file)
+                    active_locks.append(f"{os.path.basename(lock_file)} ({size} bytes)")
+                except OSError:
+                    active_locks.append(os.path.basename(lock_file))
+        
+        if active_locks:
+            health_info['issues'].append(f"Active lock files: {', '.join(active_locks)}")
+            health_info['recommendations'].append('Lock files are normal during operation, but persistent locks may indicate issues')
+        
+        # Test database connection
+        try:
+            with analyzer.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            health_info['connection_test'] = 'success'
+        except Exception as e:
+            health_info['issues'].append(f"Database connection failed: {str(e)}")
+            health_info['status'] = 'error'
+            health_info['connection_test'] = 'failed'
+            
+            if "database is locked" in str(e).lower():
+                health_info['recommendations'].append('Try restarting the application')
+                health_info['recommendations'].append('Check if another process is using the database')
+        
+        return jsonify({
+            'success': True,
+            'health': health_info
+        })
+        
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/fix-database-locks', methods=['POST'])
+def fix_database_locks():
+    """Attempt to fix database lock issues (use with caution)"""
+    try:
+        logger.warning("Database lock fix requested - this should only be used when the application is idle")
+        
+        # Force unlock database
+        analyzer.db_manager.force_unlock_database()
+        
+        # Test connection after unlock
+        try:
+            with analyzer.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Database locks cleared successfully'
+            })
+            
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': f'Database still locked after cleanup: {str(e)}'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=4500, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)

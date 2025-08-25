@@ -33,6 +33,24 @@ class LLMClient:
         self.max_retries = 3
         self.rate_limit_delay = 1.0  # 1 second between calls
         self.last_call_time = 0
+        self.timeout = 60
+        self.default_max_tokens = 2000
+        self.default_temperature = 0.1
+    
+    def update_config(self, config: Dict):
+        """Update client configuration dynamically"""
+        if 'endpoint' in config:
+            self.endpoint = config['endpoint']
+        if 'timeout' in config:
+            self.timeout = config['timeout']
+        if 'retries' in config:
+            self.max_retries = config['retries']
+        if 'maxTokens' in config:
+            self.default_max_tokens = config['maxTokens']
+        if 'temperature' in config:
+            self.default_temperature = config['temperature']
+        
+        logger.info(f"Updated LLM client config: endpoint={self.endpoint}, timeout={self.timeout}")
     
     def _apply_rate_limit(self):
         """Apply rate limiting between LLM calls"""
@@ -52,11 +70,17 @@ class LLMClient:
         max_tries=3,
         max_time=60
     )
-    def call_llm(self, prompt: str, max_tokens: int = 2000, temperature: float = 0.1) -> LLMResponse:
+    def call_llm(self, prompt: str, max_tokens: int = None, temperature: float = None) -> LLMResponse:
         """
         Call VLLM endpoint with retry logic and error handling
         """
         self._apply_rate_limit()
+        
+        # Use provided values or defaults
+        if max_tokens is None:
+            max_tokens = self.default_max_tokens
+        if temperature is None:
+            temperature = self.default_temperature
         
         start_time = time.time()
         
@@ -70,12 +94,12 @@ class LLMClient:
             }
             
             logger.info(f"Calling LLM endpoint: {self.endpoint}")
-            logger.debug(f"Prompt length: {len(prompt)} characters")
+            logger.debug(f"Prompt length: {len(prompt)} characters, max_tokens: {max_tokens}")
             
             response = self.session.post(
                 self.endpoint,
                 json=payload,
-                timeout=60
+                timeout=self.timeout
             )
             
             processing_time = int((time.time() - start_time) * 1000)
@@ -119,7 +143,7 @@ class LLMClient:
                 )
                 
         except requests.exceptions.Timeout:
-            error_msg = "LLM request timeout"
+            error_msg = f"LLM request timeout after {self.timeout}s"
             logger.error(error_msg)
             return LLMResponse(
                 success=False,
