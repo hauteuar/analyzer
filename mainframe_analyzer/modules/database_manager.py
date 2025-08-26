@@ -393,24 +393,52 @@ class DatabaseManager:
                 logger.info(f"Successfully stored component: {component_name}")
                 
                 # Store record layouts if present (skip if already stored by component extractor)
-                if component_type == 'PROGRAM' and 'record_layouts' in analysis_result:
-                    existing_layouts = self.get_record_layouts(session_id, component_name)
-                    
-                    if not existing_layouts:  # Only store if not already stored
-                        logger.info(f"Storing {len(analysis_result['record_layouts'])} record layouts for {component_name}")
-                        
-                        for layout_data in analysis_result['record_layouts']:
-                            try:
-                                self.store_record_layout(session_id, layout_data, component_name)
-                            except Exception as layout_error:
-                                logger.error(f"Error storing layout {layout_data.get('name', 'unknown')}: {str(layout_error)}")
-                                continue
-                    else:
-                        logger.debug(f"Record layouts already exist for {component_name}, skipping storage")
-                
-        except Exception as e:
-                logger.error(f"Error storing component analysis for {component_name}: {str(e)}")
-                raise
+                # Replace the hanging section with this:
+if component_type == 'PROGRAM' and 'record_layouts' in analysis_result:
+    try:
+        logger.info(f"Checking for existing layouts for {component_name}...")
+        
+        # Add timeout protection for the database query
+        existing_layouts = []
+        try:
+            # Quick check with timeout
+            with sqlite3.connect(self.db_path, timeout=5.0) as check_conn:
+                cursor = check_conn.cursor()
+                cursor.execute('''
+                    SELECT COUNT(*) FROM record_layouts 
+                    WHERE session_id = ? AND program_name = ?
+                ''', (session_id, component_name))
+                count = cursor.fetchone()[0]
+                existing_layouts = ['dummy'] if count > 0 else []
+                logger.info(f"Found {count} existing layouts for {component_name}")
+        except sqlite3.OperationalError as db_error:
+            logger.warning(f"Database timeout checking layouts: {str(db_error)}")
+            # Assume no existing layouts to avoid hanging
+            existing_layouts = []
+        
+        if not existing_layouts:
+            record_layouts = analysis_result['record_layouts']
+            logger.info(f"Storing {len(record_layouts)} record layouts for {component_name}")
+            
+            for i, layout_data in enumerate(record_layouts, 1):
+                try:
+                    logger.info(f"Storing layout {i}/{len(record_layouts)}: {layout_data.get('name', 'unknown')}")
+                    self.store_record_layout(session_id, layout_data, component_name)
+                    logger.info(f"Successfully stored layout {i}/{len(record_layouts)}")
+                except Exception as layout_error:
+                    logger.error(f"Error storing layout {layout_data.get('name', 'unknown')}: {str(layout_error)}")
+                    # Continue with next layout instead of failing completely
+                    continue
+            
+            logger.info(f"Completed storing all {len(record_layouts)} layouts for {component_name}")
+        else:
+            logger.info(f"Layouts already exist for {component_name}, skipping storage")
+            
+    except Exception as layout_section_error:
+        logger.error(f"Error in layout storage section for {component_name}: {str(layout_section_error)}")
+        # Don't let layout storage failure block component storage
+        pass
+
     
     def store_record_layout(self, session_id: str, layout_data: Dict, program_name: str):
         """Store record layout (01 level) information with enhanced logging and retry logic"""
@@ -576,7 +604,7 @@ class DatabaseManager:
                 str(field_data.get('code_snippet', ''))[:1000],  # Limit code snippet
                 field_data.get('usage_type', 'UNKNOWN')[:50], 
                 field_data.get('source_field', '')[:100],
-                field_data.get('target_field', '')[:100, 
+                field_data.get('target_field', '')[:100], 
                 field_data.get('business_purpose', f"Field definition for {field_name}")[:500],
                 float(field_data.get('confidence', 0.8))
             )
