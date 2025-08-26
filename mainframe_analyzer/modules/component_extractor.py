@@ -8,6 +8,8 @@ import logging
 import re
 from typing import Dict, List, Optional, Any
 from modules.cobol_parser import COBOLParser
+import time
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -43,15 +45,8 @@ class ComponentExtractor:
                 components = self._extract_generic_components(session_id, file_content, file_name, file_type)
             
             logger.info(f"✅ Component extraction completed: {len(components)} components extracted")
-            # Log component summary
-            if components:
-                main_components = [c for c in components if c.get('type') in ['PROGRAM', 'JCL', 'COPYBOOK']]
-                derived_components = [c for c in components if c.get('type') not in ['PROGRAM', 'JCL', 'COPYBOOK']]
-                
-                logger.info(f"📈 Component summary:")
-                logger.info(f"   • Main components: {len(main_components)}")
-                logger.info(f"   • Derived components: {len(derived_components)}")
-                for component in components:
+            
+            for component in components:
                     try:
                         self.db_manager.store_component_analysis(
                             session_id, 
@@ -62,6 +57,15 @@ class ComponentExtractor:
                         )
                     except Exception as e:
                         logger.error(f"Error storing component {component['name']}: {str(e)}")
+            # Log component summary
+            if components:
+                main_components = [c for c in components if c.get('type') in ['PROGRAM', 'JCL', 'COPYBOOK']]
+                derived_components = [c for c in components if c.get('type') not in ['PROGRAM', 'JCL', 'COPYBOOK']]
+                
+                logger.info(f"📈 Component summary:")
+                logger.info(f"   • Main components: {len(main_components)}")
+                logger.info(f"   • Derived components: {len(derived_components)}")
+                
                 
                 for component in main_components:
                     derived_count = len(component.get('derived_components', []))
@@ -97,7 +101,7 @@ class ComponentExtractor:
             
             # Create main program component with ALL necessary data
             program_component = {
-                'name': filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', ''),
+                'component_name': filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', ''),
                 'friendly_name': parsed_data['friendly_name'],
                 'type': 'PROGRAM',
                 'file_path': filename,
@@ -116,8 +120,13 @@ class ComponentExtractor:
                 'mq_operations': parsed_data.get('mq_operations', []),
                 'xml_operations': parsed_data.get('xml_operations', []),
                 'derived_components': [],  # Will store derived component names
-                'record_layouts': []  # Store layout references
+                'record_layouts': [],  # Store layout references
+                'total_fields': sum(len(layout_dict['fields']) for layout_dict in program_component['record_layouts']),
+                'fields': []  # Flatten all fields for frontend access
             }
+            # Flatten all fields into the main component for frontend access
+            for layout_dict in program_component['record_layouts']:
+                program_component['fields'].extend(layout_dict['fields'])
             components.append(program_component)
             logger.info(f"📦 Created main program component: {program_component['name']}")
             
@@ -291,18 +300,7 @@ class ComponentExtractor:
         except Exception as e:
             logger.error(f"❌ Error extracting COBOL components from {filename}: {str(e)}")
             logger.error(f"📍 Stack trace: {traceback.format_exc()}")
-            # Fallback to basic parsing
-            components = [{
-                'name': filename,
-                'friendly_name': self.cobol_parser.generate_friendly_name(filename, 'Program'),
-                'type': 'PROGRAM',
-                'content': content,
-                'total_lines': len(content.split('\n')),
-                'llm_summary': {'business_purpose': 'Analysis failed - manual review required'},
-                'error': str(e)
-            }]
-        
-        return components
+            
     def _generate_component_summary(self, session_id: str, parsed_data: Dict, component_type: str) -> Dict:
         """Generate LLM summary for component"""
         try:

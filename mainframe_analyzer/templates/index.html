@@ -2368,8 +2368,27 @@ function displayComponentsHierarchy(components) {
 
         // View component details
         function viewComponentDetails(componentName) {
-            // This would open a modal or navigate to detailed view
-            alert(`Component details for ${componentName} - Feature to be implemented`);
+            // Replace the alert with actual implementation
+            showComponentModal(componentName);
+        }
+
+        function showComponentModal(componentName) {
+            // Find the component data
+            const component = componentsData.find(c => c.component_name === componentName);
+            if (!component) return;
+            
+            // Create modal content showing detailed component information
+            const modalContent = `
+                <div class="modal">
+                    <div class="modal-content">
+                        <h3>${componentName} Details</h3>
+                        <pre>${JSON.stringify(component, null, 2)}</pre>
+                        <button onclick="closeModal()">Close</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalContent);
         }
 
         // Enhanced dashboard with component summaries
