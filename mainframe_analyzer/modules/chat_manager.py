@@ -45,42 +45,69 @@ class ChatManager:
             r'\bcomponent\s+(\w+[-\w]*)'
         ]
     
+    # EMERGENCY DEBUG VERSION - Replace process_query method in ChatManager
+
     def process_query(self, session_id: str, message: str, conversation_id: str) -> Dict:
-        """Process chat query with intelligent context"""
+        """Process chat query with enhanced error handling"""
+        logger.info(f"Processing chat query: {message[:100]}...")
+        
         try:
-            # Analyze query to determine type and extract entities
+            # Step 1: Analyze query
+            logger.debug("Step 1: Analyzing query...")
             query_analysis = self._analyze_query(message)
+            logger.debug(f"Query analysis: {query_analysis}")
             
-            # Build relevant context based on query
-            context = self._build_context(session_id, query_analysis)
+            # Step 2: Build context with error protection
+            logger.debug("Step 2: Building context...")
+            try:
+                context = self._build_context_safe(session_id, query_analysis)
+                logger.debug(f"Context built successfully with {len(context)} sections")
+            except Exception as context_error:
+                logger.error(f"Error building context: {str(context_error)}")
+                # Use minimal context as fallback
+                context = {'error': 'Context building failed', 'field_details': [], 'components': []}
             
-            # Get conversation history
-            conversation_history = self.db_manager.get_chat_history(session_id, conversation_id, limit=3)
+            # Step 3: Get conversation history
+            logger.debug("Step 3: Getting conversation history...")
+            try:
+                conversation_history = self.db_manager.get_chat_history(session_id, conversation_id, limit=3)
+            except Exception as history_error:
+                logger.error(f"Error getting history: {str(history_error)}")
+                conversation_history = []
             
-            # Create chat prompt with context
-            chat_prompt = self._create_chat_prompt(message, context, conversation_history, query_analysis)
+            # Step 4: Create prompt
+            logger.debug("Step 4: Creating chat prompt...")
+            try:
+                chat_prompt = self._create_chat_prompt_safe(message, context, conversation_history, query_analysis)
+            except Exception as prompt_error:
+                logger.error(f"Error creating prompt: {str(prompt_error)}")
+                # Fallback to simple prompt
+                chat_prompt = f"User question: {message}\n\nPlease provide a helpful response about mainframe code analysis."
             
-            # Check token limits and adjust if necessary
-            if self.token_manager.estimate_tokens(chat_prompt) > self.token_manager.EFFECTIVE_CONTENT_LIMIT:
-                context = self._reduce_context_size(context)
-                chat_prompt = self._create_chat_prompt(message, context, conversation_history, query_analysis)
-            
-            # Call LLM
+            # Step 5: Call LLM
+            logger.debug("Step 5: Calling LLM...")
             start_time = datetime.now()
             response = self.llm_client.call_llm(chat_prompt, max_tokens=1000, temperature=0.3)
             processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
             
-            # Store conversation
-            self.db_manager.store_chat_message(
-                session_id, conversation_id, 'user', message, 
-                context, response.prompt_tokens, processing_time
-            )
+            # Step 6: Store conversation
+            logger.debug("Step 6: Storing conversation...")
+            try:
+                self.db_manager.store_chat_message(
+                    session_id, conversation_id, 'user', message, 
+                    context, response.prompt_tokens if response.success else 0, processing_time
+                )
+            except Exception as store_error:
+                logger.error(f"Error storing user message: {str(store_error)}")
             
             if response.success:
-                self.db_manager.store_chat_message(
-                    session_id, conversation_id, 'assistant', response.content,
-                    None, response.response_tokens, processing_time
-                )
+                try:
+                    self.db_manager.store_chat_message(
+                        session_id, conversation_id, 'assistant', response.content,
+                        None, response.response_tokens, processing_time
+                    )
+                except Exception as store_error:
+                    logger.error(f"Error storing assistant message: {str(store_error)}")
                 
                 return {
                     'response': response.content,
@@ -92,16 +119,188 @@ class ChatManager:
                 }
             else:
                 return {
-                    'response': f"I'm sorry, I encountered an error processing your question: {response.error_message}",
+                    'response': f"I encountered an error processing your question: {response.error_message}",
                     'error': True
                 }
                 
         except Exception as e:
             logger.error(f"Error processing chat query: {str(e)}")
+            logger.error(f"Error traceback: {traceback.format_exc()}")
             return {
-                'response': "I'm sorry, I encountered an unexpected error. Please try again.",
-                'error': True
+                'response': "I encountered an unexpected error. Please try again with a simpler question.",
+                'error': True,
+                'error_detail': str(e)
             }
+
+    def _build_context_safe(self, session_id: str, query_analysis: Dict) -> Dict:
+        """Safe context building with proper error handling"""
+        context = {
+            'field_details': [],
+            'field_mappings': [],
+            'record_layouts': [],
+            'components': [],
+            'source_code_snippets': []
+        }
+        
+        try:
+            entities = query_analysis.get('entities', [])
+            query_type = query_analysis.get('type', 'GENERAL')
+            
+            logger.debug(f"Building context for {len(entities)} entities, query type: {query_type}")
+            
+            # Handle field queries
+            if 'FIELD' in query_type and entities:
+                for entity in entities[:3]:  # Limit to 3 entities
+                    try:
+                        logger.debug(f"Getting field context for: {entity}")
+                        field_context = self.db_manager.get_context_for_field(session_id, entity)
+                        
+                        if field_context and isinstance(field_context, dict):
+                            field_details = field_context.get('field_details', [])
+                            field_mappings = field_context.get('field_mappings', [])
+                            
+                            context['field_details'].extend(field_details)
+                            context['field_mappings'].extend(field_mappings)
+                            
+                            logger.debug(f"Added {len(field_details)} field details for {entity}")
+                            
+                    except Exception as field_error:
+                        logger.error(f"Error processing field entity {entity}: {str(field_error)}")
+                        continue
+            
+            # Handle layout queries
+            if 'LAYOUT' in query_type and entities:
+                try:
+                    logger.debug("Getting record layouts...")
+                    all_layouts = self.db_manager.get_record_layouts(session_id)
+                    
+                    for entity in entities[:3]:
+                        matching_layouts = []
+                        for layout in all_layouts:
+                            # Safe field access with fallback
+                            layout_name = layout.get('layout_name') or layout.get('name', '')
+                            if layout_name and entity.upper() in layout_name.upper():
+                                matching_layouts.append(layout)
+                        
+                        context['record_layouts'].extend(matching_layouts)
+                        logger.debug(f"Found {len(matching_layouts)} matching layouts for {entity}")
+                    
+                except Exception as layout_error:
+                    logger.error(f"Error processing layout queries: {str(layout_error)}")
+            
+            # Handle program queries
+            if 'PROGRAM' in query_type and entities:
+                try:
+                    logger.debug("Getting components...")
+                    all_components = self.db_manager.get_session_components(session_id)
+                    
+                    for entity in entities[:3]:
+                        matching_components = []
+                        for component in all_components:
+                            # Safe field access with fallback
+                            comp_name = component.get('component_name') or component.get('name', '')
+                            if comp_name and entity.upper() in comp_name.upper():
+                                # Create safe component dict
+                                safe_component = {
+                                    'name': comp_name,
+                                    'component_name': comp_name,  # Provide both for compatibility
+                                    'type': component.get('component_type') or component.get('type', 'Unknown'),
+                                    'component_type': component.get('component_type') or component.get('type', 'Unknown'),
+                                    'total_lines': component.get('total_lines', 0),
+                                    'analysis_result_json': component.get('analysis_result_json', '{}')
+                                }
+                                matching_components.append(safe_component)
+                        
+                        context['components'].extend(matching_components)
+                        logger.debug(f"Found {len(matching_components)} matching components for {entity}")
+                    
+                except Exception as program_error:
+                    logger.error(f"Error processing program queries: {str(program_error)}")
+            
+            # Get general session context if no specific entities
+            if not entities:
+                try:
+                    session_metrics = self.db_manager.get_session_metrics(session_id)
+                    context['session_summary'] = session_metrics
+                    
+                    # Get a few recent components for context
+                    recent_components = self.db_manager.get_session_components(session_id)
+                    if recent_components:
+                        context['recent_components'] = recent_components[:3]
+                    
+                except Exception as general_error:
+                    logger.error(f"Error building general context: {str(general_error)}")
+            
+            logger.debug(f"Context building completed successfully")
+            return context
+            
+        except Exception as e:
+            logger.error(f"Error in _build_context_safe: {str(e)}")
+            return context
+
+    def _create_chat_prompt_safe(self, message: str, context: Dict, 
+                            conversation_history: List[Dict], query_analysis: Dict) -> str:
+        """Create chat prompt with safe field access"""
+        
+        system_prompt = """You are a mainframe code analysis assistant. Help users understand COBOL programs, record layouts, and field relationships.
+
+    Guidelines:
+    - Reference specific code examples when available
+    - Explain both technical and business aspects
+    - Use clear, professional language
+    - Focus on practical insights for mainframe developers
+    """
+        
+        # Build context section safely
+        context_prompt = "\nAVAILABLE CONTEXT:\n"
+        
+        # Add field details
+        field_details = context.get('field_details', [])
+        if field_details:
+            context_prompt += f"\nFIELD INFORMATION ({len(field_details)} fields):\n"
+            for field in field_details[:3]:  # Limit to prevent token overflow
+                field_name = field.get('field_name', 'Unknown')
+                usage_type = field.get('usage_type', 'Unknown')
+                program_name = field.get('program_name', 'Unknown')
+                business_purpose = field.get('business_purpose', 'No description')
+                
+                context_prompt += f"- Field: {field_name}\n"
+                context_prompt += f"  Usage: {usage_type} in {program_name}\n"
+                context_prompt += f"  Purpose: {business_purpose}\n\n"
+        
+        # Add component information
+        components = context.get('components', [])
+        if components:
+            context_prompt += f"\nCOMPONENT INFORMATION ({len(components)} components):\n"
+            for comp in components[:2]:
+                comp_name = comp.get('name') or comp.get('component_name', 'Unknown')
+                comp_type = comp.get('type') or comp.get('component_type', 'Unknown')
+                total_lines = comp.get('total_lines', 0)
+                
+                context_prompt += f"- Component: {comp_name} ({comp_type})\n"
+                context_prompt += f"  Lines: {total_lines}\n\n"
+        
+        # Add session summary
+        session_summary = context.get('session_summary', {})
+        if session_summary:
+            context_prompt += f"\nSESSION OVERVIEW:\n"
+            context_prompt += f"- Total Components: {session_summary.get('total_components', 0)}\n"
+            context_prompt += f"- Total Fields: {session_summary.get('total_fields', 0)}\n\n"
+        
+        # Add conversation history
+        if conversation_history:
+            context_prompt += "\nRECENT CONVERSATION:\n"
+            for msg in conversation_history[-2:]:  # Last 2 messages
+                role = "User" if msg['message_type'] == 'user' else "Assistant"
+                content = msg['message_content'][:150]  # Limit length
+                context_prompt += f"{role}: {content}\n"
+        
+        # Final prompt
+        final_prompt = system_prompt + context_prompt
+        final_prompt += f"\nUSER QUESTION: {message}\n\n"
+        final_prompt += "Please provide a helpful response based on the available context."
+        
+        return final_prompt
     
     def _analyze_query(self, message: str) -> Dict:
         """Analyze query to determine type and extract entities"""
