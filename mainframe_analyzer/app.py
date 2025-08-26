@@ -352,14 +352,120 @@ def upload_file():
 
 @app.route('/api/field-mapping', methods=['POST'])
 def analyze_field_mapping():
-    """Analyze field mapping for target file"""
+    """Fixed field mapping analysis"""
     data = request.json
     session_id = data.get('session_id')
     target_file = data.get('target_file')
     
-    result = analyzer.analyze_field_mapping(session_id, target_file)
-    return jsonify(result)
-
+    logger.info(f"Field mapping request - Session: {session_id[:8]}, Target: {target_file}")
+    
+    try:
+        # First check if we have any components
+        components = analyzer.db_manager.get_session_components(session_id)
+        if not components:
+            return jsonify({
+                'success': True,
+                'field_mappings': [],
+                'message': 'No components found in session. Please upload and analyze files first.'
+            })
+        
+        # Get record layouts for the session
+        record_layouts = analyzer.db_manager.get_record_layouts(session_id)
+        if not record_layouts:
+            return jsonify({
+                'success': True,
+                'field_mappings': [],
+                'message': f'No record layouts found in session. The target file "{target_file}" was not found in any analyzed programs.'
+            })
+        
+        logger.info(f"Found {len(record_layouts)} record layouts to analyze")
+        
+        # Look for layouts that might match the target file
+        matching_layouts = []
+        target_upper = target_file.upper().replace('-', '').replace('_', '')
+        
+        for layout in record_layouts:
+            layout_name = layout['layout_name'].upper().replace('-', '').replace('_', '')
+            if target_upper in layout_name or layout_name in target_upper:
+                matching_layouts.append(layout)
+        
+        if not matching_layouts:
+            # Try fuzzy matching
+            for layout in record_layouts:
+                layout_words = layout['layout_name'].upper().split('-')
+                target_words = target_file.upper().split('-')
+                
+                # Check for word overlap
+                overlap = set(layout_words) & set(target_words)
+                if overlap:
+                    matching_layouts.append(layout)
+        
+        if not matching_layouts:
+            available_layouts = [layout['layout_name'] for layout in record_layouts[:10]]  # Show first 10
+            return jsonify({
+                'success': True,
+                'field_mappings': [],
+                'message': f'No record layouts found matching "{target_file}". Available layouts include: {", ".join(available_layouts)}{"..." if len(record_layouts) > 10 else ""}'
+            })
+        
+        logger.info(f"Found {len(matching_layouts)} matching layouts: {[l['layout_name'] for l in matching_layouts]}")
+        
+        # Analyze each matching layout
+        all_field_mappings = []
+        
+        for layout in matching_layouts:
+            try:
+                # Get field matrix data for this layout
+                field_data = analyzer.db_manager.get_field_matrix(session_id, layout['layout_name'])
+                
+                logger.info(f"Processing layout {layout['layout_name']} with {len(field_data)} field entries")
+                
+                for field_entry in field_data:
+                    # Create field mapping entry
+                    field_mapping = {
+                        'field_name': field_entry['field_name'],
+                        'friendly_name': f"Field from {layout['layout_name']}",
+                        'mainframe_data_type': 'COBOL-PIC',  # Default, could be enhanced
+                        'oracle_data_type': 'VARCHAR2',       # Default mapping
+                        'mainframe_length': 0,                # Could be extracted from picture clause
+                        'oracle_length': 255,                 # Default
+                        'population_source': field_entry.get('source_field', 'Program logic'),
+                        'source_record_layout': layout['layout_name'],
+                        'business_logic_type': field_entry.get('usage_type', 'UNKNOWN'),
+                        'business_logic_description': field_entry.get('business_purpose', ''),
+                        'derivation_logic': f"Derived from {field_entry.get('source_field', 'program logic')}",
+                        'programs_involved': [field_entry.get('program_name', 'Unknown')],
+                        'confidence_score': 0.8
+                    }
+                    
+                    all_field_mappings.append(field_mapping)
+                
+            except Exception as layout_error:
+                logger.error(f"Error processing layout {layout['layout_name']}: {str(layout_error)}")
+                continue
+        
+        # Store field mappings in database
+        if all_field_mappings:
+            analyzer.db_manager.store_field_mappings(session_id, target_file, all_field_mappings)
+        
+        logger.info(f"Generated {len(all_field_mappings)} field mappings for {target_file}")
+        
+        return jsonify({
+            'success': True,
+            'field_mappings': all_field_mappings,
+            'message': f'Successfully analyzed {len(all_field_mappings)} field mappings for "{target_file}" from {len(matching_layouts)} matching record layouts.',
+            'layouts_analyzed': [layout['layout_name'] for layout in matching_layouts]
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in field mapping analysis: {str(e)}")
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'target_file': target_file
+        })
+    
 @app.route('/api/field-matrix', methods=['GET'])
 def get_field_matrix():
     """Get field matrix data"""
@@ -383,22 +489,115 @@ def chat_query():
 
 @app.route('/api/components/<session_id>')
 def get_components(session_id):
-    """Get all components for session"""
+    """Get all components for session with proper data transformation"""
     try:
+        # Get raw components from database
         components = analyzer.db_manager.get_session_components(session_id)
-        return jsonify({'success': True, 'components': components})
+        
+        # Transform data for UI
+        transformed_components = []
+        for component in components:
+            # Parse analysis_result_json to get the actual component data
+            analysis_result = {}
+            if component.get('analysis_result_json'):
+                try:
+                    analysis_result = json.loads(component['analysis_result_json'])
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"Failed to parse analysis_result_json for component {component['component_name']}")
+            
+            # Transform component data for UI
+            transformed_component = {
+                'component_name': component['component_name'],
+                'friendly_name': analysis_result.get('friendly_name', component['component_name']),
+                'component_type': component['component_type'],
+                'file_path': component.get('file_path', ''),
+                'total_lines': component.get('total_lines', 0) or analysis_result.get('total_lines', 0),
+                'executable_lines': analysis_result.get('executable_lines', 0),
+                'comment_lines': analysis_result.get('comment_lines', 0),
+                'total_fields': component.get('total_fields', 0) or len(analysis_result.get('fields', [])),
+                'dependencies_count': component.get('dependencies_count', 0),
+                'created_at': component.get('created_at', ''),
+                'analysis_status': component.get('analysis_status', 'completed'),
+                
+                # Extract business information
+                'business_purpose': analysis_result.get('business_purpose', '') or 
+                                  (analysis_result.get('llm_summary', {}).get('business_purpose', '')),
+                'complexity_score': analysis_result.get('complexity_score', 0.5) or 
+                                   (analysis_result.get('llm_summary', {}).get('complexity_score', 0.5)),
+                
+                # LLM Summary data
+                'llm_summary': analysis_result.get('llm_summary', {}),
+                
+                # Additional data for different component types
+                'derived_components': analysis_result.get('derived_components', []),
+                'record_layouts': analysis_result.get('record_layouts', []),
+                'cics_operations': analysis_result.get('cics_operations', []),
+                'file_operations': analysis_result.get('file_operations', []),
+                
+                # Store full analysis result for detailed views
+                'analysis_result_json': component.get('analysis_result_json', '{}')
+            }
+            
+            transformed_components.append(transformed_component)
+        
+        logger.info(f"Retrieved {len(transformed_components)} components for session {session_id[:8]}")
+        
+        return jsonify({
+            'success': True, 
+            'components': transformed_components
+        })
+        
     except Exception as e:
+        logger.error(f"Error retrieving components: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
-
+    
 @app.route('/api/dependencies/<session_id>')
 def get_dependencies(session_id):
-    """Get dependency relationships"""
+    """Get dependency relationships with enhanced data"""
     try:
         dependencies = analyzer.db_manager.get_dependencies(session_id)
-        return jsonify({'success': True, 'dependencies': dependencies})
+        
+        # Transform dependencies for UI
+        transformed_deps = []
+        for dep in dependencies:
+            # Parse analysis details
+            details = {}
+            if dep.get('analysis_details_json'):
+                try:
+                    details = json.loads(dep['analysis_details_json'])
+                except:
+                    pass
+            
+            transformed_dep = {
+                'source_component': dep['source_component'],
+                'target_component': dep['target_component'],
+                'relationship_type': dep['relationship_type'],
+                'interface_type': dep.get('interface_type', 'UNKNOWN'),
+                'confidence_score': dep.get('confidence_score', 0.0),
+                'details': details,
+                'created_at': dep.get('created_at', '')
+            }
+            transformed_deps.append(transformed_dep)
+        
+        # Group dependencies by type for better visualization
+        dependency_groups = {}
+        for dep in transformed_deps:
+            rel_type = dep['relationship_type']
+            if rel_type not in dependency_groups:
+                dependency_groups[rel_type] = []
+            dependency_groups[rel_type].append(dep)
+        
+        return jsonify({
+            'success': True, 
+            'dependencies': transformed_deps,
+            'dependency_groups': dependency_groups,
+            'total_count': len(transformed_deps)
+        })
+        
     except Exception as e:
+        logger.error(f"Error getting dependencies: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
-
+    
 @app.route('/api/session-metrics/<session_id>')
 def get_session_metrics(session_id):
     """Get session metrics"""

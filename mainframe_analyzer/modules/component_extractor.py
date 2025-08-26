@@ -47,16 +47,68 @@ class ComponentExtractor:
             logger.info(f"✅ Component extraction completed: {len(components)} components extracted")
             
             for component in components:
-                    try:
-                        self.db_manager.store_component_analysis(
-                            session_id, 
-                            component['name'], 
-                            component['type'], 
-                            file_name, 
-                            component
-                        )
-                    except Exception as e:
-                        logger.error(f"Error storing component {component['name']}: {str(e)}")
+                try:
+                    # Ensure component has the proper structure for database storage
+                    component_data = {
+                        # Core component information
+                        'name': component.get('name', 'UNKNOWN'),
+                        'friendly_name': component.get('friendly_name', component.get('name', 'UNKNOWN')),
+                        'type': component.get('type', 'UNKNOWN'),
+                        'file_path': file_name,
+                        
+                        # Content and metrics
+                        'content': component.get('content', ''),
+                        'total_lines': component.get('total_lines', 0),
+                        'executable_lines': component.get('executable_lines', 0),
+                        'comment_lines': component.get('comment_lines', 0),
+                        'total_fields': component.get('total_fields', 0),
+                        
+                        # Business analysis
+                        'business_purpose': component.get('business_purpose', ''),
+                        'complexity_score': component.get('complexity_score', 0.5),
+                        'llm_summary': component.get('llm_summary', {}),
+                        
+                        # Structural data
+                        'divisions': component.get('divisions', []),
+                        'file_operations': component.get('file_operations', []),
+                        'program_calls': component.get('program_calls', []),
+                        'copybooks': component.get('copybooks', []),
+                        'cics_operations': component.get('cics_operations', []),
+                        'mq_operations': component.get('mq_operations', []),
+                        'xml_operations': component.get('xml_operations', []),
+                        
+                        # Relationships
+                        'derived_components': component.get('derived_components', []),
+                        'record_layouts': component.get('record_layouts', []),
+                        'fields': component.get('fields', []),
+                        
+                        # Component-specific data
+                        'parent_program': component.get('parent_program', ''),
+                        'parent_copybook': component.get('parent_copybook', ''),
+                        'level': component.get('level', ''),
+                        'line_start': component.get('line_start', 0),
+                        'line_end': component.get('line_end', 0),
+                        'source_code': component.get('source_code', ''),
+                        'access_pattern': component.get('access_pattern', ''),
+                        'io_classification': component.get('io_classification', ''),
+                        'operations': component.get('operations', []),
+                        'usage_pattern': component.get('usage_pattern', '')
+                    }
+                    
+                    self.db_manager.store_component_analysis(
+                        session_id, 
+                        component_data['name'], 
+                        component_data['type'], 
+                        file_name, 
+                        component_data
+                    )
+                    
+                    logger.info(f"✅ Stored component: {component_data['name']} ({component_data['type']})")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error storing component {component.get('name', 'UNKNOWN')}: {str(e)}")
+                    # Continue with other components even if one fails
+                    continue
             # Log component summary
             if components:
                 main_components = [c for c in components if c.get('type') in ['PROGRAM', 'JCL', 'COPYBOOK']]
@@ -350,6 +402,15 @@ class ComponentExtractor:
             total_time = time.time() - start_time
             logger.info(f"✅ COBOL component extraction completed in {total_time:.2f}s")
             
+            logger.info("Extracting component dependencies...")
+            dependency_start = time.time()
+            try:
+                self._extract_and_store_dependencies(session_id, components, filename)
+                dependency_time = time.time() - dependency_start
+                logger.info(f"Dependencies extracted in {dependency_time:.2f}s")
+            except Exception as dep_error:
+                logger.error(f"Error extracting dependencies: {str(dep_error)}")
+
             return components
             
         except Exception as e:
@@ -1096,3 +1157,108 @@ File Content ({filename}):
                 return f"Processing field - used in {', '.join(set(operation_types)).lower()} operations"
         else:
             return f"Static field - defined but not actively processed"
+        
+    def _extract_and_store_dependencies(self, session_id: str, components: List[Dict], filename: str):
+        """Extract and store component dependencies"""
+        try:
+            logger.info(f"Extracting dependencies for {len(components)} components")
+            
+            dependencies = []
+            
+            # Get main program component
+            main_program = None
+            for component in components:
+                if component.get('type') == 'PROGRAM':
+                    main_program = component
+                    break
+            
+            if not main_program:
+                logger.warning("No main program found for dependency extraction")
+                return
+            
+            # Extract program calls as dependencies
+            for call in main_program.get('program_calls', []):
+                dependency = {
+                    'source_component': main_program['name'],
+                    'target_component': call.get('program_name', call.get('name', 'Unknown')),
+                    'relationship_type': 'PROGRAM_CALL',
+                    'interface_type': 'COBOL_CALL',
+                    'confidence_score': 0.9,
+                    'analysis_details_json': json.dumps({
+                        'line_number': call.get('line_number', 0),
+                        'call_type': call.get('call_type', 'STATIC'),
+                        'parameters': call.get('parameters', [])
+                    })
+                }
+                dependencies.append(dependency)
+            
+            # Extract copybook dependencies
+            for copybook in main_program.get('copybooks', []):
+                dependency = {
+                    'source_component': main_program['name'],
+                    'target_component': copybook.get('copybook_name', copybook.get('name', 'Unknown')),
+                    'relationship_type': 'COPYBOOK_INCLUDE',
+                    'interface_type': 'COBOL_COPY',
+                    'confidence_score': 0.95,
+                    'analysis_details_json': json.dumps({
+                        'line_number': copybook.get('line_number', 0),
+                        'include_type': 'COPY',
+                        'library': copybook.get('library', '')
+                    })
+                }
+                dependencies.append(dependency)
+            
+            # Extract CICS file dependencies
+            for cics_op in main_program.get('cics_operations', []):
+                if 'file_name' in cics_op:
+                    dependency = {
+                        'source_component': main_program['name'],
+                        'target_component': cics_op['file_name'],
+                        'relationship_type': 'CICS_FILE_ACCESS',
+                        'interface_type': 'CICS',
+                        'confidence_score': 0.9,
+                        'analysis_details_json': json.dumps({
+                            'operation': cics_op.get('operation', 'UNKNOWN'),
+                            'access_type': cics_op.get('access_type', 'READ_WRITE'),
+                            'line_number': cics_op.get('line_number', 0)
+                        })
+                    }
+                    dependencies.append(dependency)
+            
+            # Extract record layout dependencies
+            for layout in main_program.get('record_layouts', []):
+                dependency = {
+                    'source_component': main_program['name'],
+                    'target_component': layout.get('name', 'Unknown'),
+                    'relationship_type': 'USES_RECORD_LAYOUT',
+                    'interface_type': 'DATA_STRUCTURE',
+                    'confidence_score': 0.95,
+                    'analysis_details_json': json.dumps({
+                        'layout_level': layout.get('level', '01'),
+                        'field_count': len(layout.get('fields', [])),
+                        'line_start': layout.get('line_start', 0)
+                    })
+                }
+                dependencies.append(dependency)
+            
+            # Store all dependencies
+            if dependencies:
+                logger.info(f"Storing {len(dependencies)} dependencies")
+                
+                with self.db_manager.get_connection() as conn:
+                    cursor = conn.cursor()
+                    
+                    for dep in dependencies:
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO dependency_relationships 
+                            (session_id, source_component, target_component, relationship_type,
+                            interface_type, confidence_score, analysis_details_json)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''', (session_id, dep['source_component'], dep['target_component'],
+                            dep['relationship_type'], dep['interface_type'],
+                            dep['confidence_score'], dep['analysis_details_json']))
+                
+                logger.info(f"Successfully stored {len(dependencies)} dependencies")
+            
+        except Exception as e:
+            logger.error(f"Error extracting dependencies: {str(e)}")
