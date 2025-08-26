@@ -291,92 +291,6 @@ class ComponentExtractor:
             }]
         
         return components
-                            'operations': [],
-                            'access_pattern': 'UNKNOWN',
-                            'io_operations': {
-                                'read_ops': [],
-                                'write_ops': [],
-                                'rewrite_ops': [],
-                                'delete_ops': []
-                            }
-                        }
-                    cics_files[file_name]['operations'].append(cics_op)
-                    
-                    # Categorize operations by type
-                    op_type = cics_op.get('operation', '').upper()
-                    if 'READ' in op_type:
-                        cics_files[file_name]['io_operations']['read_ops'].append(cics_op)
-                    elif 'WRITE' in op_type:
-                        cics_files[file_name]['io_operations']['write_ops'].append(cics_op)
-                    elif 'REWRITE' in op_type:
-                        cics_files[file_name]['io_operations']['rewrite_ops'].append(cics_op)
-                    elif 'DELETE' in op_type:
-                        cics_files[file_name]['io_operations']['delete_ops'].append(cics_op)
-            
-            # Add CICS files as components with proper I/O classification
-            for file_name, file_info in cics_files.items():
-                # Determine comprehensive access pattern
-                io_ops = file_info['io_operations']
-                has_read = len(io_ops['read_ops']) > 0
-                has_write = len(io_ops['write_ops']) > 0
-                has_rewrite = len(io_ops['rewrite_ops']) > 0
-                has_delete = len(io_ops['delete_ops']) > 0
-                
-                # Classify access pattern based on operations
-                if has_rewrite or has_delete:
-                    # REWRITE and DELETE are inherently I/O operations
-                    file_info['access_pattern'] = 'INPUT_OUTPUT'
-                    file_info['io_classification'] = 'BIDIRECTIONAL'
-                elif has_read and has_write:
-                    file_info['access_pattern'] = 'READ_WRITE'
-                    file_info['io_classification'] = 'BIDIRECTIONAL'
-                elif has_read:
-                    file_info['access_pattern'] = 'READ_ONLY'
-                    file_info['io_classification'] = 'INPUT_ONLY'
-                elif has_write:
-                    file_info['access_pattern'] = 'WRITE_ONLY'
-                    file_info['io_classification'] = 'OUTPUT_ONLY'
-                
-                # Generate business purpose based on I/O pattern
-                operation_summary = []
-                if has_read:
-                    operation_summary.append(f"{len(io_ops['read_ops'])} read operation(s)")
-                if has_write:
-                    operation_summary.append(f"{len(io_ops['write_ops'])} write operation(s)")
-                if has_rewrite:
-                    operation_summary.append(f"{len(io_ops['rewrite_ops'])} rewrite operation(s)")
-                if has_delete:
-                    operation_summary.append(f"{len(io_ops['delete_ops'])} delete operation(s)")
-                
-                file_info['business_purpose'] = f"CICS managed file with {', '.join(operation_summary)} - {file_info['io_classification'].lower().replace('_', ' ')} access pattern"
-                file_info['operation_count'] = len(file_info['operations'])
-                
-                components.append(file_info)
-                program_component['derived_components'].append(file_name)
-            
-            # If content is large, use LLM for enhanced analysis
-            if self.token_manager.needs_chunking(content):
-                enhanced_components = self._llm_analyze_large_program(session_id, content, filename)
-                components.extend(enhanced_components)
-            
-            # Extract field relationships and store in database
-            self._extract_and_store_field_relationships(session_id, components, filename)
-            
-        except Exception as e:
-            logger.error(f"Error extracting COBOL components: {str(e)}")
-            # Fallback to basic parsing
-            components = [{
-                'name': filename,
-                'friendly_name': self.cobol_parser.generate_friendly_name(filename, 'Program'),
-                'type': 'PROGRAM',
-                'content': content,
-                'total_lines': len(content.split('\n')),
-                'llm_summary': {'business_purpose': 'Analysis failed - manual review required'},
-                'error': str(e)
-            }]
-        
-        return components
-    
     def _generate_component_summary(self, session_id: str, parsed_data: Dict, component_type: str) -> Dict:
         """Generate LLM summary for component"""
         try:
@@ -470,6 +384,21 @@ Please provide a JSON response with:
             }
     
     def _generate_layout_summary(self, session_id: str, layout, parsed_data: Dict) -> Dict:
+        try:
+            print(f"🐛 DEBUG: About to generate summary for layout: {layout.name}")
+            print(f"🐛 DEBUG: Layout has {len(layout.fields)} fields")
+            
+            # Add this simple return to skip LLM entirely
+            return {
+                'business_purpose': f'Data structure with {len(layout.fields)} fields',
+                'usage_pattern': 'DATA_STRUCTURE', 
+                'complexity_score': 0.3
+            }
+        except Exception as e:
+            print(f"🐛 DEBUG: Error in layout summary: {e}")
+            return {'business_purpose': 'Error in analysis', 'usage_pattern': 'UNKNOWN', 'complexity_score': 0.5}
+    
+    def _generate_layout_summary1(self, session_id: str, layout, parsed_data: Dict) -> Dict:
         """Generate summary for record layout"""
         try:
             field_count = len(layout.fields)
