@@ -2042,22 +2042,25 @@
                     })
                 });
 
-                if (response.ok) {
+               if (response.ok) {
                     const data = await response.json();
                     
                     // Remove typing indicator
                     document.getElementById(typingId).remove();
                     
                     if (data.success) {
-                        addChatMessage('assistant', data.response);
+                        // Fix: Extract the actual response content
+                        const responseContent = data.response || data.content || data.message || 'No response';
+                        addChatMessage('assistant', responseContent);  // Pass string, not object
                         
                         // Update token usage if provided
                         if (data.tokens_used) {
                             updateTokenCounters();
                         }
                     } else {
-                        addChatMessage('assistant', data.response || 'Sorry, I encountered an error.');
+                        addChatMessage('assistant', data.error || 'Sorry, I encountered an error.');
                     }
+
                 } else {
                     throw new Error('Network error');
                 }
@@ -2077,18 +2080,31 @@
             messageDiv.id = messageId;
             messageDiv.className = `chat-message ${type}`;
             
+            // Fix the [object][object] issue
+            let displayMessage = '';
             if (typeof message === 'string') {
-                // Handle markdown-like formatting
-                const formattedMessage = message
-                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                    .replace(/`(.*?)`/g, '<code>$1</code>')
-                    .replace(/\n/g, '<br>');
-                
-                messageDiv.innerHTML = `<p>${formattedMessage}</p>`;
+                displayMessage = message;
+            } else if (typeof message === 'object') {
+                // Handle object responses from API
+                if (message.response) {
+                    displayMessage = message.response;
+                } else if (message.content) {
+                    displayMessage = message.content;
+                } else {
+                    displayMessage = JSON.stringify(message, null, 2);
+                }
             } else {
-                messageDiv.textContent = message;
+                displayMessage = String(message);
             }
+            
+            // Handle markdown-like formatting
+            const formattedMessage = displayMessage
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/`(.*?)`/g, '<code>$1</code>')
+                .replace(/\n/g, '<br>');
+            
+            messageDiv.innerHTML = `<p>${formattedMessage}</p>`;
             
             messagesContainer.appendChild(messageDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -2180,7 +2196,10 @@
                 const row = document.createElement('tr');
                 
                 const llmSummary = program.llm_summary || {};
-                const businessPurpose = llmSummary.business_purpose || 'Analysis pending';
+                // Make sure we're reading the business_purpose correctly
+                const businessPurpose = component.business_purpose || 
+                       (component.llm_summary && component.llm_summary.business_purpose) || 
+                       'Analysis pending';
                 const complexity = llmSummary.complexity_score || 0;
                 const derivedCount = program.derived_components ? program.derived_components.length : 0;
                 

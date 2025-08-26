@@ -112,7 +112,7 @@ class ComponentExtractor:
                 'executable_lines': parsed_data.get('executable_lines', 0),
                 'comment_lines': parsed_data.get('comment_lines', 0),
                 'llm_summary': program_summary,
-                'business_purpose': program_summary.get('business_purpose', ''),
+                'business_purpose': program_summary.get('business_purpose', 'Analysis failed'),
                 'complexity_score': program_summary.get('complexity_score', 0.5),
                 'divisions': parsed_data['divisions'],
                 'file_operations': parsed_data['file_operations'],

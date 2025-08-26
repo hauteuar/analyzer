@@ -347,6 +347,7 @@ class COBOLParser:
             if self.division_pattern.match(line):
                 division_name = self.division_pattern.match(line).group(1).upper()
                 in_data_division = (division_name == 'DATA')
+                logger.debug(f"🔍 Entered {division_name} DIVISION, in_data_division={in_data_division}")
                 continue
             
             if not in_data_division:
@@ -359,12 +360,15 @@ class COBOLParser:
                 name = data_match.group(2)
                 rest_of_line = data_match.group(3) or ""
                 
+                logger.debug(f"🔍 Found level {level} field: {name}")
+                
                 # If this is an 01 level, finalize previous layout
                 if level == 1:
-                    if current_layout:
+                    if current_layout and current_fields:  # Make sure we have fields
                         current_layout.fields = current_fields
                         current_layout.line_end = i - 1
                         layouts.append(current_layout)
+                        logger.info(f"✅ Completed layout {current_layout.name} with {len(current_fields)} fields")
                     
                     # Start new layout
                     current_layout = RecordLayout(
@@ -377,24 +381,23 @@ class COBOLParser:
                         friendly_name=self.generate_friendly_name(name, 'Record Layout')
                     )
                     current_fields = []
+                    logger.info(f"🏗️  Started new layout: {name}")
                 
-                # Add field to current layout
-                if current_layout and level > 1:
+                # Add field to current layout (levels > 1)
+                elif current_layout and level > 1:
                     field = self.parse_cobol_field(line, i + 1, level, name, rest_of_line)
                     current_fields.append(field)
+                    logger.debug(f"   📝 Added field: {name} (level {level})")
         
         # Close last layout
-        if current_layout:
-            current_layout.fields = current_fields
-            layouts.append(current_layout)
+        if current_layout and current_fields:  # Make sure we have fields
+                current_layout.fields = current_fields
+                layouts.append(current_layout)
+                logger.info(f"✅ Completed final layout {current_layout.name} with {len(current_fields)} fields")
         
-        # Extract source code for each layout
-        for layout in layouts:
-            source_lines = lines[layout.line_start-1:layout.line_end]
-            layout.source_code = '\n'.join(source_lines)
-        
+        logger.info(f"📊 Total layouts extracted: {len(layouts)}")
         return layouts
-    
+        
     def parse_cobol_field(self, line: str, line_number: int, level: int, name: str, definition: str) -> CobolField:
         """Parse individual COBOL field definition"""
         field = CobolField(
