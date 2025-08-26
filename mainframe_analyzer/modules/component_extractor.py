@@ -43,17 +43,6 @@ class ComponentExtractor:
                 components = self._extract_generic_components(session_id, file_content, file_name, file_type)
             
             logger.info(f"✅ Component extraction completed: {len(components)} components extracted")
-            for component in components:
-                try:
-                    self.db_manager.store_component_analysis(
-                        session_id, 
-                        component['name'], 
-                        component['type'], 
-                        file_name, 
-                        component
-                    )
-                except Exception as e:
-                    logger.error(f"Error storing component {component['name']}: {str(e)}")
             # Log component summary
             if components:
                 main_components = [c for c in components if c.get('type') in ['PROGRAM', 'JCL', 'COPYBOOK']]
@@ -62,6 +51,17 @@ class ComponentExtractor:
                 logger.info(f"📈 Component summary:")
                 logger.info(f"   • Main components: {len(main_components)}")
                 logger.info(f"   • Derived components: {len(derived_components)}")
+                for component in components:
+                    try:
+                        self.db_manager.store_component_analysis(
+                            session_id, 
+                            component['name'], 
+                            component['type'], 
+                            file_name, 
+                            component
+                        )
+                    except Exception as e:
+                        logger.error(f"Error storing component {component['name']}: {str(e)}")
                 
                 for component in main_components:
                     derived_count = len(component.get('derived_components', []))

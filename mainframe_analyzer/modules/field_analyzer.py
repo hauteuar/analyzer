@@ -663,185 +663,185 @@ COBOL Program Content:
         }
     # Add these methods to your FieldAnalyzer class to fix the field mapping issues
 
-def _extract_cobol_type_from_detail(self, field_detail: Dict) -> Dict:
-    """Extract COBOL data type information from field detail - FIXED VERSION"""
-    # Try to extract from code_snippet if available
-    code_snippet = field_detail.get('code_snippet', '')
-    
-    # Default values
-    picture = 'X(10)'
-    usage = ''
-    length = 10
-    
-    if code_snippet:
-        # Parse the code snippet to extract PIC and USAGE
-        # Example: "05 CUSTOMER-NAME PIC X(30)"
-        pic_match = re.search(r'PIC(?:TURE)?\s+([X9SVP\(\),\.\+\-\*\$Z]+)', code_snippet, re.IGNORECASE)
-        if pic_match:
-            picture = pic_match.group(1)
-            
-        usage_match = re.search(r'USAGE\s+(COMP|COMP-3|DISPLAY|BINARY|PACKED-DECIMAL)', code_snippet, re.IGNORECASE)
-        if usage_match:
-            usage = usage_match.group(1)
+    def _extract_cobol_type_from_detail(self, field_detail: Dict) -> Dict:
+        """Extract COBOL data type information from field detail - FIXED VERSION"""
+        # Try to extract from code_snippet if available
+        code_snippet = field_detail.get('code_snippet', '')
         
-        # Calculate length from picture
-        length = self._calculate_field_length(picture, usage)
-    
-    return {
-        'picture': picture,
-        'usage': usage,
-        'length': length
-    }
-
-def _calculate_field_length(self, picture: str, usage: str = "") -> int:
-    """Calculate field length from PIC clause"""
-    if not picture:
-        return 10
-    
-    try:
-        # Remove parentheses and extract numeric values
-        if 'X' in picture.upper():
-            # Alphanumeric field
-            match = re.search(r'X+(\((\d+)\))?', picture.upper())
-            if match:
-                if match.group(2):  # X(n) format
-                    return int(match.group(2))
-                else:  # XXX format
-                    return len(re.findall(r'X', picture.upper()))
+        # Default values
+        picture = 'X(10)'
+        usage = ''
+        length = 10
         
-        elif '9' in picture:
-            # Numeric field
-            match = re.search(r'9+(\((\d+)\))?', picture)
-            if match:
-                if match.group(2):  # 9(n) format
-                    length = int(match.group(2))
-                else:  # 999 format
-                    length = len(re.findall(r'9', picture))
+        if code_snippet:
+            # Parse the code snippet to extract PIC and USAGE
+            # Example: "05 CUSTOMER-NAME PIC X(30)"
+            pic_match = re.search(r'PIC(?:TURE)?\s+([X9SVP\(\),\.\+\-\*\$Z]+)', code_snippet, re.IGNORECASE)
+            if pic_match:
+                picture = pic_match.group(1)
                 
-                # Add decimal places if V is present
-                if 'V' in picture.upper():
-                    v_parts = picture.upper().split('V')
-                    if len(v_parts) > 1:
-                        decimal_part = v_parts[1]
-                        decimal_match = re.search(r'9+(\((\d+)\))?', decimal_part)
-                        if decimal_match:
-                            if decimal_match.group(2):
-                                length += int(decimal_match.group(2))
-                            else:
-                                length += len(re.findall(r'9', decimal_part))
-                
-                return length
-        
-        return 10  # Default
-    except:
-        return 10
-
-def _create_field_mapping(self, field_detail: Dict, program: Dict, 
-                                 target_file: str, layout: Dict) -> Optional[FieldMapping]:
-    """Enhanced field mapping creation with better data extraction"""
-    try:
-        field_name = field_detail['field_name']
-        
-        # Get actual COBOL type information
-        cobol_type = self._extract_cobol_type_from_detail(field_detail)
-        oracle_type, oracle_length = self.cobol_parser.convert_pic_to_oracle_type(
-            cobol_type.get('picture', ''), cobol_type.get('usage', '')
-        )
-        
-        # Enhanced business logic type determination
-        business_logic_type = self._determine_business_logic_type(field_detail)
-        
-        # Enhanced population source with CICS awareness
-        population_source = self._determine_population_source(field_detail, program, target_file)
-        
-        mapping = FieldMapping(
-            field_name=field_name,
-            friendly_name=self.cobol_parser.generate_friendly_name(field_name, 'Field'),
-            mainframe_data_type=f"PIC {cobol_type.get('picture', 'X(10)')} {cobol_type.get('usage', '')}".strip(),
-            oracle_data_type=oracle_type,
-            mainframe_length=cobol_type.get('length', 10),
-            oracle_length=oracle_length,
-            population_source=population_source,
-            business_logic_type=business_logic_type,
-            business_logic_description=self._generate_business_logic_description(field_detail, business_logic_type),
-            programs_involved=[program['component_name']],
-            confidence_score=0.85,
-            source_record_layout=layout.get('layout_name', 'Unknown'),
-            derivation_logic=self._extract_derivation_logic(field_detail)
-        )
-        
-        return mapping
-        
-    except Exception as e:
-        logger.error(f"Error creating enhanced field mapping: {str(e)}")
-        return None
-
-def _extract_derivation_logic(self, field_detail: Dict) -> str:
-    """Extract derivation logic from field operations"""
-    code_snippet = field_detail.get('code_snippet', '')
-    operation_type = field_detail.get('operation_type', '')
-    
-    if 'COMPUTE' in code_snippet.upper():
-        # Extract computation logic
-        compute_match = re.search(r'COMPUTE\s+[A-Z0-9\-]+\s*=\s*(.+)', code_snippet, re.IGNORECASE)
-        if compute_match:
-            return f"Computed as: {compute_match.group(1).strip()}"
-    
-    elif 'MOVE' in code_snippet.upper():
-        # Extract move operation
-        move_match = re.search(r'MOVE\s+([A-Z0-9\-\(\)]+)\s+TO\s+([A-Z0-9\-\(\)]+)', code_snippet, re.IGNORECASE)
-        if move_match:
-            return f"Moved from: {move_match.group(1).strip()}"
-    
-    return f"Processed via {operation_type} operation" if operation_type else "Direct field usage"
-
-def _find_programs_for_file(self, session_id: str, target_file: str, components: List[Dict]) -> List[Dict]:
-    """Enhanced program finding with better CICS file detection"""
-    relevant_programs = []
-    
-    for component in components:
-        if component['component_type'] != 'PROGRAM':
-            continue
+            usage_match = re.search(r'USAGE\s+(COMP|COMP-3|DISPLAY|BINARY|PACKED-DECIMAL)', code_snippet, re.IGNORECASE)
+            if usage_match:
+                usage = usage_match.group(1)
             
+            # Calculate length from picture
+            length = self._calculate_field_length(picture, usage)
+        
+        return {
+            'picture': picture,
+            'usage': usage,
+            'length': length
+        }
+
+    def _calculate_field_length(self, picture: str, usage: str = "") -> int:
+        """Calculate field length from PIC clause"""
+        if not picture:
+            return 10
+        
         try:
-            analysis_result = json.loads(component.get('analysis_result_json', '{}'))
+            # Remove parentheses and extract numeric values
+            if 'X' in picture.upper():
+                # Alphanumeric field
+                match = re.search(r'X+(\((\d+)\))?', picture.upper())
+                if match:
+                    if match.group(2):  # X(n) format
+                        return int(match.group(2))
+                    else:  # XXX format
+                        return len(re.findall(r'X', picture.upper()))
             
-            # Check traditional file operations
-            file_ops = analysis_result.get('file_operations', [])
-            for op in file_ops:
-                file_name = op.get('file_name', '').upper()
-                if target_file.upper() in file_name or file_name in target_file.upper():
-                    relevant_programs.append(component)
-                    logger.info(f"Found program {component['component_name']} using file operation: {file_name}")
-                    break
+            elif '9' in picture:
+                # Numeric field
+                match = re.search(r'9+(\((\d+)\))?', picture)
+                if match:
+                    if match.group(2):  # 9(n) format
+                        length = int(match.group(2))
+                    else:  # 999 format
+                        length = len(re.findall(r'9', picture))
+                    
+                    # Add decimal places if V is present
+                    if 'V' in picture.upper():
+                        v_parts = picture.upper().split('V')
+                        if len(v_parts) > 1:
+                            decimal_part = v_parts[1]
+                            decimal_match = re.search(r'9+(\((\d+)\))?', decimal_part)
+                            if decimal_match:
+                                if decimal_match.group(2):
+                                    length += int(decimal_match.group(2))
+                                else:
+                                    length += len(re.findall(r'9', decimal_part))
+                    
+                    return length
             
-            # Skip if already found via file operations
-            if any(prog['component_name'] == component['component_name'] for prog in relevant_programs):
+            return 10  # Default
+        except:
+            return 10
+
+    def _create_field_mapping(self, field_detail: Dict, program: Dict, 
+                                    target_file: str, layout: Dict) -> Optional[FieldMapping]:
+        """Enhanced field mapping creation with better data extraction"""
+        try:
+            field_name = field_detail['field_name']
+            
+            # Get actual COBOL type information
+            cobol_type = self._extract_cobol_type_from_detail(field_detail)
+            oracle_type, oracle_length = self.cobol_parser.convert_pic_to_oracle_type(
+                cobol_type.get('picture', ''), cobol_type.get('usage', '')
+            )
+            
+            # Enhanced business logic type determination
+            business_logic_type = self._determine_business_logic_type(field_detail)
+            
+            # Enhanced population source with CICS awareness
+            population_source = self._determine_population_source(field_detail, program, target_file)
+            
+            mapping = FieldMapping(
+                field_name=field_name,
+                friendly_name=self.cobol_parser.generate_friendly_name(field_name, 'Field'),
+                mainframe_data_type=f"PIC {cobol_type.get('picture', 'X(10)')} {cobol_type.get('usage', '')}".strip(),
+                oracle_data_type=oracle_type,
+                mainframe_length=cobol_type.get('length', 10),
+                oracle_length=oracle_length,
+                population_source=population_source,
+                business_logic_type=business_logic_type,
+                business_logic_description=self._generate_business_logic_description(field_detail, business_logic_type),
+                programs_involved=[program['component_name']],
+                confidence_score=0.85,
+                source_record_layout=layout.get('layout_name', 'Unknown'),
+                derivation_logic=self._extract_derivation_logic(field_detail)
+            )
+            
+            return mapping
+            
+        except Exception as e:
+            logger.error(f"Error creating enhanced field mapping: {str(e)}")
+            return None
+
+    def _extract_derivation_logic(self, field_detail: Dict) -> str:
+        """Extract derivation logic from field operations"""
+        code_snippet = field_detail.get('code_snippet', '')
+        operation_type = field_detail.get('operation_type', '')
+        
+        if 'COMPUTE' in code_snippet.upper():
+            # Extract computation logic
+            compute_match = re.search(r'COMPUTE\s+[A-Z0-9\-]+\s*=\s*(.+)', code_snippet, re.IGNORECASE)
+            if compute_match:
+                return f"Computed as: {compute_match.group(1).strip()}"
+        
+        elif 'MOVE' in code_snippet.upper():
+            # Extract move operation
+            move_match = re.search(r'MOVE\s+([A-Z0-9\-\(\)]+)\s+TO\s+([A-Z0-9\-\(\)]+)', code_snippet, re.IGNORECASE)
+            if move_match:
+                return f"Moved from: {move_match.group(1).strip()}"
+        
+        return f"Processed via {operation_type} operation" if operation_type else "Direct field usage"
+
+    def _find_programs_for_file(self, session_id: str, target_file: str, components: List[Dict]) -> List[Dict]:
+        """Enhanced program finding with better CICS file detection"""
+        relevant_programs = []
+        
+        for component in components:
+            if component['component_type'] != 'PROGRAM':
                 continue
                 
-            # Check CICS operations
-            cics_ops = analysis_result.get('cics_operations', [])
-            for op in cics_ops:
-                if 'file_name' in op:
+            try:
+                analysis_result = json.loads(component.get('analysis_result_json', '{}'))
+                
+                # Check traditional file operations
+                file_ops = analysis_result.get('file_operations', [])
+                for op in file_ops:
                     file_name = op.get('file_name', '').upper()
                     if target_file.upper() in file_name or file_name in target_file.upper():
                         relevant_programs.append(component)
-                        logger.info(f"Found program {component['component_name']} using CICS file: {file_name}")
+                        logger.info(f"Found program {component['component_name']} using file operation: {file_name}")
                         break
-            
-            # Skip if already found via CICS operations
-            if any(prog['component_name'] == component['component_name'] for prog in relevant_programs):
+                
+                # Skip if already found via file operations
+                if any(prog['component_name'] == component['component_name'] for prog in relevant_programs):
+                    continue
+                    
+                # Check CICS operations
+                cics_ops = analysis_result.get('cics_operations', [])
+                for op in cics_ops:
+                    if 'file_name' in op:
+                        file_name = op.get('file_name', '').upper()
+                        if target_file.upper() in file_name or file_name in target_file.upper():
+                            relevant_programs.append(component)
+                            logger.info(f"Found program {component['component_name']} using CICS file: {file_name}")
+                            break
+                
+                # Skip if already found via CICS operations
+                if any(prog['component_name'] == component['component_name'] for prog in relevant_programs):
+                    continue
+                    
+                # Check content for file references (last resort)
+                content = analysis_result.get('content', '') or str(analysis_result)
+                if target_file.upper() in content.upper():
+                    relevant_programs.append(component)
+                    logger.info(f"Found program {component['component_name']} via content search for: {target_file}")
+                    
+            except Exception as e:
+                logger.error(f"Error analyzing component {component.get('component_name', 'Unknown')}: {str(e)}")
                 continue
-                
-            # Check content for file references (last resort)
-            content = analysis_result.get('content', '') or str(analysis_result)
-            if target_file.upper() in content.upper():
-                relevant_programs.append(component)
-                logger.info(f"Found program {component['component_name']} via content search for: {target_file}")
-                
-        except Exception as e:
-            logger.error(f"Error analyzing component {component.get('component_name', 'Unknown')}: {str(e)}")
-            continue
-    
-    logger.info(f"Found {len(relevant_programs)} programs for target file {target_file}: {[p['component_name'] for p in relevant_programs]}")
-    return relevant_programs
+        
+        logger.info(f"Found {len(relevant_programs)} programs for target file {target_file}: {[p['component_name'] for p in relevant_programs]}")
+        return relevant_programs
