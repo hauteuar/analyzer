@@ -306,6 +306,13 @@ class ComponentExtractor:
             total_time = time.time() - start_time
             logger.info(f"COBOL extraction completed in {total_time:.2f}s: {len(components)} components, {program_component['total_fields']} fields")
             
+            if components:
+                self._extract_and_store_dependencies(session_id, components, filename)
+                has_layouts = any(c.get('type') == 'RECORD_LAYOUT' for c in components)
+                if has_layouts:
+                    self._extract_and_store_field_relationships(session_id, components, filename)
+
+
             return components
             
         except Exception as e:

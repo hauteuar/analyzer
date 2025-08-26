@@ -336,66 +336,60 @@ class COBOLParser:
         return components
     
     def extract_record_layouts(self, lines: List[str]) -> List[RecordLayout]:
-        """Extract 01 level record layouts with all sub-fields"""
+        """Extract 01 level record layouts with proper line tracking"""
         layouts = []
         current_layout = None
         current_fields = []
         in_data_division = False
         
         for i, line in enumerate(lines):
-            # Check if we're in DATA DIVISION
             if self.division_pattern.match(line):
                 division_name = self.division_pattern.match(line).group(1).upper()
                 in_data_division = (division_name == 'DATA')
-                logger.debug(f"🔍 Entered {division_name} DIVISION, in_data_division={in_data_division}")
                 continue
             
             if not in_data_division:
                 continue
             
-            # Parse data items
             data_match = self.data_item_pattern.match(line.strip())
             if data_match:
                 level = int(data_match.group(1))
                 name = data_match.group(2)
-                rest_of_line = data_match.group(3) or ""
                 
-                logger.debug(f"🔍 Found level {level} field: {name}")
-                
-                # If this is an 01 level, finalize previous layout
                 if level == 1:
-                    if current_layout and current_fields:  # Make sure we have fields
+                    # Finalize previous layout with proper line counts
+                    if current_layout and current_fields:
+                        current_layout.line_end = i - 1  # Previous line
                         current_layout.fields = current_fields
-                        current_layout.line_end = i - 1
+                        # Calculate actual source code
+                        layout_lines = lines[current_layout.line_start-1:current_layout.line_end]
+                        current_layout.source_code = '\n'.join(layout_lines)
                         layouts.append(current_layout)
-                        logger.info(f"✅ Completed layout {current_layout.name} with {len(current_fields)} fields")
                     
                     # Start new layout
                     current_layout = RecordLayout(
                         name=name,
                         level=level,
                         fields=[],
-                        line_start=i + 1,
+                        line_start=i + 1,  # 1-based line numbers
                         line_end=len(lines),
                         source_code="",
                         friendly_name=self.generate_friendly_name(name, 'Record Layout')
                     )
                     current_fields = []
-                    logger.info(f"🏗️  Started new layout: {name}")
                 
-                # Add field to current layout (levels > 1)
                 elif current_layout and level > 1:
-                    field = self.parse_cobol_field(line, i + 1, level, name, rest_of_line)
+                    field = self.parse_cobol_field(line, i + 1, level, name, data_match.group(3) or "")
                     current_fields.append(field)
-                    logger.debug(f"   📝 Added field: {name} (level {level})")
         
-        # Close last layout
-        if current_layout and current_fields:  # Make sure we have fields
-                current_layout.fields = current_fields
-                layouts.append(current_layout)
-                logger.info(f"✅ Completed final layout {current_layout.name} with {len(current_fields)} fields")
+        # Close last layout with proper line calculation
+        if current_layout and current_fields:
+            current_layout.line_end = len(lines)
+            layout_lines = lines[current_layout.line_start-1:current_layout.line_end]
+            current_layout.source_code = '\n'.join(layout_lines)
+            current_layout.fields = current_fields
+            layouts.append(current_layout)
         
-        logger.info(f"📊 Total layouts extracted: {len(layouts)}")
         return layouts
         
     def parse_cobol_field(self, line: str, line_number: int, level: int, name: str, definition: str) -> CobolField:

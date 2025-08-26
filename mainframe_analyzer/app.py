@@ -566,14 +566,29 @@ def get_components(session_id):
     
 @app.route('/api/dependencies/<session_id>')
 def get_dependencies(session_id):
-    """Get dependency relationships with enhanced data"""
+    """Get dependency relationships with enhanced data and debugging"""
     try:
+        logger.info(f"Getting dependencies for session: {session_id}")
+        
         dependencies = analyzer.db_manager.get_dependencies(session_id)
+        logger.info(f"Found {len(dependencies)} dependencies")
+        
+        if not dependencies:
+            # Debug: Check if we have any components at all
+            components = analyzer.db_manager.get_session_components(session_id)
+            logger.info(f"Session has {len(components)} components")
+            
+            return jsonify({
+                'success': True, 
+                'dependencies': [],
+                'dependency_groups': {},
+                'total_count': 0,
+                'debug_info': f"No dependencies found. Session has {len(components)} components."
+            })
         
         # Transform dependencies for UI
         transformed_deps = []
         for dep in dependencies:
-            # Parse analysis details
             details = {}
             if dep.get('analysis_details_json'):
                 try:
@@ -592,13 +607,15 @@ def get_dependencies(session_id):
             }
             transformed_deps.append(transformed_dep)
         
-        # Group dependencies by type for better visualization
+        # Group dependencies by type
         dependency_groups = {}
         for dep in transformed_deps:
             rel_type = dep['relationship_type']
             if rel_type not in dependency_groups:
                 dependency_groups[rel_type] = []
             dependency_groups[rel_type].append(dep)
+        
+        logger.info(f"Returning {len(transformed_deps)} dependencies in {len(dependency_groups)} groups")
         
         return jsonify({
             'success': True, 
@@ -609,8 +626,9 @@ def get_dependencies(session_id):
         
     except Exception as e:
         logger.error(f"Error getting dependencies: {str(e)}")
+        logger.error(f"Stack trace: {traceback.format_exc()}")
         return jsonify({'success': False, 'error': str(e)})
-    
+        
 @app.route('/api/session-metrics/<session_id>')
 def get_session_metrics(session_id):
     """Get session metrics"""

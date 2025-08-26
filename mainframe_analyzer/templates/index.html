@@ -1875,6 +1875,86 @@
                 tbody.appendChild(row);
             });
         }
+        // Add this function to load and display dependencies
+        async function loadDependenciesVisualization() {
+            try {
+                const response = await fetch(`/api/dependencies/${currentSessionId}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        displayDependenciesTable(data.dependencies, data.dependency_groups);
+                    } else {
+                        document.getElementById('dependenciesVisualization').innerHTML = 
+                            `<p class="text-muted">Error loading dependencies: ${data.error}</p>`;
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading dependencies:', error);
+                document.getElementById('dependenciesVisualization').innerHTML = 
+                    '<p class="text-muted">Error loading dependencies visualization</p>';
+            }
+        }
+
+        // Add this function to display dependencies
+        function displayDependenciesTable(dependencies, dependencyGroups) {
+            const container = document.getElementById('dependenciesVisualization');
+            
+            if (!dependencies || dependencies.length === 0) {
+                container.innerHTML = '<p class="text-muted">No dependencies found. Upload and analyze COBOL programs to see component relationships.</p>';
+                return;
+            }
+            
+            let html = `
+                <div style="margin-bottom: 1rem;">
+                    <h4>Found ${dependencies.length} dependencies in ${Object.keys(dependencyGroups).length} categories</h4>
+                </div>
+            `;
+            
+            // Display by groups
+            Object.entries(dependencyGroups).forEach(([groupType, deps]) => {
+                html += `
+                    <div style="margin-bottom: 2rem;">
+                        <h5 style="color: #667eea; margin-bottom: 1rem;">
+                            ${groupType.replace('_', ' ')} (${deps.length})
+                        </h5>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Source Component</th>
+                                    <th>Target Component</th>
+                                    <th>Interface Type</th>
+                                    <th>Confidence</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                
+                deps.forEach(dep => {
+                    const confidence = (dep.confidence_score * 100).toFixed(0);
+                    const details = dep.details.operation || dep.details.line_number || 'N/A';
+                    
+                    html += `
+                        <tr>
+                            <td><strong>${dep.source_component}</strong></td>
+                            <td><strong>${dep.target_component}</strong></td>
+                            <td><span class="badge badge-primary">${dep.interface_type}</span></td>
+                            <td>${confidence}%</td>
+                            <td>${details}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += `
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+        }
+
 
         // Load field matrix data
         async function loadFieldMatrix() {
@@ -2150,7 +2230,10 @@
                 loadFieldMatrixSelectors();
             } else if (tabName === 'dashboard') {
                 loadDashboardSummaries();
-            }
+            } else if (tabName === 'dependencies') {
+                loadDependenciesVisualization();  // Add this line
+          }
+
         }
 
         // Panel Management
@@ -2176,89 +2259,59 @@
 
         // Display components in hierarchical structure
         // Fixed displayComponentsHierarchy function - replace the existing one in your HTML
+// Fix displayComponentsHierarchy function
 function displayComponentsHierarchy(components) {
     const mainProgramsBody = document.getElementById('mainProgramsTableBody');
-    const derivedComponentsBody = document.getElementById('derivedComponentsTableBody');
-    
     mainProgramsBody.innerHTML = '';
-    derivedComponentsBody.innerHTML = '';
 
-    // Separate main programs from derived components
     const mainPrograms = components.filter(c => c.component_type === 'PROGRAM');
-    const derivedComponents = components.filter(c => c.component_type !== 'PROGRAM');
 
     if (mainPrograms.length === 0) {
-        mainProgramsBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No main programs available</td></tr>';
+        mainProgramsBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No programs available</td></tr>';
         return;
     }
 
-    // Display main programs
     mainPrograms.forEach(program => {
         const row = document.createElement('tr');
         
-        // Parse analysis_result_json to get LLM summary
-        let llmSummary = {};
+        // Parse the stored analysis results properly
+        let analysisResult = {};
         let businessPurpose = 'Analysis pending';
         let complexity = 0;
-        let derivedCount = 0;
         
         try {
             if (program.analysis_result_json) {
-                const analysisResult = JSON.parse(program.analysis_result_json);
-                llmSummary = analysisResult.llm_summary || {};
-                businessPurpose = program.business_purpose || 
-                                llmSummary.business_purpose || 
-                                analysisResult.business_purpose || 
-                                'Analysis pending';
-                complexity = llmSummary.complexity_score || 0;
-                derivedCount = analysisResult.derived_components ? analysisResult.derived_components.length : 0;
+                analysisResult = JSON.parse(program.analysis_result_json);
+                businessPurpose = analysisResult.business_purpose || 
+                               analysisResult.llm_summary?.business_purpose || 
+                               'Analysis complete';
+                complexity = analysisResult.llm_summary?.complexity_score || 0;
             }
         } catch (e) {
-            console.error('Error parsing analysis result:', e);
+            console.error('Error parsing analysis result for', program.component_name, e);
         }
+        
+        const derivedCount = analysisResult.record_layouts?.length || 0;
         
         row.innerHTML = `
             <td>
                 <strong>${program.component_name}</strong>
                 <br><small class="text-muted">${program.friendly_name || ''}</small>
-                <div class="complexity-bar">
-                    <div class="complexity-fill" style="width: ${complexity * 100}%"></div>
-                </div>
             </td>
-            <td style="max-width: 250px;">
-                <div class="business-purpose">${businessPurpose}</div>
-                ${llmSummary.business_domain ? `<span class="domain-badge domain-${llmSummary.business_domain.toLowerCase()}">${llmSummary.business_domain}</span>` : ''}
-            </td>
+            <td style="max-width: 250px;">${businessPurpose}</td>
             <td>
                 <div><strong>${program.total_lines || 0}</strong> total</div>
-                <div><small>${program.executable_lines || 0} executable</small></div>
-                <div><small>${program.comment_lines || 0} comments</small></div>
+                <div><small>${analysisResult.executable_lines || 0} executable</small></div>
             </td>
-            <td>
-                <div class="metric">
-                    <span class="metric-value">${(complexity * 100).toFixed(0)}%</span>
-                    <span class="metric-label">Complexity</span>
-                </div>
-            </td>
+            <td>${(complexity * 100).toFixed(0)}%</td>
             <td>
                 <span class="derived-count">${derivedCount}</span>
-                ${derivedCount > 0 ? `<button class="expand-btn" onclick="toggleDerivedComponents('${program.component_name}')">View Derived</button>` : ''}
             </td>
             <td>
                 <button class="btn btn-secondary btn-sm" onclick="viewComponentDetails('${program.component_name}')">View Details</button>
             </td>
         `;
         mainProgramsBody.appendChild(row);
-    });
-
-    // Store derived components for display when expanded
-    window.derivedComponentsData = {};
-    derivedComponents.forEach(component => {
-        const parent = component.parent_program || component.parent_copybook || 'Unknown';
-        if (!window.derivedComponentsData[parent]) {
-            window.derivedComponentsData[parent] = [];
-        }
-        window.derivedComponentsData[parent].push(component);
     });
 }
 
