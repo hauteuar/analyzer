@@ -374,104 +374,185 @@ class DatabaseManager:
         layout_name = layout_data.get('name', 'UNKNOWN')
         logger.info(f"Storing record layout: {layout_name} for program: {program_name}")
         
+        # Add immediate validation
+        if not layout_data:
+            logger.error("Empty layout_data provided")
+            return
+        
+        if not session_id:
+            logger.error("Empty session_id provided")
+            return
+            
+        fields = layout_data.get('fields', [])
+        logger.info(f"Layout {layout_name} has {len(fields)} fields to process")
+        
         max_retries = 3
         for attempt in range(max_retries):
+            conn = None
             try:
-                with self.get_connection() as conn:
-                    cursor = conn.cursor()
+                logger.debug(f"Attempt {attempt + 1} to store layout {layout_name}")
+                
+                # Use direct connection instead of context manager for better control
+                conn = sqlite3.connect(
+                    self.db_path, 
+                    timeout=10.0,  # Reduced timeout
+                    isolation_level=None
+                )
+                conn.row_factory = sqlite3.Row
+                
+                # Configure for faster writes
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA busy_timeout=10000")  # 10 second timeout
+                
+                cursor = conn.cursor()
+                
+                # Log the data being inserted with validation
+                logger.debug(f"Inserting record layout: {layout_name}")
+                logger.debug(f"Session ID: {session_id}")
+                logger.debug(f"Program name: {program_name}")
+                
+                # Validate required fields before insert
+                insert_data = (
+                    session_id, 
+                    layout_data.get('name', 'UNNAMED_LAYOUT'),
+                    program_name or 'UNKNOWN_PROGRAM',
+                    str(layout_data.get('level', '01')),
+                    layout_data.get('line_start', 0),
+                    layout_data.get('line_end', 0),
+                    layout_data.get('source_code', '')[:4000],  # Limit source code length
+                    len(fields)
+                )
+                
+                # Insert record layout with explicit commit
+                logger.debug("Executing INSERT for record_layouts table")
+                cursor.execute('''
+                    INSERT OR REPLACE INTO record_layouts 
+                    (session_id, layout_name, program_name, level_number, 
+                    line_start, line_end, source_code, fields_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', insert_data)
+                
+                layout_id = cursor.lastrowid
+                logger.info(f"Inserted record layout with ID: {layout_id}")
+                
+                # Process fields in smaller batches to avoid locks
+                batch_size = 10
+                field_batches = [fields[i:i + batch_size] for i in range(0, len(fields), batch_size)]
+                
+                logger.info(f"Processing {len(fields)} fields in {len(field_batches)} batches")
+                
+                for batch_idx, field_batch in enumerate(field_batches, 1):
+                    logger.debug(f"Processing field batch {batch_idx}/{len(field_batches)} ({len(field_batch)} fields)")
                     
-                    # Log the data being inserted
-                    logger.debug(f"Layout data keys: {list(layout_data.keys())}")
-                    logger.debug(f"Fields count: {len(layout_data.get('fields', []))}")
-                    
-                    # Insert record layout
-                    logger.debug("Executing INSERT for record_layouts table")
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO record_layouts 
-                        (session_id, layout_name, program_name, level_number, 
-                         line_start, line_end, source_code, fields_count)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        session_id, 
-                        layout_data.get('name'),
-                        program_name,
-                        layout_data.get('level', '01'),
-                        layout_data.get('line_start', 0),
-                        layout_data.get('line_end', 0),
-                        layout_data.get('source_code', ''),
-                        len(layout_data.get('fields', []))
-                    ))
-                    
-                    layout_id = cursor.lastrowid
-                    logger.info(f"Inserted record layout with ID: {layout_id}")
-                    
-                    # Store field details for this layout
-                    fields = layout_data.get('fields', [])
-                    logger.info(f"Processing {len(fields)} fields for layout: {layout_name}")
-                    
-                    for field_idx, field in enumerate(fields, 1):
+                    for field_idx, field in enumerate(field_batch, 1):
                         try:
-                            logger.debug(f"Processing field {field_idx}/{len(fields)}: {field.get('name', 'UNNAMED')}")
-                            self._store_field_details_internal(session_id, field, program_name, layout_id, cursor)
+                            field_name = field.get('name', f'UNNAMED_FIELD_{field_idx}')
+                            logger.debug(f"Processing field: {field_name}")
+                            
+                            # Validate field data
+                            field_insert_data = (
+                                session_id, 
+                                layout_id, 
+                                field_name,
+                                program_name, 
+                                field.get('operation_type', 'DEFINITION'),
+                                field.get('line_number', 0), 
+                                str(field.get('code_snippet', ''))[:1000],  # Limit length
+                                field.get('usage_type', 'UNKNOWN'), 
+                                field.get('source_field', '')[:100],  # Limit length
+                                field.get('target_field', '')[:100],  # Limit length
+                                field.get('business_purpose', f"Field definition for {field_name}")[:500],  # Limit length
+                                float(field.get('confidence', 0.8))
+                            )
+                            
+                            cursor.execute('''
+                                INSERT INTO field_analysis_details 
+                                (session_id, field_id, field_name, program_name, operation_type,
+                                line_number, code_snippet, usage_type, source_field, target_field,
+                                business_purpose, analysis_confidence)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', field_insert_data)
+                            
+                            logger.debug(f"Successfully inserted field: {field_name}")
+                            
                         except Exception as field_error:
-                            logger.error(f"Error storing field {field_idx} ({field.get('name', 'UNNAMED')}): {str(field_error)}")
-                            # Continue with other fields even if one fails
+                            logger.error(f"Error storing field {field.get('name', 'UNKNOWN')}: {str(field_error)}")
+                            # Continue with next field instead of failing entire batch
                             continue
                     
-                    logger.info(f"Successfully stored record layout: {layout_name} with {len(fields)} fields")
-                    return  # Success, exit retry loop
-                    
+                    # Commit after each batch
+                    conn.commit()
+                    logger.debug(f"Committed batch {batch_idx}")
+                
+                # Final commit
+                conn.commit()
+                logger.info(f"Successfully stored record layout: {layout_name} with {len(fields)} fields")
+                return  # Success, exit retry loop
+                
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                    logger.warning(f"Database locked storing record layout {layout_name}, attempt {attempt + 1}, retrying...")
+                    logger.warning(f"Database locked storing record layout {layout_name}, attempt {attempt + 1}, retrying in {1 + attempt}s...")
                     time.sleep(1 + attempt)  # Incremental backoff
                     continue
                 else:
-                    logger.error(f"Error storing record layout {layout_name}: {str(e)}")
+                    logger.error(f"SQLite error storing record layout {layout_name}: {str(e)}")
                     raise
             except Exception as e:
-                logger.error(f"Error storing record layout {layout_name}: {str(e)}")
-                logger.error(f"Layout data: {json.dumps(layout_data, indent=2, default=str)}")
+                logger.error(f"Unexpected error storing record layout {layout_name}: {str(e)}")
+                logger.error(f"Layout data keys: {list(layout_data.keys())}")
+                if fields:
+                    logger.error(f"First field sample: {fields[0] if fields else 'No fields'}")
                 raise
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                        logger.debug(f"Closed database connection for layout {layout_name}")
+                    except:
+                        pass
         
         # If we get here, all retries failed
         raise sqlite3.OperationalError(f"Failed to store record layout {layout_name} after {max_retries} attempts")
-    
+
     def _store_field_details_internal(self, session_id: str, field_data: Dict, 
                                     program_name: str, layout_id: int, cursor):
-        """Internal method to store field details using existing cursor"""
+        """Internal method to store field details using existing cursor - SIMPLIFIED VERSION"""
         field_name = field_data.get('name', 'UNNAMED_FIELD')
         logger.debug(f"Storing field details: {field_name}")
         
         try:
+            # Validate and limit data lengths to prevent database issues
+            insert_data = (
+                session_id, 
+                layout_id, 
+                field_name[:100],  # Limit field name length
+                program_name[:100], 
+                field_data.get('operation_type', 'DEFINITION')[:50],
+                field_data.get('line_number', 0), 
+                str(field_data.get('code_snippet', ''))[:1000],  # Limit code snippet
+                field_data.get('usage_type', 'UNKNOWN')[:50], 
+                field_data.get('source_field', '')[:100],
+                field_data.get('target_field', '')[:100, 
+                field_data.get('business_purpose', f"Field definition for {field_name}")[:500],
+                float(field_data.get('confidence', 0.8))
+            )
+            
             cursor.execute('''
                 INSERT INTO field_analysis_details 
                 (session_id, field_id, field_name, program_name, operation_type,
-                 line_number, code_snippet, usage_type, source_field, target_field,
-                 business_purpose, analysis_confidence)
+                line_number, code_snippet, usage_type, source_field, target_field,
+                business_purpose, analysis_confidence)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                session_id, 
-                layout_id, 
-                field_name,
-                program_name, 
-                field_data.get('operation_type', 'DEFINITION'),
-                field_data.get('line_number', 0), 
-                self._generate_field_code_snippet(field_data),
-                field_data.get('usage', 'UNKNOWN'), 
-                field_data.get('source_field', ''),
-                field_data.get('target_field', ''), 
-                field_data.get('business_purpose', f"Field definition for {field_name}"),
-                field_data.get('confidence', 0.8)
-            ))
+            ''', insert_data)
             
             logger.debug(f"Successfully stored field details for: {field_name}")
             
         except Exception as e:
             logger.error(f"Error in _store_field_details_internal for field {field_name}: {str(e)}")
-            logger.error(f"Field data: {json.dumps(field_data, indent=2, default=str)}")
+            logger.error(f"Insert data: {insert_data}")
             raise
-    
+            
     def _generate_field_code_snippet(self, field_data: Dict) -> str:
         """Generate a code snippet for the field definition"""
         try:
