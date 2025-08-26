@@ -123,7 +123,7 @@ class DatabaseManager:
                     logger.error(f"Cannot remove lock file {lock_file}: {e}")
     
     def initialize_database(self):
-        """Initialize database schema with retry logic"""
+        """Initialize database schema with complete field context support"""
         if self.init_executed:
             logger.debug("Database already initialized, skipping")
             return
@@ -135,9 +135,19 @@ class DatabaseManager:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
                     
+                    # Drop existing tables to start fresh
+                    cursor.execute('DROP TABLE IF EXISTS field_analysis_details')
+                    cursor.execute('DROP TABLE IF EXISTS field_mappings') 
+                    cursor.execute('DROP TABLE IF EXISTS record_layouts')
+                    cursor.execute('DROP TABLE IF EXISTS component_analysis')
+                    cursor.execute('DROP TABLE IF EXISTS dependency_relationships')
+                    cursor.execute('DROP TABLE IF EXISTS chat_conversations')
+                    cursor.execute('DROP TABLE IF EXISTS llm_analysis_calls')
+                    cursor.execute('DROP TABLE IF EXISTS analysis_sessions')
+                    
                     # Session management
                     cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS analysis_sessions (
+                        CREATE TABLE analysis_sessions (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             session_id TEXT UNIQUE NOT NULL,
                             project_name TEXT NOT NULL,
@@ -150,7 +160,7 @@ class DatabaseManager:
                     
                     # LLM call tracking
                     cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS llm_analysis_calls (
+                        CREATE TABLE llm_analysis_calls (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             session_id TEXT NOT NULL,
                             analysis_type TEXT NOT NULL,
@@ -166,9 +176,9 @@ class DatabaseManager:
                         )
                     ''')
                     
-                    # Component analysis
+                    # Component analysis with complete source storage
                     cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS component_analysis (
+                        CREATE TABLE component_analysis (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             session_id TEXT NOT NULL,
                             component_name TEXT NOT NULL,
@@ -176,8 +186,13 @@ class DatabaseManager:
                             file_path TEXT,
                             analysis_status TEXT DEFAULT 'completed',
                             total_lines INTEGER DEFAULT 0,
+                            executable_lines INTEGER DEFAULT 0,
+                            comment_lines INTEGER DEFAULT 0,
                             total_fields INTEGER DEFAULT 0,
                             dependencies_count INTEGER DEFAULT 0,
+                            business_purpose TEXT,
+                            complexity_score REAL DEFAULT 0.5,
+                            source_content TEXT,
                             analysis_result_json TEXT,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -185,30 +200,71 @@ class DatabaseManager:
                         )
                     ''')
                     
-                    # Record layouts (01 levels)
+                    # Record layouts with enhanced source tracking
                     cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS record_layouts (
+                        CREATE TABLE record_layouts (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             session_id TEXT NOT NULL,
                             layout_name TEXT NOT NULL,
+                            friendly_name TEXT,
                             program_name TEXT,
                             level_number TEXT DEFAULT '01',
                             line_start INTEGER,
                             line_end INTEGER,
                             source_code TEXT,
                             fields_count INTEGER DEFAULT 0,
+                            business_purpose TEXT,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
                         )
                     ''')
                     
-                    # Field mappings
+                    # Enhanced field analysis with complete source code context
                     cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS field_mappings (
+                        CREATE TABLE field_analysis_details (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            field_id INTEGER,
+                            field_name TEXT NOT NULL,
+                            friendly_name TEXT,
+                            program_name TEXT NOT NULL,
+                            layout_name TEXT,
+                            operation_type TEXT,
+                            line_number INTEGER,
+                            code_snippet TEXT,
+                            usage_type TEXT,
+                            source_field TEXT,
+                            target_field TEXT,
+                            business_purpose TEXT,
+                            analysis_confidence REAL DEFAULT 0.0,
+                            
+                            -- NEW: Complete source code context fields
+                            definition_line_number INTEGER,
+                            definition_code TEXT,
+                            program_source_content TEXT,
+                            field_references_json TEXT,
+                            usage_summary_json TEXT,
+                            total_program_references INTEGER DEFAULT 0,
+                            move_source_count INTEGER DEFAULT 0,
+                            move_target_count INTEGER DEFAULT 0,
+                            arithmetic_count INTEGER DEFAULT 0,
+                            conditional_count INTEGER DEFAULT 0,
+                            cics_count INTEGER DEFAULT 0,
+                            
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id),
+                            FOREIGN KEY (field_id) REFERENCES record_layouts(id)
+                        )
+                    ''')
+                    
+                    # Enhanced field mappings
+                    cursor.execute('''
+                        CREATE TABLE field_mappings (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             session_id TEXT NOT NULL,
                             target_file_name TEXT NOT NULL,
                             field_name TEXT NOT NULL,
+                            friendly_name TEXT,
                             mainframe_data_type TEXT,
                             oracle_data_type TEXT,
                             mainframe_length INTEGER,
@@ -220,36 +276,20 @@ class DatabaseManager:
                             derivation_logic TEXT,
                             programs_involved_json TEXT,
                             confidence_score REAL DEFAULT 0.0,
+                            
+                            -- NEW: Source code evidence
+                            source_code_evidence_json TEXT,
+                            actual_cobol_definition TEXT,
+                            usage_patterns_json TEXT,
+                            
                             analysis_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
                         )
                     ''')
                     
-                    # Field details with code references
-                    cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS field_analysis_details (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            session_id TEXT NOT NULL,
-                            field_id INTEGER,
-                            field_name TEXT NOT NULL,
-                            program_name TEXT NOT NULL,
-                            operation_type TEXT,
-                            line_number INTEGER,
-                            code_snippet TEXT,
-                            usage_type TEXT,
-                            source_field TEXT,
-                            target_field TEXT,
-                            business_purpose TEXT,
-                            analysis_confidence REAL DEFAULT 0.0,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id),
-                            FOREIGN KEY (field_id) REFERENCES record_layouts(id)
-                        )
-                    ''')
-                    
                     # Dependency relationships
                     cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS dependency_relationships (
+                        CREATE TABLE dependency_relationships (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             session_id TEXT NOT NULL,
                             source_component TEXT NOT NULL,
@@ -258,6 +298,7 @@ class DatabaseManager:
                             interface_type TEXT,
                             confidence_score REAL DEFAULT 0.0,
                             analysis_details_json TEXT,
+                            source_code_evidence TEXT,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
                         )
@@ -265,7 +306,7 @@ class DatabaseManager:
                     
                     # Chat conversations
                     cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS chat_conversations (
+                        CREATE TABLE chat_conversations (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             session_id TEXT NOT NULL,
                             conversation_id TEXT NOT NULL,
@@ -279,36 +320,101 @@ class DatabaseManager:
                         )
                     ''')
                     
-                    # Create indexes for performance
+                    # Create performance indexes
                     indexes = [
-                        'CREATE INDEX IF NOT EXISTS idx_field_mappings_target_file ON field_mappings(target_file_name, session_id)',
-                        'CREATE INDEX IF NOT EXISTS idx_dependency_source ON dependency_relationships(source_component, session_id)',
-                        'CREATE INDEX IF NOT EXISTS idx_dependency_target ON dependency_relationships(target_component, session_id)',
-                        'CREATE INDEX IF NOT EXISTS idx_chat_session_conv ON chat_conversations(session_id, conversation_id)',
-                        'CREATE INDEX IF NOT EXISTS idx_component_session ON component_analysis(session_id, component_type)',
-                        'CREATE INDEX IF NOT EXISTS idx_field_details_field ON field_analysis_details(field_name, session_id)',
-                        'CREATE INDEX IF NOT EXISTS idx_record_layouts_session ON record_layouts(session_id, program_name)'
+                        'CREATE INDEX idx_field_mappings_target_file ON field_mappings(target_file_name, session_id)',
+                        'CREATE INDEX idx_field_details_field_name ON field_analysis_details(field_name, session_id)',
+                        'CREATE INDEX idx_field_details_program ON field_analysis_details(program_name, session_id)',
+                        'CREATE INDEX idx_dependency_source ON dependency_relationships(source_component, session_id)',
+                        'CREATE INDEX idx_dependency_target ON dependency_relationships(target_component, session_id)',
+                        'CREATE INDEX idx_chat_session_conv ON chat_conversations(session_id, conversation_id)',
+                        'CREATE INDEX idx_component_session ON component_analysis(session_id, component_type)',
+                        'CREATE INDEX idx_record_layouts_session ON record_layouts(session_id, program_name)',
+                        'CREATE INDEX idx_record_layouts_name ON record_layouts(layout_name, session_id)'
                     ]
                     
                     for index_sql in indexes:
                         cursor.execute(index_sql)
                     
-                    logger.info("Database schema initialized successfully")
+                    logger.info("Fresh database schema created successfully with enhanced field context support")
                     self.init_executed = True
                     return
                     
-            except sqlite3.OperationalError as e:
-                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                    logger.warning(f"Database locked on initialization attempt {attempt + 1}, retrying...")
-                    time.sleep(2 ** attempt)  # Exponential backoff
-                    continue
-                else:
-                    raise
             except Exception as e:
                 logger.error(f"Database initialization error: {str(e)}")
                 raise
         
         raise sqlite3.OperationalError("Failed to initialize database after multiple attempts")
+
+    def _analyze_field_in_program_source(self, field_name: str, program_source: str, program_name: str) -> Dict:
+        """Live analysis of field usage in program source code"""
+        analysis = {
+            'field_name': field_name,
+            'program_name': program_name,
+            'references': [],
+            'usage_counts': {
+                'definition': 0,
+                'move_source': 0,
+                'move_target': 0,
+                'arithmetic': 0,
+                'conditional': 0,
+                'cics': 0
+            }
+        }
+        
+        try:
+            lines = program_source.split('\n')
+            field_upper = field_name.upper()
+            
+            for line_idx, line in enumerate(lines, 1):
+                line_stripped = line.strip()
+                line_upper = line_stripped.upper()
+                
+                if field_upper in line_upper:
+                    operation_type = 'REFERENCE'
+                    
+                    if 'PIC' in line_upper and any(line_upper.strip().startswith(level) for level in ['01', '02', '03', '04', '05', '77']):
+                        operation_type = 'DEFINITION'
+                        analysis['usage_counts']['definition'] += 1
+                    elif 'MOVE' in line_upper:
+                        if f' TO {field_upper}' in line_upper:
+                            operation_type = 'MOVE_TARGET'
+                            analysis['usage_counts']['move_target'] += 1
+                        elif f'{field_upper} TO ' in line_upper:
+                            operation_type = 'MOVE_SOURCE'
+                            analysis['usage_counts']['move_source'] += 1
+                    elif any(op in line_upper for op in ['COMPUTE', 'ADD', 'SUBTRACT']):
+                        operation_type = 'ARITHMETIC'
+                        analysis['usage_counts']['arithmetic'] += 1
+                    elif any(op in line_upper for op in ['IF', 'WHEN', 'EVALUATE']):
+                        operation_type = 'CONDITIONAL'
+                        analysis['usage_counts']['conditional'] += 1
+                    elif 'CICS' in line_upper:
+                        operation_type = 'CICS'
+                        analysis['usage_counts']['cics'] += 1
+                    
+                    context_start = max(0, line_idx - 3)
+                    context_end = min(len(lines), line_idx + 2)
+                    context_lines = lines[context_start:context_end]
+                    
+                    reference = {
+                        'line_number': line_idx,
+                        'line_content': line_stripped,
+                        'operation_type': operation_type,
+                        'context_lines': context_lines,
+                        'context_block': '\n'.join([
+                            f"{context_start + i + 1:4d}: {ctx_line}" 
+                            for i, ctx_line in enumerate(context_lines)
+                        ])
+                    }
+                    
+                    analysis['references'].append(reference)
+            
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"Error in live field analysis: {str(e)}")
+            return analysis
     
     def create_session(self, session_id: str, project_name: str) -> bool:
         """Create new analysis session"""
@@ -393,54 +499,24 @@ class DatabaseManager:
                 logger.info(f"Successfully stored component: {component_name}")
                 
                 # Store record layouts if present (skip if already stored by component extractor)
-                # Replace the hanging section with this:
                 if component_type == 'PROGRAM' and 'record_layouts' in analysis_result:
-                    try:
-                        logger.info(f"Checking for existing layouts for {component_name}...")
+                    existing_layouts = self.get_record_layouts(session_id, component_name)
+                    
+                    if not existing_layouts:  # Only store if not already stored
+                        logger.info(f"Storing {len(analysis_result['record_layouts'])} record layouts for {component_name}")
                         
-                        # Add timeout protection for the database query
-                        existing_layouts = []
-                        try:
-                            # Quick check with timeout
-                            with sqlite3.connect(self.db_path, timeout=5.0) as check_conn:
-                                cursor = check_conn.cursor()
-                                cursor.execute('''
-                                    SELECT COUNT(*) FROM record_layouts 
-                                    WHERE session_id = ? AND program_name = ?
-                                ''', (session_id, component_name))
-                                count = cursor.fetchone()[0]
-                                existing_layouts = ['dummy'] if count > 0 else []
-                                logger.info(f"Found {count} existing layouts for {component_name}")
-                        except sqlite3.OperationalError as db_error:
-                            logger.warning(f"Database timeout checking layouts: {str(db_error)}")
-                            # Assume no existing layouts to avoid hanging
-                            existing_layouts = []
-                        
-                        if not existing_layouts:
-                            record_layouts = analysis_result['record_layouts']
-                            logger.info(f"Storing {len(record_layouts)} record layouts for {component_name}")
-                            
-                            for i, layout_data in enumerate(record_layouts, 1):
-                                try:
-                                    logger.info(f"Storing layout {i}/{len(record_layouts)}: {layout_data.get('name', 'unknown')}")
-                                    self.store_record_layout(session_id, layout_data, component_name)
-                                    logger.info(f"Successfully stored layout {i}/{len(record_layouts)}")
-                                except Exception as layout_error:
-                                    logger.error(f"Error storing layout {layout_data.get('name', 'unknown')}: {str(layout_error)}")
-                                    # Continue with next layout instead of failing completely
-                                    continue
-                            
-                            logger.info(f"Completed storing all {len(record_layouts)} layouts for {component_name}")
-                        else:
-                            logger.info(f"Layouts already exist for {component_name}, skipping storage")
-                            
-                    except Exception as layout_section_error:
-                        logger.error(f"Error in layout storage section for {component_name}: {str(layout_section_error)}")
-                        # Don't let layout storage failure block component storage
-                    pass
-                    logger.info(f"FINISHED storing component analysis for: {component_name}")
+                        for layout_data in analysis_result['record_layouts']:
+                            try:
+                                self.store_record_layout(session_id, layout_data, component_name)
+                            except Exception as layout_error:
+                                logger.error(f"Error storing layout {layout_data.get('name', 'unknown')}: {str(layout_error)}")
+                                continue
+                    else:
+                        logger.debug(f"Record layouts already exist for {component_name}, skipping storage")
+                
         except Exception as e:
-            logger.error(f"Error storing component {component_name}: {str(e)}")
+                logger.error(f"Error storing component analysis for {component_name}: {str(e)}")
+                raise
 
     
     def store_record_layout(self, session_id: str, layout_data: Dict, program_name: str):

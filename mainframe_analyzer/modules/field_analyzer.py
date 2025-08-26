@@ -624,6 +624,162 @@ COBOL Program Content:
         
         return "General data field"
     
+    # Add these methods to FieldAnalyzer class:
+
+    def analyze_field_mapping(self, session_id: str, target_file: str) -> List[Dict]:
+        """Enhanced field mapping with source code evidence"""
+        try:
+            logger.info(f"Analyzing field mapping for: {target_file}")
+            
+            # Get record layouts
+            layouts = self.db_manager.get_record_layouts(session_id)
+            matching_layouts = self._find_matching_layouts(target_file, layouts)
+            
+            if not matching_layouts:
+                logger.warning(f"No layouts found matching {target_file}")
+                return []
+            
+            logger.info(f"Found {len(matching_layouts)} matching layouts")
+            
+            field_mappings = []
+            
+            for layout in matching_layouts:
+                # Get field matrix for this layout
+                field_data = self.db_manager.get_field_matrix(session_id, layout['layout_name'])
+                
+                for field_entry in field_data:
+                    mapping = {
+                        'field_name': field_entry['field_name'],
+                        'friendly_name': field_entry.get('friendly_name', field_entry['field_name']),
+                        'mainframe_data_type': self._determine_mainframe_type(field_entry),
+                        'oracle_data_type': self._map_to_oracle_type(field_entry),
+                        'mainframe_length': self._extract_cobol_length(field_entry),
+                        'oracle_length': self._calculate_oracle_length(field_entry),
+                        'population_source': field_entry.get('business_purpose', 'Program logic'),
+                        'source_record_layout': layout['layout_name'],
+                        'business_logic_type': field_entry.get('usage_type', 'UNKNOWN'),
+                        'business_logic_description': field_entry.get('business_purpose', ''),
+                        'derivation_logic': self._create_derivation_logic(field_entry),
+                        'programs_involved': [layout['program_name']],
+                        'confidence_score': 0.9
+                    }
+                    field_mappings.append(mapping)
+            
+            # Store mappings
+            if field_mappings:
+                self.db_manager.store_field_mappings(session_id, target_file, field_mappings)
+            
+            return field_mappings
+            
+        except Exception as e:
+            logger.error(f"Error in field mapping analysis: {str(e)}")
+            return []
+
+    def _find_matching_layouts(self, target_file: str, layouts: List[Dict]) -> List[Dict]:
+        """Find layouts matching target file"""
+        target_upper = target_file.upper().replace('-', '').replace('_', '')
+        target_words = set(target_file.upper().split('-'))
+        
+        exact_matches = []
+        partial_matches = []
+        word_matches = []
+        
+        for layout in layouts:
+            layout_name = layout['layout_name'].upper()
+            layout_clean = layout_name.replace('-', '').replace('_', '')
+            layout_words = set(layout_name.split('-'))
+            
+            if target_upper == layout_clean:
+                exact_matches.append(layout)
+            elif target_upper in layout_clean or layout_clean in target_upper:
+                partial_matches.append(layout)
+            elif target_words & layout_words:
+                word_matches.append(layout)
+        
+        return exact_matches + partial_matches + word_matches
+
+    def _determine_mainframe_type(self, field_entry: Dict) -> str:
+        """Determine mainframe data type from field definition"""
+        definition_code = field_entry.get('definition_code', '')
+        code_snippet = field_entry.get('code_snippet', '')
+        
+        code = definition_code or code_snippet
+        if 'PIC' in code.upper():
+            if 'X' in code.upper():
+                return 'ALPHANUMERIC'
+            elif '9' in code.upper():
+                if 'V' in code.upper():
+                    return 'DECIMAL'
+                else:
+                    return 'NUMERIC'
+            elif 'S' in code.upper():
+                return 'SIGNED_NUMERIC'
+        
+        return 'UNKNOWN'
+
+    def _map_to_oracle_type(self, field_entry: Dict) -> str:
+        """Map mainframe type to Oracle type"""
+        mf_type = self._determine_mainframe_type(field_entry)
+        length = self._extract_cobol_length(field_entry)
+        
+        mapping = {
+            'ALPHANUMERIC': f'VARCHAR2({min(length, 4000)})' if length > 0 else 'VARCHAR2(255)',
+            'NUMERIC': f'NUMBER({length})' if length > 0 else 'NUMBER',
+            'DECIMAL': f'NUMBER({length},2)' if length > 0 else 'NUMBER(10,2)',
+            'SIGNED_NUMERIC': f'NUMBER({length})' if length > 0 else 'NUMBER'
+        }
+        
+        return mapping.get(mf_type, 'VARCHAR2(255)')
+
+    def _extract_cobol_length(self, field_entry: Dict) -> int:
+        """Extract length from COBOL PIC clause"""
+        definition_code = field_entry.get('definition_code', '')
+        code_snippet = field_entry.get('code_snippet', '')
+        
+        code = definition_code or code_snippet
+        if 'PIC' in code.upper():
+            length_match = re.search(r'PIC\s+[X9S]+\((\d+)\)', code.upper())
+            if length_match:
+                return int(length_match.group(1))
+            
+            pic_match = re.search(r'PIC\s+([X9S]+)', code.upper())
+            if pic_match:
+                return len(pic_match.group(1))
+        
+        return 0
+
+    def _calculate_oracle_length(self, field_entry: Dict) -> int:
+        """Calculate appropriate Oracle length"""
+        cobol_length = self._extract_cobol_length(field_entry)
+        mf_type = self._determine_mainframe_type(field_entry)
+        
+        if mf_type == 'ALPHANUMERIC':
+            return min(cobol_length, 4000)
+        elif mf_type in ['NUMERIC', 'SIGNED_NUMERIC']:
+            return cobol_length if cobol_length <= 38 else 38
+        elif mf_type == 'DECIMAL':
+            return cobol_length + 2
+        else:
+            return 255
+
+    def _create_derivation_logic(self, field_entry: Dict) -> str:
+        """Create derivation logic description"""
+        usage_type = field_entry.get('usage_type', 'UNKNOWN')
+        business_purpose = field_entry.get('business_purpose', '')
+        
+        if usage_type == 'INPUT':
+            return 'Populated from external source via MOVE operation'
+        elif usage_type == 'OUTPUT':
+            return 'Provides data to other fields via MOVE operation'
+        elif usage_type == 'DERIVED':
+            return 'Calculated value from arithmetic operations'
+        elif usage_type == 'REFERENCE':
+            return 'Used in conditional logic for business decisions'
+        elif 'CICS' in usage_type:
+            return 'Populated/used via CICS transaction processing'
+        else:
+            return business_purpose or 'Static field definition'
+    
     def _group_fields_by_program_and_layout(self, field_data: List[Dict]) -> Dict:
         """Group fields by program and layout"""
         grouped = {}

@@ -1,12 +1,13 @@
 """
-Chat Manager Module
-Handles intelligent chat with context awareness for fields and record layouts
+Complete Chat Manager Module
+Handles intelligent chat with full source code context for mainframe analysis
 """
 
 import re
 import json
 import logging
-from typing import Dict, List, Optional, Any, Tuple
+import traceback
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -17,615 +18,627 @@ class ChatManager:
         self.token_manager = token_manager
         self.db_manager = db_manager
         
-        # Context allocation - 60% for context, 40% for conversation
-        self.context_token_budget = int(self.token_manager.EFFECTIVE_CONTENT_LIMIT * 0.6)
-        self.conversation_token_budget = int(self.token_manager.EFFECTIVE_CONTENT_LIMIT * 0.4)
-        
-        # Patterns for detecting query types
-        self.field_query_patterns = [
-            r'\bfield\s+(\w+[-\w]*)',
-            r'\b([A-Z]+[-A-Z0-9]*)\s+field\b',
-            r'\bwhat\s+is\s+(\w+[-\w]*)',
-            r'\btell\s+me\s+about\s+(\w+[-\w]*)',
-            r'\bshow\s+(\w+[-\w]*)'
+        # Field name extraction patterns
+        self.field_patterns = [
+            r'\b([A-Z][A-Z0-9\-]{2,})\b',                    # Standard COBOL fields
+            r'field\s+([A-Za-z][A-Za-z0-9\-_]+)',            # "field CUSTOMER-NAME"
+            r'about\s+([A-Za-z][A-Za-z0-9\-_]+)',            # "about ACCOUNT-NO"
+            r'([A-Za-z][A-Za-z0-9\-_]+)\s+field',            # "CUSTOMER-NAME field"
+            r'tell\s+me\s+about\s+([A-Za-z][A-Za-z0-9\-_]+)',# "tell me about FIELD-NAME"
+            r'what\s+is\s+([A-Za-z][A-Za-z0-9\-_]+)',        # "what is FIELD-NAME"
+            r'how\s+is\s+([A-Za-z][A-Za-z0-9\-_]+)',         # "how is FIELD-NAME"
+            r'where\s+is\s+([A-Za-z][A-Za-z0-9\-_]+)',       # "where is FIELD-NAME"
+            r'show\s+([A-Za-z][A-Za-z0-9\-_]+)'              # "show FIELD-NAME"
         ]
         
-        self.record_layout_patterns = [
-            r'\brecord\s+(\w+[-\w]*)',
-            r'\blayout\s+(\w+[-\w]*)',
-            r'\bstructure\s+(\w+[-\w]*)',
-            r'\b(\w+[-\w]*)\s+record\b',
-            r'\b(\w+[-\w]*)\s+layout\b'
-        ]
-        
-        self.program_query_patterns = [
-            r'\bprogram\s+(\w+[-\w]*)',
-            r'\b(\w+[-\w]*)\s+program\b',
-            r'\bmodule\s+(\w+[-\w]*)',
-            r'\bcomponent\s+(\w+[-\w]*)'
-        ]
+        # COBOL keywords to exclude
+        self.cobol_keywords = {
+            'MOVE', 'TO', 'FROM', 'PIC', 'PICTURE', 'VALUE', 'OCCURS', 'REDEFINES',
+            'USAGE', 'COMP', 'BINARY', 'PACKED', 'DISPLAY', 'COMPUTE', 'ADD',
+            'SUBTRACT', 'MULTIPLY', 'DIVIDE', 'IF', 'THEN', 'ELSE', 'END',
+            'PERFORM', 'UNTIL', 'VARYING', 'WHEN', 'EVALUATE', 'ACCEPT', 'DISPLAY'
+        }
     
-    # EMERGENCY DEBUG VERSION - Replace process_query method in ChatManager
-
-    def process_query(self, session_id: str, message: str, conversation_id: str) -> Dict:
-        """Process chat query with enhanced error handling"""
-        logger.info(f"Processing chat query: {message[:100]}...")
+    def process_query(self, session_id: str, message: str, conversation_id: str) -> str:
+        """Process chat query and return comprehensive response with source code"""
+        logger.info(f"Processing chat query: '{message[:100]}...'")
         
         try:
-            # Step 1: Analyze query
-            logger.debug("Step 1: Analyzing query...")
-            query_analysis = self._analyze_query(message)
-            logger.debug(f"Query analysis: {query_analysis}")
+            # Extract field names from user message
+            field_names = self._extract_field_names(message)
+            logger.info(f"Extracted field names: {field_names}")
             
-            # Step 2: Build context with error protection
-            logger.debug("Step 2: Building context...")
-            try:
-                context = self._build_context_safe(session_id, query_analysis)
-                logger.debug(f"Context built successfully with {len(context)} sections")
-            except Exception as context_error:
-                logger.error(f"Error building context: {str(context_error)}")
-                # Use minimal context as fallback
-                context = {'error': 'Context building failed', 'field_details': [], 'components': []}
-            
-            # Step 3: Get conversation history
-            logger.debug("Step 3: Getting conversation history...")
-            try:
-                conversation_history = self.db_manager.get_chat_history(session_id, conversation_id, limit=3)
-            except Exception as history_error:
-                logger.error(f"Error getting history: {str(history_error)}")
-                conversation_history = []
-            
-            # Step 4: Create prompt
-            logger.debug("Step 4: Creating chat prompt...")
-            try:
-                chat_prompt = self._create_chat_prompt_safe(message, context, conversation_history, query_analysis)
-            except Exception as prompt_error:
-                logger.error(f"Error creating prompt: {str(prompt_error)}")
-                # Fallback to simple prompt
-                chat_prompt = f"User question: {message}\n\nPlease provide a helpful response about mainframe code analysis."
-            
-            # Step 5: Call LLM
-            logger.debug("Step 5: Calling LLM...")
-            start_time = datetime.now()
-            response = self.llm_client.call_llm(chat_prompt, max_tokens=1000, temperature=0.3)
-            processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
-            
-            # Step 6: Store conversation
-            logger.debug("Step 6: Storing conversation...")
-            try:
-                self.db_manager.store_chat_message(
-                    session_id, conversation_id, 'user', message, 
-                    context, response.prompt_tokens if response.success else 0, processing_time
-                )
-            except Exception as store_error:
-                logger.error(f"Error storing user message: {str(store_error)}")
-            
-            if response.success:
-                try:
-                    self.db_manager.store_chat_message(
-                        session_id, conversation_id, 'assistant', response.content,
-                        None, response.response_tokens, processing_time
-                    )
-                except Exception as store_error:
-                    logger.error(f"Error storing assistant message: {str(store_error)}")
-                
-                return {
-                    'response': response.content,
-                    'context_used': context,
-                    'query_type': query_analysis['type'],
-                    'entities_found': query_analysis['entities'],
-                    'tokens_used': response.prompt_tokens + response.response_tokens,
-                    'processing_time_ms': processing_time
-                }
+            # Handle different query types
+            if field_names:
+                return self._handle_field_query(session_id, field_names, message)
+            elif any(word in message.lower() for word in ['layout', 'record', 'structure']):
+                return self._handle_layout_query(session_id, message)
+            elif any(word in message.lower() for word in ['program', 'component', 'module']):
+                return self._handle_program_query(session_id, message)
+            elif any(word in message.lower() for word in ['summary', 'overview', 'status']):
+                return self._handle_summary_query(session_id)
             else:
-                return {
-                    'response': f"I encountered an error processing your question: {response.error_message}",
-                    'error': True
-                }
+                return self._handle_general_query(session_id, message)
                 
         except Exception as e:
             logger.error(f"Error processing chat query: {str(e)}")
-            logger.error(f"Error traceback: {traceback.format_exc()}")
-            return {
-                'response': "I encountered an unexpected error. Please try again with a simpler question.",
-                'error': True,
-                'error_detail': str(e)
-            }
-
-    def _build_context_safe(self, session_id: str, query_analysis: Dict) -> Dict:
-        """Safe context building with proper error handling"""
-        context = {
-            'field_details': [],
-            'field_mappings': [],
-            'record_layouts': [],
-            'components': [],
-            'source_code_snippets': []
-        }
+            return f"I encountered an error processing your question: {str(e)}"
+    
+    def _extract_field_names(self, message: str) -> List[str]:
+        """Extract COBOL field names from user message"""
+        field_names = set()
         
         try:
-            entities = query_analysis.get('entities', [])
-            query_type = query_analysis.get('type', 'GENERAL')
+            # Apply all field extraction patterns
+            for pattern in self.field_patterns:
+                matches = re.findall(pattern, message, re.IGNORECASE)
+                for match in matches:
+                    # Convert to standard COBOL naming
+                    cobol_name = match.upper().replace('_', '-')
+                    if len(cobol_name) > 2 and cobol_name not in self.cobol_keywords:
+                        field_names.add(cobol_name)
             
-            logger.debug(f"Building context for {len(entities)} entities, query type: {query_type}")
-            
-            # Handle field queries
-            if 'FIELD' in query_type and entities:
-                for entity in entities[:3]:  # Limit to 3 entities
-                    try:
-                        logger.debug(f"Getting field context for: {entity}")
-                        field_context = self.db_manager.get_context_for_field(session_id, entity)
-                        
-                        if field_context and isinstance(field_context, dict):
-                            field_details = field_context.get('field_details', [])
-                            field_mappings = field_context.get('field_mappings', [])
-                            
-                            context['field_details'].extend(field_details)
-                            context['field_mappings'].extend(field_mappings)
-                            
-                            logger.debug(f"Added {len(field_details)} field details for {entity}")
-                            
-                    except Exception as field_error:
-                        logger.error(f"Error processing field entity {entity}: {str(field_error)}")
-                        continue
-            
-            # Handle layout queries
-            if 'LAYOUT' in query_type and entities:
-                try:
-                    logger.debug("Getting record layouts...")
-                    all_layouts = self.db_manager.get_record_layouts(session_id)
-                    
-                    for entity in entities[:3]:
-                        matching_layouts = []
-                        for layout in all_layouts:
-                            # Safe field access with fallback
-                            layout_name = layout.get('layout_name') or layout.get('name', '')
-                            if layout_name and entity.upper() in layout_name.upper():
-                                matching_layouts.append(layout)
-                        
-                        context['record_layouts'].extend(matching_layouts)
-                        logger.debug(f"Found {len(matching_layouts)} matching layouts for {entity}")
-                    
-                except Exception as layout_error:
-                    logger.error(f"Error processing layout queries: {str(layout_error)}")
-            
-            # Handle program queries
-            if 'PROGRAM' in query_type and entities:
-                try:
-                    logger.debug("Getting components...")
-                    all_components = self.db_manager.get_session_components(session_id)
-                    
-                    for entity in entities[:3]:
-                        matching_components = []
-                        for component in all_components:
-                            # Safe field access with fallback
-                            comp_name = component.get('component_name') or component.get('name', '')
-                            if comp_name and entity.upper() in comp_name.upper():
-                                # Create safe component dict
-                                safe_component = {
-                                    'name': comp_name,
-                                    'component_name': comp_name,  # Provide both for compatibility
-                                    'type': component.get('component_type') or component.get('type', 'Unknown'),
-                                    'component_type': component.get('component_type') or component.get('type', 'Unknown'),
-                                    'total_lines': component.get('total_lines', 0),
-                                    'analysis_result_json': component.get('analysis_result_json', '{}')
-                                }
-                                matching_components.append(safe_component)
-                        
-                        context['components'].extend(matching_components)
-                        logger.debug(f"Found {len(matching_components)} matching components for {entity}")
-                    
-                except Exception as program_error:
-                    logger.error(f"Error processing program queries: {str(program_error)}")
-            
-            # Get general session context if no specific entities
-            if not entities:
-                try:
-                    session_metrics = self.db_manager.get_session_metrics(session_id)
-                    context['session_summary'] = session_metrics
-                    
-                    # Get a few recent components for context
-                    recent_components = self.db_manager.get_session_components(session_id)
-                    if recent_components:
-                        context['recent_components'] = recent_components[:3]
-                    
-                except Exception as general_error:
-                    logger.error(f"Error building general context: {str(general_error)}")
-            
-            logger.debug(f"Context building completed successfully")
-            return context
+            result = list(field_names)
+            logger.debug(f"Extracted field names: {result}")
+            return result
             
         except Exception as e:
-            logger.error(f"Error in _build_context_safe: {str(e)}")
-            return context
-
-    def _create_chat_prompt_safe(self, message: str, context: Dict, 
-                            conversation_history: List[Dict], query_analysis: Dict) -> str:
-        """Create chat prompt with safe field access"""
-        
-        system_prompt = """You are a mainframe code analysis assistant. Help users understand COBOL programs, record layouts, and field relationships.
-
-    Guidelines:
-    - Reference specific code examples when available
-    - Explain both technical and business aspects
-    - Use clear, professional language
-    - Focus on practical insights for mainframe developers
-    """
-        
-        # Build context section safely
-        context_prompt = "\nAVAILABLE CONTEXT:\n"
-        
-        # Add field details
-        field_details = context.get('field_details', [])
-        if field_details:
-            context_prompt += f"\nFIELD INFORMATION ({len(field_details)} fields):\n"
-            for field in field_details[:3]:  # Limit to prevent token overflow
-                field_name = field.get('field_name', 'Unknown')
-                usage_type = field.get('usage_type', 'Unknown')
-                program_name = field.get('program_name', 'Unknown')
-                business_purpose = field.get('business_purpose', 'No description')
-                
-                context_prompt += f"- Field: {field_name}\n"
-                context_prompt += f"  Usage: {usage_type} in {program_name}\n"
-                context_prompt += f"  Purpose: {business_purpose}\n\n"
-        
-        # Add component information
-        components = context.get('components', [])
-        if components:
-            context_prompt += f"\nCOMPONENT INFORMATION ({len(components)} components):\n"
-            for comp in components[:2]:
-                comp_name = comp.get('name') or comp.get('component_name', 'Unknown')
-                comp_type = comp.get('type') or comp.get('component_type', 'Unknown')
-                total_lines = comp.get('total_lines', 0)
-                
-                context_prompt += f"- Component: {comp_name} ({comp_type})\n"
-                context_prompt += f"  Lines: {total_lines}\n\n"
-        
-        # Add session summary
-        session_summary = context.get('session_summary', {})
-        if session_summary:
-            context_prompt += f"\nSESSION OVERVIEW:\n"
-            context_prompt += f"- Total Components: {session_summary.get('total_components', 0)}\n"
-            context_prompt += f"- Total Fields: {session_summary.get('total_fields', 0)}\n\n"
-        
-        # Add conversation history
-        if conversation_history:
-            context_prompt += "\nRECENT CONVERSATION:\n"
-            for msg in conversation_history[-2:]:  # Last 2 messages
-                role = "User" if msg['message_type'] == 'user' else "Assistant"
-                content = msg['message_content'][:150]  # Limit length
-                context_prompt += f"{role}: {content}\n"
-        
-        # Final prompt
-        final_prompt = system_prompt + context_prompt
-        final_prompt += f"\nUSER QUESTION: {message}\n\n"
-        final_prompt += "Please provide a helpful response based on the available context."
-        
-        return final_prompt
+            logger.error(f"Error extracting field names: {str(e)}")
+            return []
     
-    def _analyze_query(self, message: str) -> Dict:
-        """Analyze query to determine type and extract entities"""
-        message_lower = message.lower()
-        
-        analysis = {
-            'type': 'GENERAL',
-            'entities': [],
-            'intent': 'unknown',
-            'keywords': []
-        }
-        
-        # Extract field names
-        field_matches = []
-        for pattern in self.field_query_patterns:
-            matches = re.findall(pattern, message, re.IGNORECASE)
-            field_matches.extend(matches)
-        
-        if field_matches:
-            analysis['type'] = 'FIELD_QUERY'
-            analysis['entities'].extend(field_matches)
-            analysis['intent'] = 'field_information'
-        
-        # Extract record layout names
-        layout_matches = []
-        for pattern in self.record_layout_patterns:
-            matches = re.findall(pattern, message, re.IGNORECASE)
-            layout_matches.extend(matches)
-        
-        if layout_matches:
-            if analysis['type'] == 'FIELD_QUERY':
-                analysis['type'] = 'FIELD_AND_LAYOUT_QUERY'
+    def _handle_field_query(self, session_id: str, field_names: List[str], message: str) -> str:
+        """Handle queries about specific fields"""
+        try:
+            response_parts = []
+            
+            for field_name in field_names[:2]:  # Limit to 2 fields per response
+                field_info = self._get_comprehensive_field_info(session_id, field_name, message)
+                if field_info:
+                    response_parts.append(field_info)
+            
+            if not response_parts:
+                available_fields = self._get_available_fields_sample(session_id)
+                return f"I couldn't find information about {', '.join(field_names)} in the analyzed programs.\n\nAvailable fields include: {available_fields}\n\nTry asking about one of these fields instead."
+            
+            return '\n\n'.join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error handling field query: {str(e)}")
+            return f"Error analyzing fields: {str(e)}"
+    
+    def _get_comprehensive_field_info(self, session_id: str, field_name: str, original_message: str) -> str:
+        """Get comprehensive field information with source code"""
+        try:
+            logger.info(f"Getting comprehensive info for field: {field_name}")
+            
+            # Get field context from database
+            context = self.db_manager.get_context_for_field(session_id, field_name)
+            
+            if context and context.get('field_details'):
+                return self._format_database_field_response(field_name, context, original_message)
             else:
-                analysis['type'] = 'LAYOUT_QUERY'
-            analysis['entities'].extend(layout_matches)
-            analysis['intent'] = 'layout_information'
-        
-        # Extract program names
-        program_matches = []
-        for pattern in self.program_query_patterns:
-            matches = re.findall(pattern, message, re.IGNORECASE)
-            program_matches.extend(matches)
-        
-        if program_matches:
-            analysis['type'] = f"{analysis['type']}_WITH_PROGRAM" if analysis['type'] != 'GENERAL' else 'PROGRAM_QUERY'
-            analysis['entities'].extend(program_matches)
-            analysis['intent'] = 'program_information'
-        
-        # Detect specific intents
-        if any(word in message_lower for word in ['usage', 'used', 'populate', 'where']):
-            analysis['intent'] = 'usage_analysis'
-        elif any(word in message_lower for word in ['type', 'data type', 'format']):
-            analysis['intent'] = 'data_type_info'
-        elif any(word in message_lower for word in ['business', 'purpose', 'logic']):
-            analysis['intent'] = 'business_logic'
-        elif any(word in message_lower for word in ['convert', 'oracle', 'migration']):
-            analysis['intent'] = 'conversion_info'
-        elif any(word in message_lower for word in ['relationship', 'dependency', 'flow']):
-            analysis['intent'] = 'relationship_analysis'
-        
-        # Extract keywords
-        important_words = re.findall(r'\b[A-Z][A-Z0-9\-]*\b|\b\w{4,}\b', message)
-        analysis['keywords'] = list(set(important_words))
-        
-        return analysis
-    
-    def _build_context(self, session_id: str, query_analysis: Dict) -> Dict:
-        """Enhanced context building with actual source code"""
-        context = {
-            'field_details': [],
-            'field_mappings': [],
-            'record_layouts': [],
-            'components': [],
-            'source_code_snippets': [],
-            'business_logic': []
-        }
-        
-        try:
-            entities = query_analysis['entities']
-            query_type = query_analysis['type']
-            
-            if 'FIELD' in query_type and entities:
-                # Get comprehensive field context with source code
-                for entity in entities:
-                    field_context = self.db_manager.get_context_for_field(session_id, entity)
-                    if field_context:
-                        context['field_details'].extend(field_context.get('field_details', []))
-                        context['field_mappings'].extend(field_context.get('field_mappings', []))
-                        
-                        # Get actual source code snippets for fields
-                        source_snippets = self._get_field_source_code(session_id, entity)
-                        context['source_code_snippets'].extend(source_snippets)
-            
-            if 'LAYOUT' in query_type and entities:
-                # Get layout context with full source code
-                for entity in entities:
-                    layouts = self.db_manager.get_record_layouts(session_id)
-                    matching_layouts = [l for l in layouts if entity.upper() in l['layout_name'].upper()]
-                    context['record_layouts'].extend(matching_layouts)
-                    
-                    # Get source code for each layout
-                    for layout in matching_layouts:
-                        if layout.get('source_code'):
-                            context['source_code_snippets'].append({
-                                'type': 'RECORD_LAYOUT',
-                                'name': layout['layout_name'],
-                                'source': layout['source_code'],
-                                'line_start': layout.get('line_start', 0),
-                                'line_end': layout.get('line_end', 0)
-                            })
-            
-            if 'PROGRAM' in query_type and entities:
-                # Get program context with source code
-                for entity in entities:
-                    components = self.db_manager.get_session_components(session_id)
-                    matching_components = [c for c in components if entity.upper() in c['component_name'].upper()]
-                    context['components'].extend(matching_components)
-                    
-                    # Get program source code snippets
-                    for component in matching_components:
-                        try:
-                            analysis_result = json.loads(component.get('analysis_result_json', '{}'))
-                            if analysis_result.get('content'):
-                                # Get relevant code snippets (first 50 lines for context)
-                                content_lines = analysis_result['content'].split('\n')
-                                preview_lines = content_lines[:50]
-                                context['source_code_snippets'].append({
-                                    'type': 'PROGRAM',
-                                    'name': component['component_name'],
-                                    'source': '\n'.join(preview_lines),
-                                    'total_lines': len(content_lines)
-                                })
-                        except:
-                            continue
-            
-            # If no specific entities, get general context with examples
-            if not entities and query_analysis['intent'] != 'unknown':
-                context = self._build_general_context_enhanced(session_id, query_analysis)
-            
-            return context
-            
-        except Exception as e:
-            logger.error(f"Error building enhanced context: {str(e)}")
-            return context
-    
-    def _build_general_context(self, session_id: str, query_analysis: Dict) -> Dict:
-        """Build general context for queries without specific entities"""
-        context = {
-            'session_summary': {},
-            'recent_components': [],
-            'sample_fields': []
-        }
-        
-        try:
-            # Get session metrics for overview
-            context['session_summary'] = self.db_manager.get_session_metrics(session_id)
-            
-            # Get recent components
-            components = self.db_manager.get_session_components(session_id)
-            context['recent_components'] = components[:5]  # Latest 5
-            
-            # Get sample fields for general field questions
-            if query_analysis['intent'] in ['field_information', 'usage_analysis', 'data_type_info']:
-                sample_fields = self.db_manager.get_field_matrix(session_id)
-                context['sample_fields'] = sample_fields[:10]  # First 10
-            
-        except Exception as e:
-            logger.error(f"Error building general context: {str(e)}")
-        
-        return context
-    
-    def _limit_context_size(self, context: Dict) -> Dict:
-        """Limit context size to fit within token budget"""
-        try:
-            context_str = json.dumps(context, default=str)
-            estimated_tokens = self.token_manager.estimate_tokens(context_str)
-            
-            if estimated_tokens <= self.context_token_budget:
-                return context
-            
-            # Reduce context size by priority
-            reduction_order = [
-                ('dependencies', 0.5),
-                ('field_details', 0.7),
-                ('components', 0.7),
-                ('field_mappings', 0.8),
-                ('record_layouts', 0.9)
-            ]
-            
-            for field_name, keep_ratio in reduction_order:
-                if field_name in context and context[field_name]:
-                    original_size = len(context[field_name])
-                    new_size = int(original_size * keep_ratio)
-                    context[field_name] = context[field_name][:new_size]
+                # Perform live analysis
+                return self._perform_live_field_analysis(session_id, field_name)
                 
-                # Check if we're now within budget
-                context_str = json.dumps(context, default=str)
-                estimated_tokens = self.token_manager.estimate_tokens(context_str)
-                if estimated_tokens <= self.context_token_budget:
-                    break
-            
         except Exception as e:
-            logger.error(f"Error limiting context size: {str(e)}")
-        
-        return context
+            logger.error(f"Error getting field info: {str(e)}")
+            return f"Error analyzing {field_name}: {str(e)}"
     
-    def _reduce_context_size(self, context: Dict) -> Dict:
-        """Emergency context size reduction"""
+    def _format_database_field_response(self, field_name: str, context: Dict, message: str) -> str:
+        """Format comprehensive field response from database context"""
         try:
-            # Keep only the most essential information
-            reduced_context = {}
+            field_details = context.get('field_details', [])
+            field_mappings = context.get('field_mappings', [])
             
-            if context.get('field_details'):
-                reduced_context['field_details'] = context['field_details'][:3]
+            primary_field = field_details[0]
+            response = f"Field Analysis: {field_name}\n"
+            response += "=" * (len(field_name) + 16) + "\n"
             
-            if context.get('field_mappings'):
-                reduced_context['field_mappings'] = context['field_mappings'][:3]
+            # Basic information
+            response += f"Program: {primary_field.get('program_name', 'Unknown')}\n"
+            response += f"Usage Type: {primary_field.get('usage_type', 'Unknown')}\n"
             
-            if context.get('record_layouts'):
-                reduced_context['record_layouts'] = context['record_layouts'][:2]
+            # Business purpose
+            business_purpose = primary_field.get('business_purpose', '')
+            if business_purpose:
+                response += f"Business Purpose: {business_purpose}\n"
             
-            return reduced_context
+            # Field definition with source code
+            definition_code = primary_field.get('definition_code', '')
+            if definition_code:
+                response += f"\nField Definition:\n  {definition_code}\n"
+            
+            # Usage statistics
+            total_refs = primary_field.get('total_program_references', 0)
+            if total_refs > 0:
+                response += f"\nUsage Statistics:\n"
+                response += f"  Total References: {total_refs}\n"
+                
+                # Detailed breakdown
+                stats = []
+                if primary_field.get('move_target_count', 0) > 0:
+                    stats.append(f"Receives data: {primary_field['move_target_count']} operations")
+                if primary_field.get('move_source_count', 0) > 0:
+                    stats.append(f"Provides data: {primary_field['move_source_count']} operations")
+                if primary_field.get('arithmetic_count', 0) > 0:
+                    stats.append(f"Calculations: {primary_field['arithmetic_count']} operations")
+                if primary_field.get('conditional_count', 0) > 0:
+                    stats.append(f"Conditions: {primary_field['conditional_count']} operations")
+                if primary_field.get('cics_count', 0) > 0:
+                    stats.append(f"CICS operations: {primary_field['cics_count']} operations")
+                
+                if stats:
+                    response += f"  Usage Breakdown: {'; '.join(stats)}\n"
+            
+            # Source code examples
+            field_refs_json = primary_field.get('field_references_json', '[]')
+            try:
+                references = json.loads(field_refs_json) if field_refs_json else []
+                if references:
+                    response += f"\nSource Code Examples:\n"
+                    
+                    # Show definition first
+                    def_refs = [ref for ref in references if ref.get('operation_type') == 'DEFINITION']
+                    if def_refs:
+                        def_ref = def_refs[0]
+                        response += f"  Definition (Line {def_ref['line_number']}):\n"
+                        response += f"    {def_ref['line_content']}\n"
+                    
+                    # Show key operations
+                    operation_refs = [ref for ref in references if ref.get('operation_type') != 'DEFINITION']
+                    operation_refs.sort(key=lambda x: x.get('line_number', 0))
+                    
+                    for ref in operation_refs[:5]:  # Show up to 5 usage examples
+                        response += f"  {ref.get('operation_type', 'Usage')} (Line {ref['line_number']}):\n"
+                        response += f"    {ref['line_content']}\n"
+                        if ref.get('business_context'):
+                            response += f"    -> {ref['business_context']}\n"
+                    
+                    # Show detailed context for most important operation
+                    if operation_refs and any(word in message.lower() for word in ['how', 'where', 'usage', 'context']):
+                        important_ref = operation_refs[0]
+                        context_block = important_ref.get('context_block', '')
+                        if context_block:
+                            response += f"\nDetailed Code Context:\n{context_block}\n"
+                            
+            except Exception as ref_error:
+                logger.warning(f"Error parsing field references: {str(ref_error)}")
+            
+            # Field mappings if available
+            if field_mappings:
+                mapping = field_mappings[0]
+                response += f"\nData Type Mapping:\n"
+                response += f"  Mainframe: {mapping.get('mainframe_data_type', 'Unknown')}\n"
+                response += f"  Oracle: {mapping.get('oracle_data_type', 'Unknown')}\n"
+                if mapping.get('business_logic_description'):
+                    response += f"  Logic: {mapping['business_logic_description']}\n"
+            
+            return response
             
         except Exception as e:
-            logger.error(f"Error reducing context size: {str(e)}")
-            return {}
+            logger.error(f"Error formatting field response: {str(e)}")
+            return f"Error formatting response for {field_name}: {str(e)}"
     
-    def _get_field_source_code(self, session_id: str, field_name: str) -> List[Dict]:
-        """Get actual source code snippets where field is used"""
-        snippets = []
+    def _perform_live_field_analysis(self, session_id: str, field_name: str) -> str:
+        """Perform live field analysis when not in database"""
+        try:
+            logger.info(f"Performing live analysis for: {field_name}")
+            
+            components = self.db_manager.get_session_components(session_id)
+            
+            for component in components:
+                if component.get('component_type') != 'PROGRAM':
+                    continue
+                
+                # Get program source code
+                analysis_json = component.get('analysis_result_json', '{}')
+                analysis_data = json.loads(analysis_json) if analysis_json else {}
+                source_content = analysis_data.get('content') or component.get('source_content', '')
+                
+                if not source_content:
+                    continue
+                
+                # Check if field exists in this program
+                if field_name.upper() in source_content.upper():
+                    logger.info(f"Found {field_name} in {component['component_name']}")
+                    
+                    # Analyze field usage
+                    field_analysis = self._analyze_field_in_program(
+                        field_name, source_content, component['component_name']
+                    )
+                    
+                    return self._format_live_analysis_response(field_name, field_analysis)
+            
+            return f"Field {field_name} was not found in any analyzed program source code. Please verify the field name and ensure the containing program has been uploaded and analyzed."
+            
+        except Exception as e:
+            logger.error(f"Error in live field analysis: {str(e)}")
+            return f"Error performing live analysis for {field_name}: {str(e)}"
+    
+    def _analyze_field_in_program(self, field_name: str, source_content: str, program_name: str) -> Dict:
+        """Complete field analysis in program source code"""
+        analysis = {
+            'field_name': field_name,
+            'program_name': program_name,
+            'definition': None,
+            'references': [],
+            'usage_patterns': {
+                'input_operations': [],
+                'output_operations': [],
+                'arithmetic_operations': [],
+                'conditional_operations': [],
+                'cics_operations': []
+            },
+            'business_summary': ''
+        }
         
         try:
-            # Get field details with code snippets
-            field_details = self.db_manager.get_context_for_field(session_id, field_name)
+            lines = source_content.split('\n')
+            field_upper = field_name.upper()
             
-            for detail in field_details.get('field_details', []):
-                if detail.get('code_snippet'):
-                    snippets.append({
-                        'type': 'FIELD_USAGE',
-                        'field_name': detail['field_name'],
-                        'program': detail.get('program_name', 'Unknown'),
-                        'operation': detail.get('operation_type', 'Unknown'),
-                        'line_number': detail.get('line_number', 0),
-                        'source': detail['code_snippet'],
-                        'business_purpose': detail.get('business_purpose', '')
-                    })
-        
+            for line_idx, line in enumerate(lines, 1):
+                line_stripped = line.strip()
+                line_upper = line_stripped.upper()
+                
+                # Skip comments and empty lines
+                if not line_stripped or line_stripped.startswith('*'):
+                    continue
+                
+                if field_upper in line_upper:
+                    # Determine operation type
+                    operation_type, business_context = self._classify_field_operation(line_upper, field_upper)
+                    
+                    # Get surrounding context
+                    context_start = max(0, line_idx - 3)
+                    context_end = min(len(lines), line_idx + 2)
+                    context_lines = lines[context_start:context_end]
+                    
+                    reference = {
+                        'line_number': line_idx,
+                        'line_content': line_stripped,
+                        'operation_type': operation_type,
+                        'business_context': business_context,
+                        'context_lines': context_lines,
+                        'context_display': '\n'.join([
+                            f"{context_start + i + 1:4d}: {ctx_line}"
+                            for i, ctx_line in enumerate(context_lines)
+                        ])
+                    }
+                    
+                    # Categorize by operation type
+                    if operation_type == 'DEFINITION':
+                        analysis['definition'] = reference
+                    elif operation_type == 'MOVE_TARGET':
+                        analysis['usage_patterns']['input_operations'].append(reference)
+                    elif operation_type == 'MOVE_SOURCE':
+                        analysis['usage_patterns']['output_operations'].append(reference)
+                    elif operation_type == 'ARITHMETIC':
+                        analysis['usage_patterns']['arithmetic_operations'].append(reference)
+                    elif operation_type == 'CONDITIONAL':
+                        analysis['usage_patterns']['conditional_operations'].append(reference)
+                    elif operation_type == 'CICS':
+                        analysis['usage_patterns']['cics_operations'].append(reference)
+                    
+                    analysis['references'].append(reference)
+            
+            # Generate business summary
+            analysis['business_summary'] = self._generate_field_business_summary(analysis)
+            
+            return analysis
+            
         except Exception as e:
-            logger.error(f"Error getting field source code: {str(e)}")
+            logger.error(f"Error analyzing field {field_name}: {str(e)}")
+            return analysis
+    
+    def _classify_field_operation(self, line_upper: str, field_upper: str) -> tuple:
+        """Classify the type of operation involving the field"""
+        # Field definition
+        if ('PIC' in line_upper and 
+            re.match(r'^\s*\d{2}\s+' + re.escape(field_upper), line_upper)):
+            return 'DEFINITION', 'Data structure definition with type and length specification'
         
-        return snippets
-
-    def _create_chat_prompt(self, message: str, context: Dict, 
-                               conversation_history: List[Dict], query_analysis: Dict) -> str:
-        """Enhanced chat prompt with actual source code context"""
+        # MOVE operations
+        elif 'MOVE' in line_upper:
+            # Field receives data (MOVE source TO field)
+            if re.search(rf'MOVE\s+.+\s+TO\s+{re.escape(field_upper)}', line_upper):
+                source_match = re.search(r'MOVE\s+([A-Z0-9\-\(\)]+)', line_upper)
+                source = source_match.group(1) if source_match else 'unknown source'
+                return 'MOVE_TARGET', f'Receives data from {source}'
+            
+            # Field provides data (MOVE field TO target)
+            elif re.search(rf'MOVE\s+{re.escape(field_upper)}\s+TO', line_upper):
+                target_match = re.search(rf'MOVE\s+{re.escape(field_upper)}\s+TO\s+([A-Z0-9\-\(\)]+)', line_upper)
+                target = target_match.group(1) if target_match else 'unknown target'
+                return 'MOVE_SOURCE', f'Provides data to {target}'
         
-        system_prompt = """You are an expert mainframe code analyst assistant. You help users understand COBOL programs, field mappings, record layouts, and data relationships.
-
-    Key guidelines:
-    - Provide accurate, helpful information based on the context provided
-    - Always reference specific source code when available
-    - Explain business logic and data relationships clearly
-    - Use technical language appropriate for mainframe developers
-    - When discussing field usage, show actual COBOL code examples
-    - Explain both the technical and business aspects of the code
-    """
+        # Arithmetic operations
+        elif any(op in line_upper for op in ['COMPUTE', 'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE']):
+            return 'ARITHMETIC', 'Used in mathematical calculation or business computation'
         
-        # Enhanced context section with source code
-        context_prompt = "\nCONTEXT INFORMATION:\n"
+        # Conditional operations
+        elif any(op in line_upper for op in ['IF', 'WHEN', 'EVALUATE']):
+            return 'CONDITIONAL', 'Used in business logic decision or program flow control'
         
-        if context.get('source_code_snippets'):
-            context_prompt += "\nSOURCE CODE EXAMPLES:\n"
-            for snippet in context['source_code_snippets'][:5]:
-                context_prompt += f"\n--- {snippet['type']}: {snippet['name']} ---\n"
-                if snippet.get('line_number'):
-                    context_prompt += f"Line {snippet['line_number']}: "
-                context_prompt += f"{snippet['source']}\n"
-                if snippet.get('business_purpose'):
-                    context_prompt += f"Purpose: {snippet['business_purpose']}\n"
+        # CICS operations
+        elif 'CICS' in line_upper:
+            return 'CICS', 'Used in CICS transaction processing or screen handling'
         
-        if context.get('field_details'):
-            context_prompt += "\nFIELD ANALYSIS:\n"
-            for field in context['field_details'][:5]:
-                context_prompt += f"- {field['field_name']} ({field.get('friendly_name', 'N/A')})\n"
-                context_prompt += f"  Usage: {field.get('usage_type', 'Unknown')} in {field.get('program_name', 'N/A')}\n"
-                context_prompt += f"  Operation: {field.get('operation_type', 'N/A')}\n"
-                if field.get('code_snippet'):
-                    context_prompt += f"  Code: {field['code_snippet']}\n"
-                context_prompt += f"  Purpose: {field.get('business_purpose', 'N/A')}\n\n"
+        # File operations
+        elif any(op in line_upper for op in ['READ', 'WRITE', 'REWRITE']):
+            return 'FILE_IO', 'Used in file input/output operations'
         
-        if context.get('field_mappings'):
-            context_prompt += "\nFIELD MAPPINGS:\n"
-            for mapping in context['field_mappings'][:3]:
-                context_prompt += f"- {mapping['field_name']}: {mapping.get('mainframe_data_type', 'N/A')} → {mapping.get('oracle_data_type', 'N/A')}\n"
-                context_prompt += f"  Business Logic: {mapping.get('business_logic_description', 'N/A')}\n"
-                context_prompt += f"  Population: {mapping.get('population_source', 'N/A')}\n\n"
+        # General reference
+        else:
+            return 'REFERENCE', 'Referenced in program logic'
+    
+    def _generate_field_business_summary(self, analysis: Dict) -> str:
+        """Generate business summary from field analysis"""
+        patterns = analysis['usage_patterns']
+        field_name = analysis['field_name']
         
-        if context.get('record_layouts'):
-            context_prompt += "\nRECORD LAYOUTS:\n"
-            for layout in context['record_layouts'][:3]:
-                context_prompt += f"- {layout['layout_name']} (Level {layout.get('level_number', '01')})\n"
-                context_prompt += f"  Program: {layout.get('program_name', 'N/A')}\n"
-                context_prompt += f"  Fields: {layout.get('fields_count', 0)}\n"
-                if layout.get('source_code'):
-                    # Show first few lines of layout source
-                    source_lines = layout['source_code'].split('\n')[:3]
-                    context_prompt += f"  Source: {chr(10).join(source_lines)}...\n\n"
+        summary_parts = []
         
-        # Add conversation history
-        history_prompt = "\nRECENT CONVERSATION:\n"
-        for msg in conversation_history[-3:]:
-            role = "User" if msg['message_type'] == 'user' else "Assistant"
-            content = msg['message_content'][:200] + "..." if len(msg['message_content']) > 200 else msg['message_content']
-            history_prompt += f"{role}: {content}\n"
+        if patterns['input_operations']:
+            summary_parts.append(f"receives data ({len(patterns['input_operations'])} times)")
         
-        # Query analysis
-        query_info = f"\nQUERY ANALYSIS:\n"
-        query_info += f"Type: {query_analysis['type']}\n"
-        query_info += f"Intent: {query_analysis['intent']}\n"
-        if query_analysis['entities']:
-            query_info += f"Entities: {', '.join(query_analysis['entities'])}\n"
+        if patterns['output_operations']:
+            summary_parts.append(f"provides data ({len(patterns['output_operations'])} times)")
         
-        # Construct final prompt
-        final_prompt = system_prompt + context_prompt + history_prompt + query_info
-        final_prompt += f"\nUSER QUESTION: {message}\n\n"
-        final_prompt += "Please provide a detailed response based on the source code and context above. Include specific code examples when relevant."
+        if patterns['arithmetic_operations']:
+            summary_parts.append(f"mathematical calculations ({len(patterns['arithmetic_operations'])} times)")
         
-        return final_prompt
+        if patterns['conditional_operations']:
+            summary_parts.append(f"business decisions ({len(patterns['conditional_operations'])} times)")
+        
+        if patterns['cics_operations']:
+            summary_parts.append(f"CICS transactions ({len(patterns['cics_operations'])} times)")
+        
+        if summary_parts:
+            return f"{field_name} is actively used for: {', '.join(summary_parts)}"
+        elif analysis['definition']:
+            return f"{field_name} is defined but not actively used in the main program logic"
+        else:
+            return f"{field_name} usage pattern could not be determined"
+    
+    def _format_live_analysis_response(self, field_name: str, analysis: Dict) -> str:
+        """Format response from live analysis"""
+        response = f"Field Analysis: {field_name} (Live Analysis)\n"
+        response += "=" * (len(field_name) + 28) + "\n"
+        
+        response += f"Program: {analysis['program_name']}\n"
+        response += f"Business Summary: {analysis['business_summary']}\n"
+        
+        # Show definition
+        if analysis['definition']:
+            def_ref = analysis['definition']
+            response += f"\nField Definition:\n"
+            response += f"  Line {def_ref['line_number']}: {def_ref['line_content']}\n"
+        
+        # Show usage patterns
+        patterns = analysis['usage_patterns']
+        total_operations = sum(len(ops) for ops in patterns.values())
+        
+        if total_operations > 0:
+            response += f"\nUsage Patterns ({total_operations} total operations):\n"
+            
+            if patterns['input_operations']:
+                response += f"  Data Input ({len(patterns['input_operations'])} operations):\n"
+                for op in patterns['input_operations'][:2]:
+                    response += f"    Line {op['line_number']}: {op['line_content']}\n"
+            
+            if patterns['output_operations']:
+                response += f"  Data Output ({len(patterns['output_operations'])} operations):\n"
+                for op in patterns['output_operations'][:2]:
+                    response += f"    Line {op['line_number']}: {op['line_content']}\n"
+            
+            if patterns['arithmetic_operations']:
+                response += f"  Calculations ({len(patterns['arithmetic_operations'])} operations):\n"
+                for op in patterns['arithmetic_operations'][:2]:
+                    response += f"    Line {op['line_number']}: {op['line_content']}\n"
+            
+            if patterns['conditional_operations']:
+                response += f"  Business Logic ({len(patterns['conditional_operations'])} operations):\n"
+                for op in patterns['conditional_operations'][:2]:
+                    response += f"    Line {op['line_number']}: {op['line_content']}\n"
+        
+        # Show detailed context for first significant operation
+        significant_ops = (patterns['input_operations'] + patterns['output_operations'] + 
+                          patterns['arithmetic_operations'])
+        if significant_ops:
+            important_op = significant_ops[0]
+            response += f"\nDetailed Context Example:\n"
+            response += important_op['context_display']
+        
+        return response
+    
+    def _handle_layout_query(self, session_id: str, message: str) -> str:
+        """Handle queries about record layouts"""
+        try:
+            # Extract layout names from message
+            layout_names = re.findall(r'\b([A-Z][A-Z0-9\-]{2,})\b', message.upper())
+            
+            if layout_names:
+                # Get specific layout info
+                layouts = self.db_manager.get_record_layouts(session_id)
+                matching_layouts = []
+                
+                for layout_name in layout_names:
+                    matches = [l for l in layouts if layout_name in l['layout_name'].upper()]
+                    matching_layouts.extend(matches)
+                
+                if matching_layouts:
+                    response = f"Record Layout Analysis:\n\n"
+                    for layout in matching_layouts[:2]:
+                        response += f"Layout: {layout['layout_name']}\n"
+                        response += f"Program: {layout['program_name']}\n"
+                        response += f"Level: {layout.get('level_number', '01')}\n"
+                        response += f"Fields: {layout.get('fields_count', 0)}\n"
+                        if layout.get('business_purpose'):
+                            response += f"Purpose: {layout['business_purpose']}\n"
+                        response += "\n"
+                    
+                    return response
+            
+            # General layout information
+            return self._get_general_layout_info(session_id)
+            
+        except Exception as e:
+            logger.error(f"Error handling layout query: {str(e)}")
+            return f"Error analyzing layouts: {str(e)}"
+    
+    def _get_general_layout_info(self, session_id: str) -> str:
+        """Get general information about record layouts"""
+        try:
+            layouts = self.db_manager.get_record_layouts(session_id)
+            
+            if not layouts:
+                return "No record layouts found. Upload COBOL programs with data structures first."
+            
+            response = f"Record Layouts ({len(layouts)} found):\n\n"
+            
+            for layout in layouts[:5]:  # Show first 5
+                response += f"Layout: {layout['layout_name']}\n"
+                response += f"Program: {layout['program_name']}\n"
+                response += f"Fields: {layout.get('fields_count', 0)}\n"
+                if layout.get('business_purpose'):
+                    response += f"Purpose: {layout['business_purpose']}\n"
+                response += "\n"
+            
+            if len(layouts) > 5:
+                response += f"... and {len(layouts) - 5} more layouts\n"
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error getting layout info: {str(e)}")
+            return "Error retrieving layout information"
+    
+    def _handle_program_query(self, session_id: str, message: str) -> str:
+        """Handle queries about programs"""
+        try:
+            components = self.db_manager.get_session_components(session_id)
+            programs = [c for c in components if c.get('component_type') == 'PROGRAM']
+            
+            if not programs:
+                return "No programs have been analyzed yet. Please upload COBOL program files first."
+            
+            response = f"Program Analysis ({len(programs)} programs):\n\n"
+            
+            for program in programs:
+                response += f"Program: {program['component_name']}\n"
+                response += f"Lines: {program.get('total_lines', 0)}\n"
+                response += f"Fields: {program.get('total_fields', 0)}\n"
+                
+                if program.get('business_purpose'):
+                    response += f"Purpose: {program['business_purpose']}\n"
+                
+                response += "\n"
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error handling program query: {str(e)}")
+            return f"Error analyzing programs: {str(e)}"
+    
+    def _handle_summary_query(self, session_id: str) -> str:
+        """Handle summary/overview queries"""
+        try:
+            metrics = self.db_manager.get_session_metrics(session_id)
+            components = self.db_manager.get_session_components(session_id)
+            
+            response = "Project Analysis Summary:\n"
+            response += "=" * 25 + "\n"
+            
+            # Basic metrics
+            response += f"Total Components: {metrics.get('total_components', 0)}\n"
+            response += f"Total Fields: {metrics.get('total_fields', 0)}\n"
+            response += f"Lines of Code: {metrics.get('total_lines', 0)}\n"
+            
+            # Component breakdown
+            if components:
+                component_types = {}
+                for comp in components:
+                    comp_type = comp.get('component_type', 'Unknown')
+                    component_types[comp_type] = component_types.get(comp_type, 0) + 1
+                
+                response += f"\nComponent Breakdown:\n"
+                for comp_type, count in component_types.items():
+                    response += f"  {comp_type}: {count}\n"
+            
+            # Token usage
+            token_usage = metrics.get('token_usage', {})
+            if token_usage:
+                total_tokens = token_usage.get('total_prompt_tokens', 0) + token_usage.get('total_response_tokens', 0)
+                response += f"\nToken Usage: {total_tokens:,} tokens\n"
+                response += f"LLM Calls: {token_usage.get('total_calls', 0)}\n"
+            
+            response += f"\nAsk me about specific fields, record layouts, or programs!"
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error handling summary query: {str(e)}")
+            return f"Error generating summary: {str(e)}"
+    
+    def _handle_general_query(self, session_id: str, message: str) -> str:
+        """Handle general queries"""
+        try:
+            # Check if user is asking for help
+            if any(word in message.lower() for word in ['help', 'what can you', 'how do i']):
+                return self._get_help_response()
+            
+            # Provide general guidance
+            return ("I can help you analyze your mainframe code! Here's what you can ask:\n\n"
+                   "Field Analysis:\n"
+                   "  - 'Tell me about CUSTOMER-NAME'\n"
+                   "  - 'How is ACCOUNT-NUMBER used?'\n"
+                   "  - 'Show me EMPLOYEE-ID field'\n\n"
+                   "General Information:\n"
+                   "  - 'Show me the project summary'\n"
+                   "  - 'What programs have been analyzed?'\n"
+                   "  - 'List the record layouts'\n\n"
+                   "Ask about any specific field name and I'll show you exactly how it's used in your COBOL programs!")
+            
+        except Exception as e:
+            logger.error(f"Error handling general query: {str(e)}")
+            return "I can help analyze your mainframe code. Ask me about specific fields, programs, or record layouts!"
+    
+    def _get_help_response(self) -> str:
+        """Provide help information"""
+        return ("Mainframe Code Analyzer Help:\n\n"
+               "I can analyze your COBOL programs and provide detailed information about:\n\n"
+               "1. Field Analysis:\n"
+               "   - Field definitions and data types\n"
+               "   - How fields are used (input, output, calculations)\n"
+               "   - Source code examples showing field usage\n"
+               "   - Business purpose and data flow\n\n"
+               "2. Program Structure:\n"
+               "   - Record layouts and data structures\n"
+               "   - Component relationships and dependencies\n"
+               "   - CICS transaction processing\n"
+               "   - File operations and data flow\n\n"
+               "Example questions:\n"
+               "   - 'Tell me about CUSTOMER-NAME field'\n"
+               "   - 'How is ACCOUNT-BALANCE calculated?'\n"
+               "   - 'Show me the EMPLOYEE-RECORD layout'\n"
+               "   - 'What programs use TRANSACTION-CODE?'\n\n"
+               "Just ask about any field name and I'll show you the actual COBOL code!")
+    
+    def _get_available_fields_sample(self, session_id: str) -> str:
+        """Get sample of available fields"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT DISTINCT field_name FROM field_analysis_details 
+                    WHERE session_id = ? 
+                    ORDER BY field_name 
+                    LIMIT 10
+                ''', (session_id,))
+                
+                fields = [row[0] for row in cursor.fetchall()]
+                return ', '.join(fields) if fields else 'No fields analyzed yet'
+                
+        except Exception as e:
+            logger.error(f"Error getting available fields: {str(e)}")
+            return 'Error retrieving field list'

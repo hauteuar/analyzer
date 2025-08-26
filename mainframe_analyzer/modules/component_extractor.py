@@ -131,33 +131,26 @@ class ComponentExtractor:
             return []
     
     def _extract_cobol_components(self, session_id: str, content: str, filename: str) -> List[Dict]:
-        """Extract components from COBOL program - FIXED VERSION"""
-        logger.info(f"🔍 Parsing COBOL structure for {filename}...")
-        components = []
+        """Complete COBOL component extraction with full source code analysis"""
+        logger.info(f"Starting complete COBOL analysis for {filename}")
         
         try:
-            # Use COBOL parser for initial parsing
-            logger.info("📖 Running COBOL parser...")
+            # Parse COBOL structure
             start_time = time.time()
             parsed_data = self.cobol_parser.parse_cobol_file(content, filename)
-            parse_time = time.time() - start_time
+            logger.info(f"COBOL parsing completed: {len(parsed_data['record_layouts'])} layouts found")
             
-            logger.info(f"📊 COBOL parsing completed in {parse_time:.2f}s:")
-            
-            # Generate LLM summary for the main program
-            logger.info("🤖 Generating LLM business summary...")
-            summary_start = time.time()
+            # Generate LLM summary
             program_summary = self._generate_component_summary(session_id, parsed_data, 'PROGRAM')
-            summary_time = time.time() - summary_start
-            logger.info(f"🧠 LLM summary generated in {summary_time:.2f}s")
             
-            # Create main program component with ALL necessary data
+            # Create main program component with complete source
+            program_name = filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', '')
             program_component = {
-                'name': filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', ''),  # FIXED: was 'component_name'
+                'name': program_name,
                 'friendly_name': parsed_data['friendly_name'],
                 'type': 'PROGRAM',
                 'file_path': filename,
-                'content': content,  # IMPORTANT: Store the actual source code
+                'content': content,  # CRITICAL: Store complete source code
                 'total_lines': parsed_data['total_lines'],
                 'executable_lines': parsed_data.get('executable_lines', 0),
                 'comment_lines': parsed_data.get('comment_lines', 0),
@@ -169,265 +162,388 @@ class ComponentExtractor:
                 'program_calls': parsed_data['program_calls'],
                 'copybooks': parsed_data['copybooks'],
                 'cics_operations': parsed_data['cics_operations'],
-                'mq_operations': parsed_data.get('mq_operations', []),
-                'xml_operations': parsed_data.get('xml_operations', []),
-                'derived_components': [],  # Will store derived component names
-                'record_layouts': [],  # Store layout references
-                'fields': []  # Flatten all fields for frontend access
+                'derived_components': [],
+                'record_layouts': [],
+                'fields': []
             }
             
-            # FIXED: Calculate total_fields after record_layouts is populated
-            components.append(program_component)
-            logger.info(f"📦 Created main program component: {program_component['name']}")
+            components = [program_component]
             
-            # Process record layouts with enhanced field storage
-            logger.info(f"🏗️  Processing {len(parsed_data['record_layouts'])} record layouts...")
-            for i, layout in enumerate(parsed_data['record_layouts'], 1):
-                logger.info(f"📋 Processing record layout {i}/{len(parsed_data['record_layouts'])}: {layout.name}")
+            # Process each record layout with complete field analysis
+            for layout_idx, layout in enumerate(parsed_data['record_layouts'], 1):
+                layout_name = layout.name
+                logger.info(f"Processing layout {layout_idx}/{len(parsed_data['record_layouts'])}: {layout_name}")
                 
+                # Generate layout summary
+                layout_summary = self._generate_layout_summary(session_id, layout, parsed_data)
+                
+                # Store record layout in database first
+                layout_data = {
+                    'name': layout_name,
+                    'friendly_name': layout.friendly_name,
+                    'level': str(layout.level),
+                    'line_start': layout.line_start,
+                    'line_end': layout.line_end,
+                    'source_code': layout.source_code,
+                    'fields': []  # Will be populated below
+                }
+                
+                # Store layout in database and get ID
                 try:
-                    layout_summary = self._generate_layout_summary(session_id, layout, parsed_data)
-                    
-                    # Convert layout to dict with enhanced field information
-                    layout_dict = {
-                        'name': layout.name,
-                        'friendly_name': layout.friendly_name,
-                        'level': str(layout.level),
-                        'line_start': layout.line_start,
-                        'line_end': layout.line_end,
-                        'source_code': layout.source_code,
-                        'fields': []
-                    }
-                    
-                    # Convert fields with enhanced information for database storage
-                    logger.debug(f"Converting {len(layout.fields)} fields for layout {layout.name}")
-                    for field_idx, field in enumerate(layout.fields, 1):
-                        try:
-                            field_dict = self._field_to_dict_enhanced(field, content)
-                            layout_dict['fields'].append(field_dict)
-                            logger.debug(f"  Field {field_idx}/{len(layout.fields)}: {field.name} converted")
-                        except Exception as field_error:
-                            logger.error(f"Error converting field {field.name}: {str(field_error)}")
-                            # Add basic field data as fallback
-                            layout_dict['fields'].append({
-                                'name': field.name,
-                                'level': field.level,
-                                'picture': getattr(field, 'picture', ''),
-                                'line_number': getattr(field, 'line_number', 0),
-                                'error': str(field_error)
-                            })
-                    
-                    # Store layout component
-                    layout_component = {
-                        'name': layout.name,
-                        'friendly_name': layout.friendly_name,
-                        'type': 'RECORD_LAYOUT',
-                        'parent_program': program_component['name'],
-                        'level': layout.level,
-                        'line_start': layout.line_start,
-                        'line_end': layout.line_end,
-                        'source_code': layout.source_code,
-                        'fields': layout_dict['fields'],
-                        'llm_summary': layout_summary,
-                        'business_purpose': layout_summary.get('business_purpose', ''),
-                        'usage_pattern': layout_summary.get('usage_pattern', 'UNKNOWN')
-                    }
-                    components.append(layout_component)
-                    program_component['derived_components'].append(layout.name)
-                    program_component['record_layouts'].append(layout_dict)
-                    
-                    # Flatten all fields into the main component for frontend access
-                    program_component['fields'].extend(layout_dict['fields'])
-                    
-                    logger.info(f"   ✅ Record layout {layout.name}: {len(layout.fields)} fields processed")
-                    
-                    # Store record layout in database with error handling and timeout
-                    logger.info(f"🗄️ Storing record layout {layout.name} in database...")
+                    with self.db_manager.get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO record_layouts 
+                            (session_id, layout_name, friendly_name, program_name, level_number, 
+                            line_start, line_end, source_code, fields_count, business_purpose)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (session_id, layout_name, layout.friendly_name, program_name,
+                            str(layout.level), layout.line_start, layout.line_end,
+                            layout.source_code, len(layout.fields),
+                            layout_summary.get('business_purpose', '')))
+                        
+                        layout_id = cursor.lastrowid
+                        logger.info(f"Stored layout {layout_name} with ID {layout_id}")
+                except Exception as db_error:
+                    logger.error(f"Error storing layout {layout_name}: {str(db_error)}")
+                    layout_id = None
+                
+                # Process each field with complete source code analysis
+                enhanced_fields = []
+                for field_idx, field in enumerate(layout.fields, 1):
                     try:
-                        # Add timeout protection
-                        import signal
+                        logger.debug(f"Analyzing field {field_idx}/{len(layout.fields)}: {field.name}")
                         
-                        def timeout_handler(signum, frame):
-                            raise TimeoutError("Database operation timed out")
+                        # Perform complete source code analysis for this field
+                        field_source_analysis = self._complete_field_source_analysis(
+                            field.name, content, program_name
+                        )
                         
-                        # Set 30-second timeout for database operation
-                        signal.signal(signal.SIGALRM, timeout_handler)
-                        signal.alarm(30)
+                        # Create enhanced field data with complete context
+                        enhanced_field = {
+                            'name': field.name,
+                            'friendly_name': field.friendly_name or field.name.replace('-', ' ').title(),
+                            'level': field.level,
+                            'picture': field.picture,
+                            'usage': field.usage,
+                            'occurs': field.occurs,
+                            'redefines': field.redefines,
+                            'value': field.value,
+                            'line_number': field.line_number,
+                            'code_snippet': f"{field.level:02d} {field.name}" + (f" PIC {field.picture}" if field.picture else ""),
+                            'usage_type': field_source_analysis['primary_usage'],
+                            'operation_type': 'COMPREHENSIVE_DEFINITION',
+                            'business_purpose': field_source_analysis['business_purpose'],
+                            'confidence': 0.95,
+                            'source_field': field_source_analysis.get('primary_source_field', ''),
+                            'target_field': field.name if field_source_analysis.get('receives_data', False) else '',
+                            
+                            # Complete source code context for database
+                            'definition_line_number': field_source_analysis.get('definition_line', field.line_number),
+                            'definition_code': field_source_analysis.get('definition_code', ''),
+                            'program_source_content': content,  # Store complete program source
+                            'field_references_json': json.dumps(field_source_analysis['all_references']),
+                            'usage_summary_json': json.dumps(field_source_analysis['usage_summary']),
+                            'total_program_references': len(field_source_analysis['all_references']),
+                            'move_source_count': field_source_analysis['counts']['move_source'],
+                            'move_target_count': field_source_analysis['counts']['move_target'],
+                            'arithmetic_count': field_source_analysis['counts']['arithmetic'],
+                            'conditional_count': field_source_analysis['counts']['conditional'],
+                            'cics_count': field_source_analysis['counts']['cics']
+                        }
                         
-                        self.db_manager.store_record_layout(session_id, {
-                            'name': layout.name,
-                            'friendly_name': layout.friendly_name,
-                            'level': str(layout.level),
-                            'line_start': layout.line_start,
-                            'line_end': layout.line_end,
-                            'source_code': layout.source_code,
-                            'fields': layout_dict['fields']
-                        }, program_component['name'])
+                        enhanced_fields.append(enhanced_field)
                         
-                        signal.alarm(0)  # Cancel timeout
-                        logger.info(f"✅ Successfully stored record layout {layout.name}")
+                        # Store field details in database with complete context
+                        if layout_id:
+                            try:
+                                self.db_manager.store_field_details(session_id, enhanced_field, program_name, layout_id)
+                                logger.debug(f"Stored field {field.name} with {len(field_source_analysis['all_references'])} source references")
+                            except Exception as field_db_error:
+                                logger.error(f"Error storing field {field.name}: {str(field_db_error)}")
                         
-                    except TimeoutError:
-                        signal.alarm(0)
-                        logger.error(f"❌ Timeout storing record layout {layout.name} - skipping database storage")
-                    except Exception as db_error:
-                        logger.error(f"❌ Database error storing record layout {layout.name}: {str(db_error)}")
-                        # Continue processing even if database storage fails
-                        continue
-                        
-                except Exception as layout_error:
-                    logger.error(f"❌ Error processing layout {layout.name}: {str(layout_error)}")
-                    # Continue with next layout
-                    continue
+                    except Exception as field_error:
+                        logger.error(f"Error analyzing field {field.name}: {str(field_error)}")
+                        # Create basic field entry as fallback
+                        enhanced_field = {
+                            'name': field.name,
+                            'level': field.level,
+                            'picture': field.picture,
+                            'line_number': field.line_number,
+                            'error': str(field_error)
+                        }
+                        enhanced_fields.append(enhanced_field)
+                
+                # Update layout data with enhanced fields
+                layout_data['fields'] = enhanced_fields
+                
+                # Create layout component
+                layout_component = {
+                    'name': layout_name,
+                    'friendly_name': layout.friendly_name,
+                    'type': 'RECORD_LAYOUT',
+                    'parent_program': program_name,
+                    'level': layout.level,
+                    'line_start': layout.line_start,
+                    'line_end': layout.line_end,
+                    'source_code': layout.source_code,
+                    'fields': enhanced_fields,
+                    'llm_summary': layout_summary,
+                    'business_purpose': layout_summary.get('business_purpose', ''),
+                    'usage_pattern': layout_summary.get('usage_pattern', 'UNKNOWN')
+                }
+                
+                components.append(layout_component)
+                program_component['derived_components'].append(layout_name)
+                program_component['record_layouts'].append(layout_data)
+                program_component['fields'].extend(enhanced_fields)
+                
+                logger.info(f"Completed layout {layout_name}: {len(enhanced_fields)} fields analyzed")
             
-            # Update total_fields after processing all layouts
+            # Update final counts
             program_component['total_fields'] = len(program_component['fields'])
             
-            # Extract copybook references as components
-            if parsed_data['copybooks']:
-                logger.info(f"📚 Processing {len(parsed_data['copybooks'])} copybook references...")
-                for copybook in parsed_data['copybooks']:
-                    copybook_component = {
-                        'name': copybook['copybook_name'],
-                        'friendly_name': copybook['friendly_name'],
-                        'type': 'COPYBOOK_REFERENCE',
-                        'parent_program': program_component['name'],
-                        'line_number': copybook['line_number'],
-                        'line_content': copybook['line_content'],
-                        'business_purpose': f"Copybook include providing shared data structures or procedures"
-                    }
-                    components.append(copybook_component)
-                    program_component['derived_components'].append(copybook['copybook_name'])
-                    logger.info(f"   📖 Copybook reference: {copybook['copybook_name']}")
-            
-            # Extract CICS file operations as logical file components
-            cics_files = {}
-            for cics_op in parsed_data['cics_operations']:
-                if 'file_name' in cics_op:
-                    file_name = cics_op['file_name']
-                    if file_name not in cics_files:
-                        cics_files[file_name] = {
-                            'name': file_name,
-                            'friendly_name': self.cobol_parser.generate_friendly_name(file_name, 'CICS File'),
-                            'type': 'CICS_FILE',
-                            'parent_program': program_component['name'],
-                            'operations': [],
-                            'access_pattern': 'UNKNOWN',
-                            'io_operations': {
-                                'read_ops': [],
-                                'write_ops': [],
-                                'rewrite_ops': [],
-                                'delete_ops': []
-                            }
-                        }
-                    cics_files[file_name]['operations'].append(cics_op)
-                    
-                    # Categorize operations by type
-                    op_type = cics_op.get('operation', '').upper()
-                    if 'READ' in op_type:
-                        cics_files[file_name]['io_operations']['read_ops'].append(cics_op)
-                    elif 'WRITE' in op_type:
-                        cics_files[file_name]['io_operations']['write_ops'].append(cics_op)
-                    elif 'REWRITE' in op_type:
-                        cics_files[file_name]['io_operations']['rewrite_ops'].append(cics_op)
-                    elif 'DELETE' in op_type:
-                        cics_files[file_name]['io_operations']['delete_ops'].append(cics_op)
-            
-            # Add CICS files as components with proper I/O classification
-            if cics_files:
-                logger.info(f"🔄 Processing {len(cics_files)} CICS files...")
-                for file_name, file_info in cics_files.items():
-                    # Determine comprehensive access pattern
-                    io_ops = file_info['io_operations']
-                    has_read = len(io_ops['read_ops']) > 0
-                    has_write = len(io_ops['write_ops']) > 0
-                    has_rewrite = len(io_ops['rewrite_ops']) > 0
-                    has_delete = len(io_ops['delete_ops']) > 0
-                    
-                    # Classify access pattern based on operations
-                    if has_rewrite or has_delete:
-                        file_info['access_pattern'] = 'INPUT_OUTPUT'
-                        file_info['io_classification'] = 'BIDIRECTIONAL'
-                    elif has_read and has_write:
-                        file_info['access_pattern'] = 'READ_WRITE'
-                        file_info['io_classification'] = 'BIDIRECTIONAL'
-                    elif has_read:
-                        file_info['access_pattern'] = 'READ_ONLY'
-                        file_info['io_classification'] = 'INPUT_ONLY'
-                    elif has_write:
-                        file_info['access_pattern'] = 'WRITE_ONLY'
-                        file_info['io_classification'] = 'OUTPUT_ONLY'
-                    
-                    # Generate business purpose based on I/O pattern
-                    operation_summary = []
-                    if has_read:
-                        operation_summary.append(f"{len(io_ops['read_ops'])} read operation(s)")
-                    if has_write:
-                        operation_summary.append(f"{len(io_ops['write_ops'])} write operation(s)")
-                    if has_rewrite:
-                        operation_summary.append(f"{len(io_ops['rewrite_ops'])} rewrite operation(s)")
-                    if has_delete:
-                        operation_summary.append(f"{len(io_ops['delete_ops'])} delete operation(s)")
-                    
-                    file_info['business_purpose'] = f"CICS managed file with {', '.join(operation_summary)} - {file_info['io_classification'].lower().replace('_', ' ')} access pattern"
-                    file_info['operation_count'] = len(file_info['operations'])
-                    
-                    components.append(file_info)
-                    program_component['derived_components'].append(file_name)
-                    
-                    logger.info(f"   🗄️  CICS file {file_name}: {file_info['access_pattern']} ({len(file_info['operations'])} ops)")
-            
-            # Check if content needs LLM chunking for large files
-            if self.token_manager.needs_chunking(content):
-                logger.info("📄 File is large, using LLM chunked analysis...")
-                chunk_start = time.time()
-                try:
-                    enhanced_components = self._llm_analyze_large_program(session_id, content, filename)
-                    components.extend(enhanced_components)
-                    chunk_time = time.time() - chunk_start
-                    logger.info(f"🔄 Chunked LLM analysis completed in {chunk_time:.2f}s")
-                except Exception as chunk_error:
-                    logger.error(f"❌ Error in chunked LLM analysis: {str(chunk_error)}")
-            
-            # Extract field relationships and store in database
-            logger.info("🔗 Extracting field relationships...")
-            relationship_start = time.time()
-            try:
-                self._extract_and_store_field_relationships(session_id, components, filename)
-                relationship_time = time.time() - relationship_start
-                logger.info(f"🔗 Field relationships extracted in {relationship_time:.2f}s")
-            except Exception as rel_error:
-                logger.error(f"❌ Error extracting field relationships: {str(rel_error)}")
-            
             total_time = time.time() - start_time
-            logger.info(f"✅ COBOL component extraction completed in {total_time:.2f}s")
+            logger.info(f"COBOL extraction completed in {total_time:.2f}s: {len(components)} components, {program_component['total_fields']} fields")
             
-            logger.info("Extracting component dependencies...")
-            dependency_start = time.time()
-            try:
-                self._extract_and_store_dependencies(session_id, components, filename)
-                dependency_time = time.time() - dependency_start
-                logger.info(f"Dependencies extracted in {dependency_time:.2f}s")
-            except Exception as dep_error:
-                logger.error(f"Error extracting dependencies: {str(dep_error)}")
-
             return components
             
         except Exception as e:
-            logger.error(f"❌ Error extracting COBOL components from {filename}: {str(e)}")
-            logger.error(f"📍 Stack trace: {traceback.format_exc()}")
-            
-            # Return fallback component
-            return [{
-                'name': filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', ''),
-                'friendly_name': self.cobol_parser.generate_friendly_name(filename, 'Program'),
-                'type': 'PROGRAM',
-                'content': content,
-                'total_lines': len(content.split('\n')),
-                'error': str(e)
-            }]
+            logger.error(f"Error in COBOL component extraction: {str(e)}")
+            return []
+
+
+    def store_field_details(self, session_id: str, field_data: Dict, program_name: str, layout_id: int = None):
+        """Store complete field details with source code context"""
+        field_name = field_data.get('name', 'UNNAMED')
         
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Store complete field analysis
+                cursor.execute('''
+                    INSERT OR REPLACE INTO field_analysis_details 
+                    (session_id, field_id, field_name, friendly_name, program_name, layout_name,
+                    operation_type, line_number, code_snippet, usage_type, source_field, target_field,
+                    business_purpose, analysis_confidence,
+                    definition_line_number, definition_code, program_source_content,
+                    field_references_json, usage_summary_json, total_program_references,
+                    move_source_count, move_target_count, arithmetic_count, conditional_count, cics_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    session_id, layout_id, field_name,
+                    field_data.get('friendly_name', field_name),
+                    program_name, None,
+                    field_data.get('operation_type', 'DEFINITION'),
+                    field_data.get('line_number', 0),
+                    field_data.get('code_snippet', ''),
+                    field_data.get('usage_type', 'STATIC'),
+                    field_data.get('source_field', ''),
+                    field_data.get('target_field', ''),
+                    field_data.get('business_purpose', ''),
+                    field_data.get('confidence', 0.8),
+                    field_data.get('definition_line_number', 0),
+                    field_data.get('definition_code', ''),
+                    field_data.get('program_source_content', ''),
+                    field_data.get('field_references_json', '[]'),
+                    field_data.get('usage_summary_json', '{}'),
+                    field_data.get('total_program_references', 0),
+                    field_data.get('move_source_count', 0),
+                    field_data.get('move_target_count', 0),
+                    field_data.get('arithmetic_count', 0),
+                    field_data.get('conditional_count', 0),
+                    field_data.get('cics_count', 0)
+                ))
+                
+                logger.debug(f"Stored complete field details: {field_name}")
+                
+        except Exception as e:
+            logger.error(f"Error storing field details for {field_name}: {str(e)}")
+            raise
+
+    # Add this method to ComponentExtractor class:
+
+    def _complete_field_source_analysis(self, field_name: str, program_content: str, program_name: str) -> Dict:
+        """Perform complete source code analysis for a field"""
+        analysis = {
+            'field_name': field_name,
+            'program_name': program_name,
+            'all_references': [],
+            'definition_line': None,
+            'definition_code': '',
+            'primary_usage': 'STATIC',
+            'primary_source_field': '',
+            'receives_data': False,
+            'provides_data': False,
+            'business_purpose': '',
+            'counts': {
+                'definition': 0,
+                'move_source': 0,
+                'move_target': 0,
+                'arithmetic': 0,
+                'conditional': 0,
+                'cics': 0
+            },
+            'usage_summary': {}
+        }
+        
+        try:
+            lines = program_content.split('\n')
+            field_upper = field_name.upper()
             
+            # Analyze every line for field usage
+            for line_idx, line in enumerate(lines, 1):
+                line_stripped = line.strip()
+                line_upper = line_stripped.upper()
+                
+                # Skip empty lines and comments
+                if not line_stripped or line_stripped.startswith('*'):
+                    continue
+                
+                # Check if field is referenced in this line
+                if field_upper in line_upper:
+                    operation_type = 'REFERENCE'
+                    business_context = ''
+                    source_field = ''
+                    target_field = ''
+                    
+                    # Field definition with PIC clause
+                    if ('PIC' in line_upper and 
+                        re.match(r'^\s*\d{2}\s+' + re.escape(field_upper), line_upper)):
+                        operation_type = 'DEFINITION'
+                        analysis['definition_line'] = line_idx
+                        analysis['definition_code'] = line_stripped
+                        analysis['counts']['definition'] += 1
+                        business_context = 'Field data structure definition'
+                    
+                    # MOVE operations - field receives data
+                    elif 'MOVE' in line_upper:
+                        # Pattern: MOVE source TO field_name
+                        move_to_match = re.search(rf'MOVE\s+([A-Z0-9\-\(\)]+)\s+TO\s+{re.escape(field_upper)}', line_upper)
+                        if move_to_match:
+                            operation_type = 'MOVE_TARGET'
+                            source_field = move_to_match.group(1)
+                            analysis['counts']['move_target'] += 1
+                            analysis['receives_data'] = True
+                            if not analysis['primary_source_field']:
+                                analysis['primary_source_field'] = source_field
+                            business_context = f'Receives data from {source_field}'
+                        
+                        # Pattern: MOVE field_name TO target
+                        else:
+                            move_from_match = re.search(rf'MOVE\s+{re.escape(field_upper)}\s+TO\s+([A-Z0-9\-\(\)]+)', line_upper)
+                            if move_from_match:
+                                operation_type = 'MOVE_SOURCE'
+                                target_field = move_from_match.group(1)
+                                analysis['counts']['move_source'] += 1
+                                analysis['provides_data'] = True
+                                business_context = f'Provides data to {target_field}'
+                    
+                    # Arithmetic operations
+                    elif any(op in line_upper for op in ['COMPUTE', 'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE']):
+                        operation_type = 'ARITHMETIC'
+                        analysis['counts']['arithmetic'] += 1
+                        business_context = 'Used in mathematical computation'
+                    
+                    # Conditional operations
+                    elif any(op in line_upper for op in ['IF', 'WHEN', 'EVALUATE']):
+                        operation_type = 'CONDITIONAL'
+                        analysis['counts']['conditional'] += 1
+                        business_context = 'Used in business logic decision'
+                    
+                    # CICS operations
+                    elif 'CICS' in line_upper:
+                        operation_type = 'CICS'
+                        analysis['counts']['cics'] += 1
+                        business_context = 'Used in CICS transaction processing'
+                    
+                    # Get context lines for complete understanding
+                    context_start = max(0, line_idx - 4)
+                    context_end = min(len(lines), line_idx + 3)
+                    context_lines = lines[context_start:context_end]
+                    
+                    # Create comprehensive reference entry
+                    reference = {
+                        'line_number': line_idx,
+                        'line_content': line_stripped,
+                        'operation_type': operation_type,
+                        'business_context': business_context,
+                        'source_field': source_field,
+                        'target_field': target_field,
+                        'context_lines': context_lines,
+                        'context_block': '\n'.join([
+                            f"{context_start + i + 1:4d}: {ctx_line}"
+                            for i, ctx_line in enumerate(context_lines)
+                        ])
+                    }
+                    
+                    analysis['all_references'].append(reference)
+            
+            # Determine primary usage based on actual operations
+            counts = analysis['counts']
+            total_ops = sum(counts.values()) - counts['definition']  # Exclude definition from usage count
+            
+            if analysis['receives_data'] and analysis['provides_data']:
+                analysis['primary_usage'] = 'INPUT_OUTPUT'
+            elif analysis['receives_data']:
+                analysis['primary_usage'] = 'INPUT'
+            elif analysis['provides_data']:
+                analysis['primary_usage'] = 'OUTPUT'
+            elif counts['arithmetic'] > 0:
+                analysis['primary_usage'] = 'DERIVED'
+            elif counts['conditional'] > 0:
+                analysis['primary_usage'] = 'REFERENCE'
+            elif counts['cics'] > 0:
+                analysis['primary_usage'] = 'CICS_FIELD'
+            elif total_ops == 0:
+                analysis['primary_usage'] = 'STATIC'
+            else:
+                analysis['primary_usage'] = 'PROCESSED'
+            
+            # Generate comprehensive business purpose
+            purpose_elements = []
+            if counts['move_target'] > 0:
+                purpose_elements.append(f"receives data ({counts['move_target']} operations)")
+            if counts['move_source'] > 0:
+                purpose_elements.append(f"provides data ({counts['move_source']} operations)")
+            if counts['arithmetic'] > 0:
+                purpose_elements.append(f"mathematical calculations ({counts['arithmetic']} operations)")
+            if counts['conditional'] > 0:
+                purpose_elements.append(f"business decisions ({counts['conditional']} operations)")
+            if counts['cics'] > 0:
+                purpose_elements.append(f"CICS transactions ({counts['cics']} operations)")
+            
+            if purpose_elements:
+                analysis['business_purpose'] = f"{field_name} - {', '.join(purpose_elements)}"
+            elif counts['definition'] > 0:
+                analysis['business_purpose'] = f"{field_name} - Static data field (defined but not actively used)"
+            else:
+                analysis['business_purpose'] = f"{field_name} - Field usage could not be determined"
+            
+            # Create usage summary
+            analysis['usage_summary'] = {
+                'total_references': len(analysis['all_references']),
+                'definition_found': analysis['definition_line'] is not None,
+                'actively_used': total_ops > 0,
+                'primary_pattern': analysis['primary_usage'],
+                'operation_breakdown': dict(counts)
+            }
+            
+            logger.debug(f"Field {field_name}: {analysis['primary_usage']}, {len(analysis['all_references'])} refs")
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"Error in complete field analysis for {field_name}: {str(e)}")
+            return {
+                'field_name': field_name,
+                'all_references': [],
+                'primary_usage': 'ERROR',
+                'business_purpose': f'Analysis failed: {str(e)}',
+                'counts': {},
+                'usage_summary': {}
+            }
+
     def _generate_component_summary(self, session_id: str, parsed_data: Dict, component_type: str) -> Dict:
         """Generate LLM summary for component"""
         try:
@@ -769,45 +885,55 @@ Please provide a JSON response with:
             'line_number': field.line_number
         }
     
-    def _field_to_dict_enhanced(self, field, program_content: str) -> Dict:
-        """Convert CobolField to dictionary with enhanced context"""
-        # Generate enhanced code snippet
-        code_snippet = f"{field.level:02d} {field.name}"
-        if field.picture:
-            code_snippet += f" PIC {field.picture}"
-        if field.usage:
-            code_snippet += f" USAGE {field.usage}"
-        if field.occurs > 0:
-            code_snippet += f" OCCURS {field.occurs}"
-        if field.redefines:
-            code_snippet += f" REDEFINES {field.redefines}"
-        if field.value:
-            code_snippet += f" VALUE {field.value}"
+    def _field_to_dict_enhanced(self, field, program_content: str, program_name: str = "PROGRAM") -> Dict:
+        """Convert field with complete source code analysis"""
+        try:
+            field_name = field.name
             
-        # Analyze field usage in the program
-        usage_analysis = self.cobol_parser.analyze_field_usage(program_content.split('\n'), field.name)
-        
-        # Determine enhanced usage type
-        usage_type = self._determine_enhanced_usage_type(usage_analysis)
-        
-        return {
-            'name': field.name,
-            'friendly_name': field.friendly_name,
-            'level': field.level,
-            'picture': field.picture,
-            'usage': field.usage,
-            'occurs': field.occurs,
-            'redefines': field.redefines,
-            'value': field.value,
-            'line_number': field.line_number,
-            'code_snippet': code_snippet,
-            'usage_type': usage_type,
-            'operation_type': 'DEFINITION',
-            'business_purpose': self._infer_field_business_purpose(field.name, usage_analysis),
-            'confidence': 0.8,
-            'source_field': self._extract_source_field(usage_analysis),
-            'target_field': field.name if usage_analysis.get('target_operations') else ''
-        }
+            # Perform complete source analysis
+            source_analysis = self._complete_field_source_analysis(field_name, program_content, program_name)
+            
+            return {
+                'name': field_name,
+                'friendly_name': field.friendly_name or field_name.replace('-', ' ').title(),
+                'level': field.level,
+                'picture': field.picture,
+                'usage': field.usage,
+                'occurs': field.occurs,
+                'redefines': field.redefines,
+                'value': field.value,
+                'line_number': field.line_number,
+                'code_snippet': f"{field.level:02d} {field_name}" + (f" PIC {field.picture}" if field.picture else ""),
+                'usage_type': source_analysis['primary_usage'],
+                'operation_type': 'COMPREHENSIVE_DEFINITION',
+                'business_purpose': source_analysis['business_purpose'],
+                'confidence': 0.95,
+                'source_field': source_analysis.get('primary_source_field', ''),
+                'target_field': field_name if source_analysis.get('receives_data', False) else '',
+                
+                # Complete source code storage
+                'definition_line_number': source_analysis.get('definition_line', field.line_number),
+                'definition_code': source_analysis.get('definition_code', ''),
+                'program_source_content': program_content,
+                'field_references_json': json.dumps(source_analysis['all_references']),
+                'usage_summary_json': json.dumps(source_analysis['usage_summary']),
+                'total_program_references': len(source_analysis['all_references']),
+                'move_source_count': source_analysis['counts']['move_source'],
+                'move_target_count': source_analysis['counts']['move_target'],
+                'arithmetic_count': source_analysis['counts']['arithmetic'],
+                'conditional_count': source_analysis['counts']['conditional'],
+                'cics_count': source_analysis['counts']['cics']
+            }
+            
+        except Exception as e:
+            logger.error(f"Error enhancing field {field.name}: {str(e)}")
+            return {
+                'name': field.name,
+                'level': field.level,
+                'picture': getattr(field, 'picture', ''),
+                'line_number': getattr(field, 'line_number', 0),
+                'error': str(e)
+            }
     
     def _infer_field_business_purpose(self, field_name: str, usage_analysis: Dict) -> str:
         """Infer business purpose from field name and usage analysis"""

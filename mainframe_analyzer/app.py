@@ -478,14 +478,27 @@ def get_field_matrix():
 
 @app.route('/api/chat', methods=['POST'])
 def chat_query():
-    """Process chat query"""
-    data = request.json
-    session_id = data.get('session_id')
-    message = data.get('message')
-    conversation_id = data.get('conversation_id', str(uuid.uuid4()))
-    
-    result = analyzer.chat_query(session_id, message, conversation_id)
-    return jsonify(result)
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        message = data.get('message')
+        conversation_id = data.get('conversation_id', str(uuid.uuid4()))
+        
+        # Process query - returns string now
+        chat_response = analyzer.chat_manager.process_query(session_id, message, conversation_id)
+        
+        return jsonify({
+            'success': True,
+            'response': chat_response,
+            'content': chat_response
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'response': 'Chat service error'
+        })
 
 @app.route('/api/components/<session_id>')
 def get_components(session_id):
