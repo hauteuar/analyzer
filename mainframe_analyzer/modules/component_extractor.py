@@ -383,22 +383,8 @@ Please provide a JSON response with:
                 'business_domain': 'GENERAL'
             }
     
-    def _generate_layout_summary(self, session_id: str, layout, parsed_data: Dict) -> Dict:
-        try:
-            print(f"🐛 DEBUG: About to generate summary for layout: {layout.name}")
-            print(f"🐛 DEBUG: Layout has {len(layout.fields)} fields")
-            
-            # Add this simple return to skip LLM entirely
-            return {
-                'business_purpose': f'Data structure with {len(layout.fields)} fields',
-                'usage_pattern': 'DATA_STRUCTURE', 
-                'complexity_score': 0.3
-            }
-        except Exception as e:
-            print(f"🐛 DEBUG: Error in layout summary: {e}")
-            return {'business_purpose': 'Error in analysis', 'usage_pattern': 'UNKNOWN', 'complexity_score': 0.5}
     
-    def _generate_layout_summary1(self, session_id: str, layout, parsed_data: Dict) -> Dict:
+    def _generate_layout_summary(self, session_id: str, layout, parsed_data: Dict) -> Dict:
         """Generate summary for record layout"""
         try:
             field_count = len(layout.fields)
@@ -427,7 +413,7 @@ Please provide a JSON response with:
                 'usage_pattern': 'UNKNOWN',
                 'field_analysis': {},
                 'complexity_score': 0.5
-            } {str(e)}")
+            } 
             # Fallback to basic parsing
             components = [{
                 'name': filename,

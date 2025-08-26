@@ -1,5 +1,5 @@
 """
-Database Manager Module
+Database Manager Module - Complete Version with Enhanced Logging
 Handles all SQL operations and data persistence with proper connection management
 """
 
@@ -28,6 +28,7 @@ class DatabaseManager:
         db_dir = os.path.dirname(os.path.abspath(self.db_path))
         if not os.path.exists(db_dir):
             os.makedirs(db_dir, mode=0o755)
+            logger.info(f"Created database directory: {db_dir}")
         
         # Check if directory is writable
         if not os.access(db_dir, os.W_OK):
@@ -40,6 +41,7 @@ class DatabaseManager:
         with self._lock:  # Thread-safe access
             conn = None
             try:
+                logger.debug(f"Attempting to connect to database: {self.db_path}")
                 conn = sqlite3.connect(
                     self.db_path, 
                     timeout=30.0,  # 30 second timeout for locks
@@ -54,6 +56,7 @@ class DatabaseManager:
                 conn.execute("PRAGMA temp_store=MEMORY")  # Temp tables in memory
                 conn.execute("PRAGMA busy_timeout=30000")  # 30 second busy timeout
                 
+                logger.debug("Database connection established successfully")
                 yield conn
                 
             except sqlite3.OperationalError as e:
@@ -74,6 +77,7 @@ class DatabaseManager:
                 if conn:
                     try:
                         conn.close()
+                        logger.debug("Database connection closed")
                     except:
                         pass  # Ignore close errors
     
@@ -121,8 +125,10 @@ class DatabaseManager:
     def initialize_database(self):
         """Initialize database schema with retry logic"""
         if self.init_executed:
+            logger.debug("Database already initialized, skipping")
             return
         
+        logger.info("Initializing database schema...")
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -237,7 +243,7 @@ class DatabaseManager:
                             analysis_confidence REAL DEFAULT 0.0,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id),
-                            FOREIGN KEY (field_id) REFERENCES field_mappings(id)
+                            FOREIGN KEY (field_id) REFERENCES record_layouts(id)
                         )
                     ''')
                     
@@ -304,210 +310,6 @@ class DatabaseManager:
         
         raise sqlite3.OperationalError("Failed to initialize database after multiple attempts")
     
-    def store_field_details(self, session_id: str, field_data: Dict, 
-                          program_name: str, layout_id: int = None):
-        """Store field analysis details with retry logic"""
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                with self.get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        INSERT INTO field_analysis_details 
-                        (session_id, field_id, field_name, program_name, operation_type,
-                         line_number, code_snippet, usage_type, source_field, target_field,
-                         business_purpose, analysis_confidence)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (session_id, layout_id, field_data.get('name'),
-                          program_name, field_data.get('operation_type'),
-                          field_data.get('line_number', 0), field_data.get('code_snippet', ''),
-                          field_data.get('usage', 'UNKNOWN'), field_data.get('source_field', ''),
-                          field_data.get('target_field', ''), field_data.get('business_purpose', ''),
-                          field_data.get('confidence', 0.8)))
-                    return  # Success, exit retry loop
-                    
-            except sqlite3.OperationalError as e:
-                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                    logger.warning(f"Database locked storing field details, attempt {attempt + 1}, retrying...")
-                    time.sleep(1 + attempt)  # Incremental backoff
-                    continue
-                else:
-                    logger.error(f"Error storing field details: {str(e)}")
-                    raise
-            except Exception as e:
-                logger.error(f"Error storing field details: {str(e)}")
-                raise
-    
-    def initialize_database(self):
-        """Initialize database schema"""
-        if self.init_executed:
-            return
-            
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Session management
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS analysis_sessions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT UNIQUE NOT NULL,
-                    project_name TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    status TEXT DEFAULT 'active',
-                    total_components INTEGER DEFAULT 0,
-                    total_fields INTEGER DEFAULT 0
-                )
-            ''')
-            
-            # LLM call tracking
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS llm_analysis_calls (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    analysis_type TEXT NOT NULL,
-                    chunk_number INTEGER DEFAULT 1,
-                    total_chunks INTEGER DEFAULT 1,
-                    prompt_tokens INTEGER DEFAULT 0,
-                    response_tokens INTEGER DEFAULT 0,
-                    processing_time_ms INTEGER DEFAULT 0,
-                    success BOOLEAN DEFAULT 1,
-                    error_message TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
-                )
-            ''')
-            
-            # Component analysis
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS component_analysis (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    component_name TEXT NOT NULL,
-                    component_type TEXT NOT NULL,
-                    file_path TEXT,
-                    analysis_status TEXT DEFAULT 'completed',
-                    total_lines INTEGER DEFAULT 0,
-                    total_fields INTEGER DEFAULT 0,
-                    dependencies_count INTEGER DEFAULT 0,
-                    analysis_result_json TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
-                )
-            ''')
-            
-            # Record layouts (01 levels)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS record_layouts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    layout_name TEXT NOT NULL,
-                    program_name TEXT,
-                    level_number TEXT DEFAULT '01',
-                    line_start INTEGER,
-                    line_end INTEGER,
-                    source_code TEXT,
-                    fields_count INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
-                )
-            ''')
-            
-            # Field mappings
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS field_mappings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    target_file_name TEXT NOT NULL,
-                    field_name TEXT NOT NULL,
-                    mainframe_data_type TEXT,
-                    oracle_data_type TEXT,
-                    mainframe_length INTEGER,
-                    oracle_length INTEGER,
-                    population_source TEXT,
-                    source_record_layout TEXT,
-                    business_logic_type TEXT,
-                    business_logic_description TEXT,
-                    derivation_logic TEXT,
-                    programs_involved_json TEXT,
-                    confidence_score REAL DEFAULT 0.0,
-                    analysis_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
-                )
-            ''')
-            
-            # Field details with code references
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS field_analysis_details (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    field_id INTEGER,
-                    field_name TEXT NOT NULL,
-                    program_name TEXT NOT NULL,
-                    operation_type TEXT,
-                    line_number INTEGER,
-                    code_snippet TEXT,
-                    usage_type TEXT,
-                    source_field TEXT,
-                    target_field TEXT,
-                    business_purpose TEXT,
-                    analysis_confidence REAL DEFAULT 0.0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id),
-                    FOREIGN KEY (field_id) REFERENCES field_mappings(id)
-                )
-            ''')
-            
-            # Dependency relationships
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS dependency_relationships (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    source_component TEXT NOT NULL,
-                    target_component TEXT NOT NULL,
-                    relationship_type TEXT NOT NULL,
-                    interface_type TEXT,
-                    confidence_score REAL DEFAULT 0.0,
-                    analysis_details_json TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
-                )
-            ''')
-            
-            # Chat conversations
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS chat_conversations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    conversation_id TEXT NOT NULL,
-                    message_type TEXT NOT NULL,
-                    message_content TEXT NOT NULL,
-                    context_used_json TEXT,
-                    tokens_used INTEGER DEFAULT 0,
-                    processing_time_ms INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
-                )
-            ''')
-            
-            # Create indexes for performance
-            indexes = [
-                'CREATE INDEX IF NOT EXISTS idx_field_mappings_target_file ON field_mappings(target_file_name, session_id)',
-                'CREATE INDEX IF NOT EXISTS idx_dependency_source ON dependency_relationships(source_component, session_id)',
-                'CREATE INDEX IF NOT EXISTS idx_dependency_target ON dependency_relationships(target_component, session_id)',
-                'CREATE INDEX IF NOT EXISTS idx_chat_session_conv ON chat_conversations(session_id, conversation_id)',
-                'CREATE INDEX IF NOT EXISTS idx_component_session ON component_analysis(session_id, component_type)',
-                'CREATE INDEX IF NOT EXISTS idx_field_details_field ON field_analysis_details(field_name, session_id)',
-                'CREATE INDEX IF NOT EXISTS idx_record_layouts_session ON record_layouts(session_id, program_name)'
-            ]
-            
-            for index_sql in indexes:
-                cursor.execute(index_sql)
-            
-            conn.commit()
-            logger.info("Database schema initialized successfully")
-            self.init_executed = True
-    
     def create_session(self, session_id: str, project_name: str) -> bool:
         """Create new analysis session"""
         try:
@@ -517,7 +319,6 @@ class DatabaseManager:
                     INSERT INTO analysis_sessions (session_id, project_name)
                     VALUES (?, ?)
                 ''', (session_id, project_name))
-                conn.commit()
                 logger.info(f"Created session: {session_id} for project: {project_name}")
                 return True
         except Exception as e:
@@ -538,7 +339,6 @@ class DatabaseManager:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (session_id, analysis_type, chunk_number, total_chunks,
                       prompt_tokens, response_tokens, processing_time_ms, success, error_message))
-                conn.commit()
         except Exception as e:
             logger.error(f"Error logging LLM call: {str(e)}")
     
@@ -565,59 +365,161 @@ class DatabaseManager:
                     for layout in analysis_result['record_layouts']:
                         self.store_record_layout(session_id, layout, component_name)
                 
-                conn.commit()
                 logger.info(f"Stored component analysis: {component_name}")
         except Exception as e:
             logger.error(f"Error storing component analysis: {str(e)}")
     
     def store_record_layout(self, session_id: str, layout_data: Dict, program_name: str):
-        """Store record layout (01 level) information"""
+        """Store record layout (01 level) information with enhanced logging and retry logic"""
+        layout_name = layout_data.get('name', 'UNKNOWN')
+        logger.info(f"Storing record layout: {layout_name} for program: {program_name}")
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    
+                    # Log the data being inserted
+                    logger.debug(f"Layout data keys: {list(layout_data.keys())}")
+                    logger.debug(f"Fields count: {len(layout_data.get('fields', []))}")
+                    
+                    # Insert record layout
+                    logger.debug("Executing INSERT for record_layouts table")
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO record_layouts 
+                        (session_id, layout_name, program_name, level_number, 
+                         line_start, line_end, source_code, fields_count)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        session_id, 
+                        layout_data.get('name'),
+                        program_name,
+                        layout_data.get('level', '01'),
+                        layout_data.get('line_start', 0),
+                        layout_data.get('line_end', 0),
+                        layout_data.get('source_code', ''),
+                        len(layout_data.get('fields', []))
+                    ))
+                    
+                    layout_id = cursor.lastrowid
+                    logger.info(f"Inserted record layout with ID: {layout_id}")
+                    
+                    # Store field details for this layout
+                    fields = layout_data.get('fields', [])
+                    logger.info(f"Processing {len(fields)} fields for layout: {layout_name}")
+                    
+                    for field_idx, field in enumerate(fields, 1):
+                        try:
+                            logger.debug(f"Processing field {field_idx}/{len(fields)}: {field.get('name', 'UNNAMED')}")
+                            self._store_field_details_internal(session_id, field, program_name, layout_id, cursor)
+                        except Exception as field_error:
+                            logger.error(f"Error storing field {field_idx} ({field.get('name', 'UNNAMED')}): {str(field_error)}")
+                            # Continue with other fields even if one fails
+                            continue
+                    
+                    logger.info(f"Successfully stored record layout: {layout_name} with {len(fields)} fields")
+                    return  # Success, exit retry loop
+                    
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                    logger.warning(f"Database locked storing record layout {layout_name}, attempt {attempt + 1}, retrying...")
+                    time.sleep(1 + attempt)  # Incremental backoff
+                    continue
+                else:
+                    logger.error(f"Error storing record layout {layout_name}: {str(e)}")
+                    raise
+            except Exception as e:
+                logger.error(f"Error storing record layout {layout_name}: {str(e)}")
+                logger.error(f"Layout data: {json.dumps(layout_data, indent=2, default=str)}")
+                raise
+        
+        # If we get here, all retries failed
+        raise sqlite3.OperationalError(f"Failed to store record layout {layout_name} after {max_retries} attempts")
+    
+    def _store_field_details_internal(self, session_id: str, field_data: Dict, 
+                                    program_name: str, layout_id: int, cursor):
+        """Internal method to store field details using existing cursor"""
+        field_name = field_data.get('name', 'UNNAMED_FIELD')
+        logger.debug(f"Storing field details: {field_name}")
+        
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT OR REPLACE INTO record_layouts 
-                    (session_id, layout_name, program_name, level_number, 
-                     line_start, line_end, source_code, fields_count)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (session_id, layout_data.get('name'), program_name,
-                      layout_data.get('level', '01'),
-                      layout_data.get('line_start', 0),
-                      layout_data.get('line_end', 0),
-                      layout_data.get('source_code', ''),
-                      len(layout_data.get('fields', []))))
-                
-                layout_id = cursor.lastrowid
-                
-                # Store field details for this layout
-                for field in layout_data.get('fields', []):
-                    self.store_field_details(session_id, field, program_name, layout_id)
-                
-                conn.commit()
+            cursor.execute('''
+                INSERT INTO field_analysis_details 
+                (session_id, field_id, field_name, program_name, operation_type,
+                 line_number, code_snippet, usage_type, source_field, target_field,
+                 business_purpose, analysis_confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                session_id, 
+                layout_id, 
+                field_name,
+                program_name, 
+                field_data.get('operation_type', 'DEFINITION'),
+                field_data.get('line_number', 0), 
+                self._generate_field_code_snippet(field_data),
+                field_data.get('usage', 'UNKNOWN'), 
+                field_data.get('source_field', ''),
+                field_data.get('target_field', ''), 
+                field_data.get('business_purpose', f"Field definition for {field_name}"),
+                field_data.get('confidence', 0.8)
+            ))
+            
+            logger.debug(f"Successfully stored field details for: {field_name}")
+            
         except Exception as e:
-            logger.error(f"Error storing record layout: {str(e)}")
+            logger.error(f"Error in _store_field_details_internal for field {field_name}: {str(e)}")
+            logger.error(f"Field data: {json.dumps(field_data, indent=2, default=str)}")
+            raise
+    
+    def _generate_field_code_snippet(self, field_data: Dict) -> str:
+        """Generate a code snippet for the field definition"""
+        try:
+            level = field_data.get('level', '05')
+            name = field_data.get('name', 'UNNAMED')
+            picture = field_data.get('picture', '')
+            usage = field_data.get('usage', '')
+            
+            snippet = f"{level} {name}"
+            if picture:
+                snippet += f" PIC {picture}"
+            if usage:
+                snippet += f" USAGE {usage}"
+            
+            return snippet.strip()
+            
+        except Exception as e:
+            logger.warning(f"Error generating code snippet for field: {str(e)}")
+            return field_data.get('code_snippet', f"Field: {field_data.get('name', 'UNKNOWN')}")
     
     def store_field_details(self, session_id: str, field_data: Dict, 
                           program_name: str, layout_id: int = None):
-        """Store field analysis details"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO field_analysis_details 
-                    (session_id, field_id, field_name, program_name, operation_type,
-                     line_number, code_snippet, usage_type, source_field, target_field,
-                     business_purpose, analysis_confidence)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (session_id, layout_id, field_data.get('name'),
-                      program_name, field_data.get('operation_type'),
-                      field_data.get('line_number', 0), field_data.get('code_snippet', ''),
-                      field_data.get('usage', 'UNKNOWN'), field_data.get('source_field', ''),
-                      field_data.get('target_field', ''), field_data.get('business_purpose', ''),
-                      field_data.get('confidence', 0.8)))
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Error storing field details: {str(e)}")
+        """Store field analysis details with retry logic (public method)"""
+        field_name = field_data.get('name', 'UNNAMED_FIELD')
+        logger.debug(f"Public store_field_details called for: {field_name}")
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    self._store_field_details_internal(session_id, field_data, program_name, layout_id, cursor)
+                    return  # Success, exit retry loop
+                    
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                    logger.warning(f"Database locked storing field details for {field_name}, attempt {attempt + 1}, retrying...")
+                    time.sleep(1 + attempt)  # Incremental backoff
+                    continue
+                else:
+                    logger.error(f"Error storing field details for {field_name}: {str(e)}")
+                    raise
+            except Exception as e:
+                logger.error(f"Error storing field details for {field_name}: {str(e)}")
+                raise
+        
+        # If we get here, all retries failed
+        raise sqlite3.OperationalError(f"Failed to store field details for {field_name} after {max_retries} attempts")
     
     def store_field_mappings(self, session_id: str, target_file: str, mappings: List[Dict]):
         """Store field mapping analysis results"""
@@ -641,7 +543,6 @@ class DatabaseManager:
                           mapping.get('derivation_logic'), json.dumps(mapping.get('programs_involved', [])),
                           mapping.get('confidence_score', 0.0)))
                 
-                conn.commit()
                 logger.info(f"Stored {len(mappings)} field mappings for {target_file}")
         except Exception as e:
             logger.error(f"Error storing field mappings: {str(e)}")
@@ -791,6 +692,8 @@ class DatabaseManager:
                 ''', (session_id,))
                 component_counts = {row[0]: row[1] for row in cursor.fetchall()}
                 
+                # Field mapping counts
+
                 # Field counts
                 cursor.execute('''
                     SELECT COUNT(DISTINCT field_name) as total_fields
@@ -847,7 +750,6 @@ class DatabaseManager:
                 ''', (session_id, conversation_id, message_type, content,
                       json.dumps(context_used) if context_used else None,
                       tokens_used, processing_time_ms))
-                conn.commit()
         except Exception as e:
             logger.error(f"Error storing chat message: {str(e)}")
     
