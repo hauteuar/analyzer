@@ -394,51 +394,51 @@ class DatabaseManager:
                 
                 # Store record layouts if present (skip if already stored by component extractor)
                 # Replace the hanging section with this:
-if component_type == 'PROGRAM' and 'record_layouts' in analysis_result:
-    try:
-        logger.info(f"Checking for existing layouts for {component_name}...")
-        
-        # Add timeout protection for the database query
-        existing_layouts = []
-        try:
-            # Quick check with timeout
-            with sqlite3.connect(self.db_path, timeout=5.0) as check_conn:
-                cursor = check_conn.cursor()
-                cursor.execute('''
-                    SELECT COUNT(*) FROM record_layouts 
-                    WHERE session_id = ? AND program_name = ?
-                ''', (session_id, component_name))
-                count = cursor.fetchone()[0]
-                existing_layouts = ['dummy'] if count > 0 else []
-                logger.info(f"Found {count} existing layouts for {component_name}")
-        except sqlite3.OperationalError as db_error:
-            logger.warning(f"Database timeout checking layouts: {str(db_error)}")
-            # Assume no existing layouts to avoid hanging
-            existing_layouts = []
-        
-        if not existing_layouts:
-            record_layouts = analysis_result['record_layouts']
-            logger.info(f"Storing {len(record_layouts)} record layouts for {component_name}")
-            
-            for i, layout_data in enumerate(record_layouts, 1):
-                try:
-                    logger.info(f"Storing layout {i}/{len(record_layouts)}: {layout_data.get('name', 'unknown')}")
-                    self.store_record_layout(session_id, layout_data, component_name)
-                    logger.info(f"Successfully stored layout {i}/{len(record_layouts)}")
-                except Exception as layout_error:
-                    logger.error(f"Error storing layout {layout_data.get('name', 'unknown')}: {str(layout_error)}")
-                    # Continue with next layout instead of failing completely
-                    continue
-            
-            logger.info(f"Completed storing all {len(record_layouts)} layouts for {component_name}")
-        else:
-            logger.info(f"Layouts already exist for {component_name}, skipping storage")
-            
-    except Exception as layout_section_error:
-        logger.error(f"Error in layout storage section for {component_name}: {str(layout_section_error)}")
-        # Don't let layout storage failure block component storage
-        pass
-
+                if component_type == 'PROGRAM' and 'record_layouts' in analysis_result:
+                    try:
+                        logger.info(f"Checking for existing layouts for {component_name}...")
+                        
+                        # Add timeout protection for the database query
+                        existing_layouts = []
+                        try:
+                            # Quick check with timeout
+                            with sqlite3.connect(self.db_path, timeout=5.0) as check_conn:
+                                cursor = check_conn.cursor()
+                                cursor.execute('''
+                                    SELECT COUNT(*) FROM record_layouts 
+                                    WHERE session_id = ? AND program_name = ?
+                                ''', (session_id, component_name))
+                                count = cursor.fetchone()[0]
+                                existing_layouts = ['dummy'] if count > 0 else []
+                                logger.info(f"Found {count} existing layouts for {component_name}")
+                        except sqlite3.OperationalError as db_error:
+                            logger.warning(f"Database timeout checking layouts: {str(db_error)}")
+                            # Assume no existing layouts to avoid hanging
+                            existing_layouts = []
+                        
+                        if not existing_layouts:
+                            record_layouts = analysis_result['record_layouts']
+                            logger.info(f"Storing {len(record_layouts)} record layouts for {component_name}")
+                            
+                            for i, layout_data in enumerate(record_layouts, 1):
+                                try:
+                                    logger.info(f"Storing layout {i}/{len(record_layouts)}: {layout_data.get('name', 'unknown')}")
+                                    self.store_record_layout(session_id, layout_data, component_name)
+                                    logger.info(f"Successfully stored layout {i}/{len(record_layouts)}")
+                                except Exception as layout_error:
+                                    logger.error(f"Error storing layout {layout_data.get('name', 'unknown')}: {str(layout_error)}")
+                                    # Continue with next layout instead of failing completely
+                                    continue
+                            
+                            logger.info(f"Completed storing all {len(record_layouts)} layouts for {component_name}")
+                        else:
+                            logger.info(f"Layouts already exist for {component_name}, skipping storage")
+                            
+                    except Exception as layout_section_error:
+                        logger.error(f"Error in layout storage section for {component_name}: {str(layout_section_error)}")
+                        # Don't let layout storage failure block component storage
+                    pass
+                logger.info(f"FINISHED storing component analysis for: {component_name}")
     
     def store_record_layout(self, session_id: str, layout_data: Dict, program_name: str):
         """Store record layout (01 level) information with enhanced logging and retry logic"""
