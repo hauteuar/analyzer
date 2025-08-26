@@ -439,6 +439,9 @@ class DatabaseManager:
                         # Don't let layout storage failure block component storage
                     pass
                 logger.info(f"FINISHED storing component analysis for: {component_name}")
+        except Exception as e:
+            logger.error(f"Error storing component {component_name}: {str(e)}")
+            
     
     def store_record_layout(self, session_id: str, layout_data: Dict, program_name: str):
         """Store record layout (01 level) information with enhanced logging and retry logic"""
