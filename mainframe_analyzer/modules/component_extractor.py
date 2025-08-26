@@ -43,7 +43,17 @@ class ComponentExtractor:
                 components = self._extract_generic_components(session_id, file_content, file_name, file_type)
             
             logger.info(f"✅ Component extraction completed: {len(components)} components extracted")
-            
+            for component in components:
+                try:
+                    self.db_manager.store_component_analysis(
+                        session_id, 
+                        component['name'], 
+                        component['type'], 
+                        file_name, 
+                        component
+                    )
+                except Exception as e:
+                    logger.error(f"Error storing component {component['name']}: {str(e)}")
             # Log component summary
             if components:
                 main_components = [c for c in components if c.get('type') in ['PROGRAM', 'JCL', 'COPYBOOK']]
@@ -65,7 +75,7 @@ class ComponentExtractor:
             return []
     
     def _extract_cobol_components(self, session_id: str, content: str, filename: str) -> List[Dict]:
-        """Extract components from COBOL program"""
+        """Extract components from COBOL program - FIXED VERSION"""
         logger.info(f"🔍 Parsing COBOL structure for {filename}...")
         components = []
         
@@ -77,15 +87,6 @@ class ComponentExtractor:
             parse_time = time.time() - start_time
             
             logger.info(f"📊 COBOL parsing completed in {parse_time:.2f}s:")
-            logger.info(f"   • Total lines: {parsed_data.get('total_lines', 0)}")
-            logger.info(f"   • Executable lines: {parsed_data.get('executable_lines', 0)}")
-            logger.info(f"   • Comment lines: {parsed_data.get('comment_lines', 0)}")
-            logger.info(f"   • Divisions: {len(parsed_data.get('divisions', []))}")
-            logger.info(f"   • Record layouts: {len(parsed_data.get('record_layouts', []))}")
-            logger.info(f"   • File operations: {len(parsed_data.get('file_operations', []))}")
-            logger.info(f"   • CICS operations: {len(parsed_data.get('cics_operations', []))}")
-            logger.info(f"   • MQ operations: {len(parsed_data.get('mq_operations', []))}")
-            logger.info(f"   • XML operations: {len(parsed_data.get('xml_operations', []))}")
             
             # Generate LLM summary for the main program
             logger.info("🤖 Generating LLM business summary...")
@@ -94,25 +95,18 @@ class ComponentExtractor:
             summary_time = time.time() - summary_start
             logger.info(f"🧠 LLM summary generated in {summary_time:.2f}s")
             
-            # Log business insights
-            if program_summary:
-                logger.info(f"💼 Business analysis:")
-                logger.info(f"   • Domain: {program_summary.get('business_domain', 'Unknown')}")
-                logger.info(f"   • Function: {program_summary.get('primary_function', 'Unknown')}")
-                logger.info(f"   • Complexity: {program_summary.get('complexity_score', 0):.1%}")
-            
-            # Create main program component with LLM summary
+            # Create main program component with ALL necessary data
             program_component = {
                 'name': filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', ''),
                 'friendly_name': parsed_data['friendly_name'],
                 'type': 'PROGRAM',
                 'file_path': filename,
-                'content': content,
+                'content': content,  # IMPORTANT: Store the actual source code
                 'total_lines': parsed_data['total_lines'],
                 'executable_lines': parsed_data.get('executable_lines', 0),
                 'comment_lines': parsed_data.get('comment_lines', 0),
                 'llm_summary': program_summary,
-                'business_purpose': program_summary.get('business_purpose', 'Analysis failed'),
+                'business_purpose': program_summary.get('business_purpose', ''),
                 'complexity_score': program_summary.get('complexity_score', 0.5),
                 'divisions': parsed_data['divisions'],
                 'file_operations': parsed_data['file_operations'],
@@ -121,18 +115,36 @@ class ComponentExtractor:
                 'cics_operations': parsed_data['cics_operations'],
                 'mq_operations': parsed_data.get('mq_operations', []),
                 'xml_operations': parsed_data.get('xml_operations', []),
-                'derived_components': []  # Will store derived component names
+                'derived_components': [],  # Will store derived component names
+                'record_layouts': []  # Store layout references
             }
             components.append(program_component)
             logger.info(f"📦 Created main program component: {program_component['name']}")
             
-            # Extract record layouts as separate components with summaries
+            # Process record layouts with enhanced field storage
             logger.info(f"🏗️  Processing {len(parsed_data['record_layouts'])} record layouts...")
             for i, layout in enumerate(parsed_data['record_layouts'], 1):
                 logger.info(f"📋 Processing record layout {i}/{len(parsed_data['record_layouts'])}: {layout.name}")
                 
                 layout_summary = self._generate_layout_summary(session_id, layout, parsed_data)
                 
+                # Convert layout to dict with enhanced field information
+                layout_dict = {
+                    'name': layout.name,
+                    'friendly_name': layout.friendly_name,
+                    'level': str(layout.level),
+                    'line_start': layout.line_start,
+                    'line_end': layout.line_end,
+                    'source_code': layout.source_code,
+                    'fields': []
+                }
+                
+                # Convert fields with enhanced information for database storage
+                for field in layout.fields:
+                    field_dict = self._field_to_dict_enhanced(field, content)
+                    layout_dict['fields'].append(field_dict)
+                
+                # Store layout component
                 layout_component = {
                     'name': layout.name,
                     'friendly_name': layout.friendly_name,
@@ -142,16 +154,16 @@ class ComponentExtractor:
                     'line_start': layout.line_start,
                     'line_end': layout.line_end,
                     'source_code': layout.source_code,
-                    'fields': [self._field_to_dict(field) for field in layout.fields],
+                    'fields': layout_dict['fields'],
                     'llm_summary': layout_summary,
                     'business_purpose': layout_summary.get('business_purpose', ''),
                     'usage_pattern': layout_summary.get('usage_pattern', 'UNKNOWN')
                 }
                 components.append(layout_component)
                 program_component['derived_components'].append(layout.name)
+                program_component['record_layouts'].append(layout_dict)
                 
                 logger.info(f"   ✅ Record layout {layout.name}: {len(layout.fields)} fields")
-                
                 # Store record layout in database
                 self.db_manager.store_record_layout(session_id, {
                     'name': layout.name,
@@ -160,7 +172,7 @@ class ComponentExtractor:
                     'line_start': layout.line_start,
                     'line_end': layout.line_end,
                     'source_code': layout.source_code,
-                    'fields': [self._field_to_dict(field) for field in layout.fields]
+                    'fields': [self._field_to_dict_enhanced(field, content) for field in layout.fields]  # NEW METHOD
                 }, program_component['name'])
             
             # Extract copybook references as components
@@ -555,7 +567,7 @@ Please provide a JSON response with:
                     'line_start': layout.line_start,
                     'line_end': layout.line_end,
                     'source_code': layout.source_code,
-                    'fields': [self._field_to_dict(field) for field in layout.fields]
+                    'fields': [self._field_to_dict_enhanced(field, content) for field in layout.fields]  # NEW METHOD
                 }
                 components.append(layout_component)
                 copybook_component['record_layouts'].append(layout_component['name'])
@@ -568,7 +580,7 @@ Please provide a JSON response with:
                     'line_start': layout.line_start,
                     'line_end': layout.line_end,
                     'source_code': layout.source_code,
-                    'fields': [self._field_to_dict(field) for field in layout.fields]
+                    'fields': [self._field_to_dict_enhanced(field, content) for field in layout.fields]  # NEW METHOD
                 }, copybook_component['name'])
             
             components.insert(0, copybook_component)  # Main component first
@@ -631,6 +643,105 @@ Please provide a JSON response with:
             'value': field.value,
             'line_number': field.line_number
         }
+    
+    def _field_to_dict_enhanced(self, field, program_content: str) -> Dict:
+        """Convert CobolField to dictionary with enhanced context"""
+        # Generate enhanced code snippet
+        code_snippet = f"{field.level:02d} {field.name}"
+        if field.picture:
+            code_snippet += f" PIC {field.picture}"
+        if field.usage:
+            code_snippet += f" USAGE {field.usage}"
+        if field.occurs > 0:
+            code_snippet += f" OCCURS {field.occurs}"
+        if field.redefines:
+            code_snippet += f" REDEFINES {field.redefines}"
+        if field.value:
+            code_snippet += f" VALUE {field.value}"
+            
+        # Analyze field usage in the program
+        usage_analysis = self.cobol_parser.analyze_field_usage(program_content.split('\n'), field.name)
+        
+        # Determine enhanced usage type
+        usage_type = self._determine_enhanced_usage_type(usage_analysis)
+        
+        return {
+            'name': field.name,
+            'friendly_name': field.friendly_name,
+            'level': field.level,
+            'picture': field.picture,
+            'usage': field.usage,
+            'occurs': field.occurs,
+            'redefines': field.redefines,
+            'value': field.value,
+            'line_number': field.line_number,
+            'code_snippet': code_snippet,
+            'usage_type': usage_type,
+            'operation_type': 'DEFINITION',
+            'business_purpose': self._infer_field_business_purpose(field.name, usage_analysis),
+            'confidence': 0.8,
+            'source_field': self._extract_source_field(usage_analysis),
+            'target_field': field.name if usage_analysis.get('target_operations') else ''
+        }
+    
+    def _infer_field_business_purpose(self, field_name: str, usage_analysis: Dict) -> str:
+        """Infer business purpose from field name and usage analysis"""
+        name_upper = field_name.upper()
+        
+        # Check usage patterns first
+        if usage_analysis.get('target_operations'):
+            return f"Input field - receives data from external sources"
+        elif usage_analysis.get('source_operations'):
+            return f"Output field - provides data to other processes"
+        elif usage_analysis.get('operations'):
+            op_types = [op.get('operation', '') for op in usage_analysis['operations']]
+            if 'CONDITION' in op_types:
+                return f"Control field - used in business logic decisions"
+            return f"Processing field - used in {', '.join(set(op_types)).lower()} operations"
+        
+        # Fallback to name-based inference
+        purpose_keywords = {
+            'CUST': 'Customer information field',
+            'ACCT': 'Account data field',
+            'ADDR': 'Address information field',
+            'DATE': 'Date field for temporal data',
+            'TIME': 'Time field for temporal data',
+            'AMT': 'Monetary amount field',
+            'QTY': 'Quantity field',
+            'NBR': 'Numeric identifier field',
+            'NO': 'Number/identifier field',
+            'CD': 'Code field for classification',
+            'DESC': 'Description field',
+            'NAME': 'Name field',
+            'TRAN': 'Transaction data field',
+            'BAL': 'Balance field',
+            'RATE': 'Rate/percentage field',
+            'FLG': 'Flag/indicator field',
+            'IND': 'Indicator field',
+            'SW': 'Switch field for control logic'
+        }
+        
+        for keyword, purpose in purpose_keywords.items():
+            if keyword in name_upper:
+                return purpose
+        
+        return f"Data field - {field_name} used in program processing"
+
+    def _extract_source_field(self, usage_analysis: Dict) -> str:
+        """Extract source field from usage analysis"""
+        source_ops = usage_analysis.get('source_operations', [])
+        if source_ops:
+            # Look for MOVE operations
+            for op in source_ops:
+                if 'MOVE' in op.get('line_content', ''):
+                    # Extract source from MOVE statement
+                    import re
+                    move_match = re.search(r'MOVE\s+([A-Z0-9\-\(\)]+)\s+TO', op['line_content'], re.IGNORECASE)
+                    if move_match:
+                        return move_match.group(1)
+        return ''
+
+    # Also add this method to store components with enhanced data
     
     def _llm_analyze_large_program(self, session_id: str, content: str, filename: str) -> List[Dict]:
         """Analyze large programs using chunked LLM calls"""
@@ -878,6 +989,25 @@ File Content ({filename}):
         else:
             return 'UNUSED'
     
+    def _determine_enhanced_usage_type(self, usage_analysis: Dict) -> str:
+        """Determine enhanced usage type from comprehensive analysis"""
+        if usage_analysis.get('target_operations') and usage_analysis.get('source_operations'):
+            return 'INPUT_OUTPUT'
+        elif usage_analysis.get('target_operations'):
+            return 'INPUT'
+        elif usage_analysis.get('source_operations'):
+            return 'OUTPUT'
+        elif usage_analysis.get('operations'):
+            # Check if used in conditions
+            conditions = [op for op in usage_analysis['operations'] if op.get('operation') == 'CONDITION']
+            if conditions:
+                return 'REFERENCE'
+            return 'DERIVED'
+        elif usage_analysis.get('references'):
+            return 'REFERENCE'
+        else:
+            return 'STATIC'
+
     def _map_operation_to_usage(self, operation_type: str) -> str:
         """Map operation type to usage type"""
         mapping = {

@@ -169,13 +169,14 @@ class ChatManager:
         return analysis
     
     def _build_context(self, session_id: str, query_analysis: Dict) -> Dict:
-        """Build relevant context based on query analysis"""
+        """Enhanced context building with actual source code"""
         context = {
             'field_details': [],
             'field_mappings': [],
             'record_layouts': [],
             'components': [],
-            'dependencies': []
+            'source_code_snippets': [],
+            'business_logic': []
         }
         
         try:
@@ -183,44 +184,68 @@ class ChatManager:
             query_type = query_analysis['type']
             
             if 'FIELD' in query_type and entities:
-                # Get field context
+                # Get comprehensive field context with source code
                 for entity in entities:
                     field_context = self.db_manager.get_context_for_field(session_id, entity)
                     if field_context:
                         context['field_details'].extend(field_context.get('field_details', []))
                         context['field_mappings'].extend(field_context.get('field_mappings', []))
+                        
+                        # Get actual source code snippets for fields
+                        source_snippets = self._get_field_source_code(session_id, entity)
+                        context['source_code_snippets'].extend(source_snippets)
             
             if 'LAYOUT' in query_type and entities:
-                # Get layout context
+                # Get layout context with full source code
                 for entity in entities:
                     layouts = self.db_manager.get_record_layouts(session_id)
                     matching_layouts = [l for l in layouts if entity.upper() in l['layout_name'].upper()]
                     context['record_layouts'].extend(matching_layouts)
                     
-                    if matching_layouts:
-                        # Get field matrix for these layouts
-                        for layout in matching_layouts:
-                            field_matrix = self.db_manager.get_field_matrix(session_id, layout['layout_name'])
-                            context['field_details'].extend(field_matrix)
+                    # Get source code for each layout
+                    for layout in matching_layouts:
+                        if layout.get('source_code'):
+                            context['source_code_snippets'].append({
+                                'type': 'RECORD_LAYOUT',
+                                'name': layout['layout_name'],
+                                'source': layout['source_code'],
+                                'line_start': layout.get('line_start', 0),
+                                'line_end': layout.get('line_end', 0)
+                            })
             
             if 'PROGRAM' in query_type and entities:
-                # Get program context
+                # Get program context with source code
                 for entity in entities:
                     components = self.db_manager.get_session_components(session_id)
                     matching_components = [c for c in components if entity.upper() in c['component_name'].upper()]
                     context['components'].extend(matching_components)
+                    
+                    # Get program source code snippets
+                    for component in matching_components:
+                        try:
+                            analysis_result = json.loads(component.get('analysis_result_json', '{}'))
+                            if analysis_result.get('content'):
+                                # Get relevant code snippets (first 50 lines for context)
+                                content_lines = analysis_result['content'].split('\n')
+                                preview_lines = content_lines[:50]
+                                context['source_code_snippets'].append({
+                                    'type': 'PROGRAM',
+                                    'name': component['component_name'],
+                                    'source': '\n'.join(preview_lines),
+                                    'total_lines': len(content_lines)
+                                })
+                        except:
+                            continue
             
-            # If no specific entities found, get general context based on intent
+            # If no specific entities, get general context with examples
             if not entities and query_analysis['intent'] != 'unknown':
-                context = self._build_general_context(session_id, query_analysis)
+                context = self._build_general_context_enhanced(session_id, query_analysis)
             
-            # Limit context size to budget
-            context = self._limit_context_size(context)
+            return context
             
         except Exception as e:
-            logger.error(f"Error building context: {str(e)}")
-        
-        return context
+            logger.error(f"Error building enhanced context: {str(e)}")
+            return context
     
     def _build_general_context(self, session_id: str, query_analysis: Dict) -> Dict:
         """Build general context for queries without specific entities"""
@@ -304,73 +329,104 @@ class ChatManager:
             logger.error(f"Error reducing context size: {str(e)}")
             return {}
     
-    def _create_chat_prompt(self, message: str, context: Dict, 
-                          conversation_history: List[Dict], query_analysis: Dict) -> str:
-        """Create chat prompt with context and history"""
+    def _get_field_source_code(self, session_id: str, field_name: str) -> List[Dict]:
+        """Get actual source code snippets where field is used"""
+        snippets = []
         
-        # Base system prompt
+        try:
+            # Get field details with code snippets
+            field_details = self.db_manager.get_context_for_field(session_id, field_name)
+            
+            for detail in field_details.get('field_details', []):
+                if detail.get('code_snippet'):
+                    snippets.append({
+                        'type': 'FIELD_USAGE',
+                        'field_name': detail['field_name'],
+                        'program': detail.get('program_name', 'Unknown'),
+                        'operation': detail.get('operation_type', 'Unknown'),
+                        'line_number': detail.get('line_number', 0),
+                        'source': detail['code_snippet'],
+                        'business_purpose': detail.get('business_purpose', '')
+                    })
+        
+        except Exception as e:
+            logger.error(f"Error getting field source code: {str(e)}")
+        
+        return snippets
+
+    def _create_chat_prompt(self, message: str, context: Dict, 
+                               conversation_history: List[Dict], query_analysis: Dict) -> str:
+        """Enhanced chat prompt with actual source code context"""
+        
         system_prompt = """You are an expert mainframe code analyst assistant. You help users understand COBOL programs, field mappings, record layouts, and data relationships.
 
-Key guidelines:
-- Provide accurate, helpful information based on the context provided
-- Use friendly, technical language appropriate for mainframe developers
-- Reference specific field names, programs, and layouts when available in context
-- Explain business logic and data relationships clearly
-- If asked about conversions, provide both COBOL and Oracle equivalents
-- Always base your responses on the provided context data
-
-"""
+    Key guidelines:
+    - Provide accurate, helpful information based on the context provided
+    - Always reference specific source code when available
+    - Explain business logic and data relationships clearly
+    - Use technical language appropriate for mainframe developers
+    - When discussing field usage, show actual COBOL code examples
+    - Explain both the technical and business aspects of the code
+    """
         
-        # Add context information
+        # Enhanced context section with source code
         context_prompt = "\nCONTEXT INFORMATION:\n"
         
+        if context.get('source_code_snippets'):
+            context_prompt += "\nSOURCE CODE EXAMPLES:\n"
+            for snippet in context['source_code_snippets'][:5]:
+                context_prompt += f"\n--- {snippet['type']}: {snippet['name']} ---\n"
+                if snippet.get('line_number'):
+                    context_prompt += f"Line {snippet['line_number']}: "
+                context_prompt += f"{snippet['source']}\n"
+                if snippet.get('business_purpose'):
+                    context_prompt += f"Purpose: {snippet['business_purpose']}\n"
+        
         if context.get('field_details'):
-            context_prompt += "\nField Analysis Details:\n"
-            for field in context['field_details'][:5]:  # Limit to 5 for prompt size
-                context_prompt += f"- {field['field_name']} ({field.get('friendly_name', 'N/A')}): {field.get('usage_type', 'Unknown')} usage in {field.get('program_name', 'N/A')}\n"
+            context_prompt += "\nFIELD ANALYSIS:\n"
+            for field in context['field_details'][:5]:
+                context_prompt += f"- {field['field_name']} ({field.get('friendly_name', 'N/A')})\n"
+                context_prompt += f"  Usage: {field.get('usage_type', 'Unknown')} in {field.get('program_name', 'N/A')}\n"
+                context_prompt += f"  Operation: {field.get('operation_type', 'N/A')}\n"
                 if field.get('code_snippet'):
-                    context_prompt += f"  Code: {field['code_snippet'][:100]}...\n"
+                    context_prompt += f"  Code: {field['code_snippet']}\n"
+                context_prompt += f"  Purpose: {field.get('business_purpose', 'N/A')}\n\n"
         
         if context.get('field_mappings'):
-            context_prompt += "\nField Mappings:\n"
+            context_prompt += "\nFIELD MAPPINGS:\n"
             for mapping in context['field_mappings'][:3]:
-                context_prompt += f"- {mapping['field_name']}: {mapping.get('mainframe_data_type', 'N/A')} -> {mapping.get('oracle_data_type', 'N/A')}\n"
-                context_prompt += f"  Business Logic: {mapping.get('business_logic_type', 'N/A')} - {mapping.get('business_logic_description', 'N/A')}\n"
+                context_prompt += f"- {mapping['field_name']}: {mapping.get('mainframe_data_type', 'N/A')} → {mapping.get('oracle_data_type', 'N/A')}\n"
+                context_prompt += f"  Business Logic: {mapping.get('business_logic_description', 'N/A')}\n"
+                context_prompt += f"  Population: {mapping.get('population_source', 'N/A')}\n\n"
         
         if context.get('record_layouts'):
-            context_prompt += "\nRecord Layouts:\n"
+            context_prompt += "\nRECORD LAYOUTS:\n"
             for layout in context['record_layouts'][:3]:
-                context_prompt += f"- {layout['layout_name']} ({layout.get('friendly_name', 'N/A')}): Level {layout.get('level_number', '01')} in {layout.get('program_name', 'N/A')}\n"
-        
-        if context.get('components'):
-            context_prompt += "\nProgram Components:\n"
-            for component in context['components'][:3]:
-                context_prompt += f"- {component['component_name']} ({component.get('component_type', 'N/A')}): {component.get('total_lines', 0)} lines\n"
-        
-        if context.get('session_summary'):
-            summary = context['session_summary']
-            context_prompt += f"\nSession Overview:\n"
-            context_prompt += f"- Total Components: {summary.get('total_components', 0)}\n"
-            context_prompt += f"- Total Fields: {summary.get('total_fields', 0)}\n"
-            context_prompt += f"- Component Types: {', '.join(summary.get('component_counts', {}).keys())}\n"
+                context_prompt += f"- {layout['layout_name']} (Level {layout.get('level_number', '01')})\n"
+                context_prompt += f"  Program: {layout.get('program_name', 'N/A')}\n"
+                context_prompt += f"  Fields: {layout.get('fields_count', 0)}\n"
+                if layout.get('source_code'):
+                    # Show first few lines of layout source
+                    source_lines = layout['source_code'].split('\n')[:3]
+                    context_prompt += f"  Source: {chr(10).join(source_lines)}...\n\n"
         
         # Add conversation history
-        history_prompt = "\nCONVERSATION HISTORY:\n"
-        for msg in conversation_history[-3:]:  # Last 3 messages
+        history_prompt = "\nRECENT CONVERSATION:\n"
+        for msg in conversation_history[-3:]:
             role = "User" if msg['message_type'] == 'user' else "Assistant"
             content = msg['message_content'][:200] + "..." if len(msg['message_content']) > 200 else msg['message_content']
             history_prompt += f"{role}: {content}\n"
         
-        # Add current query information
-        query_info = f"\nCURRENT QUERY ANALYSIS:\n"
-        query_info += f"Query Type: {query_analysis['type']}\n"
+        # Query analysis
+        query_info = f"\nQUERY ANALYSIS:\n"
+        query_info += f"Type: {query_analysis['type']}\n"
         query_info += f"Intent: {query_analysis['intent']}\n"
         if query_analysis['entities']:
-            query_info += f"Entities Found: {', '.join(query_analysis['entities'])}\n"
+            query_info += f"Entities: {', '.join(query_analysis['entities'])}\n"
         
         # Construct final prompt
         final_prompt = system_prompt + context_prompt + history_prompt + query_info
         final_prompt += f"\nUSER QUESTION: {message}\n\n"
-        final_prompt += "Please provide a helpful response based on the context and conversation history above."
+        final_prompt += "Please provide a detailed response based on the source code and context above. Include specific code examples when relevant."
         
         return final_prompt

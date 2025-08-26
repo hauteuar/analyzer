@@ -2175,78 +2175,92 @@
         }
 
         // Display components in hierarchical structure
-        function displayComponentsHierarchy(components) {
-            const mainProgramsBody = document.getElementById('mainProgramsTableBody');
-            const derivedComponentsBody = document.getElementById('derivedComponentsTableBody');
-            
-            mainProgramsBody.innerHTML = '';
-            derivedComponentsBody.innerHTML = '';
+        // Fixed displayComponentsHierarchy function - replace the existing one in your HTML
+function displayComponentsHierarchy(components) {
+    const mainProgramsBody = document.getElementById('mainProgramsTableBody');
+    const derivedComponentsBody = document.getElementById('derivedComponentsTableBody');
+    
+    mainProgramsBody.innerHTML = '';
+    derivedComponentsBody.innerHTML = '';
 
-            // Separate main programs from derived components
-            const mainPrograms = components.filter(c => c.component_type === 'PROGRAM');
-            const derivedComponents = components.filter(c => c.component_type !== 'PROGRAM');
+    // Separate main programs from derived components
+    const mainPrograms = components.filter(c => c.component_type === 'PROGRAM');
+    const derivedComponents = components.filter(c => c.component_type !== 'PROGRAM');
 
-            if (mainPrograms.length === 0) {
-                mainProgramsBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No main programs available</td></tr>';
-                return;
+    if (mainPrograms.length === 0) {
+        mainProgramsBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No main programs available</td></tr>';
+        return;
+    }
+
+    // Display main programs
+    mainPrograms.forEach(program => {
+        const row = document.createElement('tr');
+        
+        // Parse analysis_result_json to get LLM summary
+        let llmSummary = {};
+        let businessPurpose = 'Analysis pending';
+        let complexity = 0;
+        let derivedCount = 0;
+        
+        try {
+            if (program.analysis_result_json) {
+                const analysisResult = JSON.parse(program.analysis_result_json);
+                llmSummary = analysisResult.llm_summary || {};
+                businessPurpose = program.business_purpose || 
+                                llmSummary.business_purpose || 
+                                analysisResult.business_purpose || 
+                                'Analysis pending';
+                complexity = llmSummary.complexity_score || 0;
+                derivedCount = analysisResult.derived_components ? analysisResult.derived_components.length : 0;
             }
-
-            // Display main programs
-            mainPrograms.forEach(program => {
-                const row = document.createElement('tr');
-                
-                const llmSummary = program.llm_summary || {};
-                // Make sure we're reading the business_purpose correctly
-                const businessPurpose = component.business_purpose || 
-                       (component.llm_summary && component.llm_summary.business_purpose) || 
-                       'Analysis pending';
-                const complexity = llmSummary.complexity_score || 0;
-                const derivedCount = program.derived_components ? program.derived_components.length : 0;
-                
-                row.innerHTML = `
-                    <td>
-                        <strong>${program.component_name}</strong>
-                        <br><small class="text-muted">${program.friendly_name || ''}</small>
-                        <div class="complexity-bar">
-                            <div class="complexity-fill" style="width: ${complexity * 100}%"></div>
-                        </div>
-                    </td>
-                    <td style="max-width: 250px;">
-                        <div class="business-purpose">${businessPurpose}</div>
-                        ${llmSummary.business_domain ? `<span class="domain-badge domain-${llmSummary.business_domain.toLowerCase()}">${llmSummary.business_domain}</span>` : ''}
-                    </td>
-                    <td>
-                        <div><strong>${program.total_lines || 0}</strong> total</div>
-                        <div><small>${program.executable_lines || 0} executable</small></div>
-                        <div><small>${program.comment_lines || 0} comments</small></div>
-                    </td>
-                    <td>
-                        <div class="metric">
-                            <span class="metric-value">${(complexity * 100).toFixed(0)}%</span>
-                            <span class="metric-label">Complexity</span>
-                        </div>
-                    </td>
-                    <td>
-                        <span class="derived-count">${derivedCount}</span>
-                        ${derivedCount > 0 ? `<button class="expand-btn" onclick="toggleDerivedComponents('${program.component_name}')">View Derived</button>` : ''}
-                    </td>
-                    <td>
-                        <button class="btn btn-secondary btn-sm" onclick="viewComponentDetails('${program.component_name}')">View Details</button>
-                    </td>
-                `;
-                mainProgramsBody.appendChild(row);
-            });
-
-            // Store derived components for display when expanded
-            window.derivedComponentsData = {};
-            derivedComponents.forEach(component => {
-                const parent = component.parent_program || 'Unknown';
-                if (!window.derivedComponentsData[parent]) {
-                    window.derivedComponentsData[parent] = [];
-                }
-                window.derivedComponentsData[parent].push(component);
-            });
+        } catch (e) {
+            console.error('Error parsing analysis result:', e);
         }
+        
+        row.innerHTML = `
+            <td>
+                <strong>${program.component_name}</strong>
+                <br><small class="text-muted">${program.friendly_name || ''}</small>
+                <div class="complexity-bar">
+                    <div class="complexity-fill" style="width: ${complexity * 100}%"></div>
+                </div>
+            </td>
+            <td style="max-width: 250px;">
+                <div class="business-purpose">${businessPurpose}</div>
+                ${llmSummary.business_domain ? `<span class="domain-badge domain-${llmSummary.business_domain.toLowerCase()}">${llmSummary.business_domain}</span>` : ''}
+            </td>
+            <td>
+                <div><strong>${program.total_lines || 0}</strong> total</div>
+                <div><small>${program.executable_lines || 0} executable</small></div>
+                <div><small>${program.comment_lines || 0} comments</small></div>
+            </td>
+            <td>
+                <div class="metric">
+                    <span class="metric-value">${(complexity * 100).toFixed(0)}%</span>
+                    <span class="metric-label">Complexity</span>
+                </div>
+            </td>
+            <td>
+                <span class="derived-count">${derivedCount}</span>
+                ${derivedCount > 0 ? `<button class="expand-btn" onclick="toggleDerivedComponents('${program.component_name}')">View Derived</button>` : ''}
+            </td>
+            <td>
+                <button class="btn btn-secondary btn-sm" onclick="viewComponentDetails('${program.component_name}')">View Details</button>
+            </td>
+        `;
+        mainProgramsBody.appendChild(row);
+    });
+
+    // Store derived components for display when expanded
+    window.derivedComponentsData = {};
+    derivedComponents.forEach(component => {
+        const parent = component.parent_program || component.parent_copybook || 'Unknown';
+        if (!window.derivedComponentsData[parent]) {
+            window.derivedComponentsData[parent] = [];
+        }
+        window.derivedComponentsData[parent].push(component);
+    });
+}
 
         // Toggle derived components display
         function toggleDerivedComponents(programName) {
