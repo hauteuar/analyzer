@@ -101,7 +101,7 @@ class ComponentExtractor:
             
             # Create main program component with ALL necessary data
             program_component = {
-                'component_name': filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', ''),
+                'name': filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', ''),  # FIXED: was 'component_name'
                 'friendly_name': parsed_data['friendly_name'],
                 'type': 'PROGRAM',
                 'file_path': filename,
@@ -121,12 +121,10 @@ class ComponentExtractor:
                 'xml_operations': parsed_data.get('xml_operations', []),
                 'derived_components': [],  # Will store derived component names
                 'record_layouts': [],  # Store layout references
-                'total_fields': sum(len(layout_dict['fields']) for layout_dict in program_component['record_layouts']),
                 'fields': []  # Flatten all fields for frontend access
             }
-            # Flatten all fields into the main component for frontend access
-            for layout_dict in program_component['record_layouts']:
-                program_component['fields'].extend(layout_dict['fields'])
+            
+            # FIXED: Calculate total_fields after record_layouts is populated
             components.append(program_component)
             logger.info(f"📦 Created main program component: {program_component['name']}")
             
@@ -135,54 +133,103 @@ class ComponentExtractor:
             for i, layout in enumerate(parsed_data['record_layouts'], 1):
                 logger.info(f"📋 Processing record layout {i}/{len(parsed_data['record_layouts'])}: {layout.name}")
                 
-                layout_summary = self._generate_layout_summary(session_id, layout, parsed_data)
-                
-                # Convert layout to dict with enhanced field information
-                layout_dict = {
-                    'name': layout.name,
-                    'friendly_name': layout.friendly_name,
-                    'level': str(layout.level),
-                    'line_start': layout.line_start,
-                    'line_end': layout.line_end,
-                    'source_code': layout.source_code,
-                    'fields': []
-                }
-                
-                # Convert fields with enhanced information for database storage
-                for field in layout.fields:
-                    field_dict = self._field_to_dict_enhanced(field, content)
-                    layout_dict['fields'].append(field_dict)
-                
-                # Store layout component
-                layout_component = {
-                    'name': layout.name,
-                    'friendly_name': layout.friendly_name,
-                    'type': 'RECORD_LAYOUT',
-                    'parent_program': program_component['name'],
-                    'level': layout.level,
-                    'line_start': layout.line_start,
-                    'line_end': layout.line_end,
-                    'source_code': layout.source_code,
-                    'fields': layout_dict['fields'],
-                    'llm_summary': layout_summary,
-                    'business_purpose': layout_summary.get('business_purpose', ''),
-                    'usage_pattern': layout_summary.get('usage_pattern', 'UNKNOWN')
-                }
-                components.append(layout_component)
-                program_component['derived_components'].append(layout.name)
-                program_component['record_layouts'].append(layout_dict)
-                
-                logger.info(f"   ✅ Record layout {layout.name}: {len(layout.fields)} fields")
-                # Store record layout in database
-                self.db_manager.store_record_layout(session_id, {
-                    'name': layout.name,
-                    'friendly_name': layout.friendly_name,
-                    'level': str(layout.level),
-                    'line_start': layout.line_start,
-                    'line_end': layout.line_end,
-                    'source_code': layout.source_code,
-                    'fields': [self._field_to_dict_enhanced(field, content) for field in layout.fields]  # NEW METHOD
-                }, program_component['name'])
+                try:
+                    layout_summary = self._generate_layout_summary(session_id, layout, parsed_data)
+                    
+                    # Convert layout to dict with enhanced field information
+                    layout_dict = {
+                        'name': layout.name,
+                        'friendly_name': layout.friendly_name,
+                        'level': str(layout.level),
+                        'line_start': layout.line_start,
+                        'line_end': layout.line_end,
+                        'source_code': layout.source_code,
+                        'fields': []
+                    }
+                    
+                    # Convert fields with enhanced information for database storage
+                    logger.debug(f"Converting {len(layout.fields)} fields for layout {layout.name}")
+                    for field_idx, field in enumerate(layout.fields, 1):
+                        try:
+                            field_dict = self._field_to_dict_enhanced(field, content)
+                            layout_dict['fields'].append(field_dict)
+                            logger.debug(f"  Field {field_idx}/{len(layout.fields)}: {field.name} converted")
+                        except Exception as field_error:
+                            logger.error(f"Error converting field {field.name}: {str(field_error)}")
+                            # Add basic field data as fallback
+                            layout_dict['fields'].append({
+                                'name': field.name,
+                                'level': field.level,
+                                'picture': getattr(field, 'picture', ''),
+                                'line_number': getattr(field, 'line_number', 0),
+                                'error': str(field_error)
+                            })
+                    
+                    # Store layout component
+                    layout_component = {
+                        'name': layout.name,
+                        'friendly_name': layout.friendly_name,
+                        'type': 'RECORD_LAYOUT',
+                        'parent_program': program_component['name'],
+                        'level': layout.level,
+                        'line_start': layout.line_start,
+                        'line_end': layout.line_end,
+                        'source_code': layout.source_code,
+                        'fields': layout_dict['fields'],
+                        'llm_summary': layout_summary,
+                        'business_purpose': layout_summary.get('business_purpose', ''),
+                        'usage_pattern': layout_summary.get('usage_pattern', 'UNKNOWN')
+                    }
+                    components.append(layout_component)
+                    program_component['derived_components'].append(layout.name)
+                    program_component['record_layouts'].append(layout_dict)
+                    
+                    # Flatten all fields into the main component for frontend access
+                    program_component['fields'].extend(layout_dict['fields'])
+                    
+                    logger.info(f"   ✅ Record layout {layout.name}: {len(layout.fields)} fields processed")
+                    
+                    # Store record layout in database with error handling and timeout
+                    logger.info(f"🗄️ Storing record layout {layout.name} in database...")
+                    try:
+                        # Add timeout protection
+                        import signal
+                        
+                        def timeout_handler(signum, frame):
+                            raise TimeoutError("Database operation timed out")
+                        
+                        # Set 30-second timeout for database operation
+                        signal.signal(signal.SIGALRM, timeout_handler)
+                        signal.alarm(30)
+                        
+                        self.db_manager.store_record_layout(session_id, {
+                            'name': layout.name,
+                            'friendly_name': layout.friendly_name,
+                            'level': str(layout.level),
+                            'line_start': layout.line_start,
+                            'line_end': layout.line_end,
+                            'source_code': layout.source_code,
+                            'fields': layout_dict['fields']
+                        }, program_component['name'])
+                        
+                        signal.alarm(0)  # Cancel timeout
+                        logger.info(f"✅ Successfully stored record layout {layout.name}")
+                        
+                    except TimeoutError:
+                        signal.alarm(0)
+                        logger.error(f"❌ Timeout storing record layout {layout.name} - skipping database storage")
+                    except Exception as db_error:
+                        logger.error(f"❌ Database error storing record layout {layout.name}: {str(db_error)}")
+                        # Continue processing even if database storage fails
+                        continue
+                        
+                except Exception as layout_error:
+                    logger.error(f"❌ Error processing layout {layout.name}: {str(layout_error)}")
+                    # Continue with next layout
+                    continue
+            
+            # Update total_fields after processing all layouts
+            program_component['total_fields'] = len(program_component['fields'])
             
             # Extract copybook references as components
             if parsed_data['copybooks']:
@@ -282,24 +329,43 @@ class ComponentExtractor:
             if self.token_manager.needs_chunking(content):
                 logger.info("📄 File is large, using LLM chunked analysis...")
                 chunk_start = time.time()
-                enhanced_components = self._llm_analyze_large_program(session_id, content, filename)
-                chunk_time = time.time() - chunk_start
-                logger.info(f"🔄 Chunked LLM analysis completed in {chunk_time:.2f}s")
-                components.extend(enhanced_components)
+                try:
+                    enhanced_components = self._llm_analyze_large_program(session_id, content, filename)
+                    components.extend(enhanced_components)
+                    chunk_time = time.time() - chunk_start
+                    logger.info(f"🔄 Chunked LLM analysis completed in {chunk_time:.2f}s")
+                except Exception as chunk_error:
+                    logger.error(f"❌ Error in chunked LLM analysis: {str(chunk_error)}")
             
             # Extract field relationships and store in database
             logger.info("🔗 Extracting field relationships...")
             relationship_start = time.time()
-            self._extract_and_store_field_relationships(session_id, components, filename)
-            relationship_time = time.time() - relationship_start
-            logger.info(f"🔗 Field relationships extracted in {relationship_time:.2f}s")
+            try:
+                self._extract_and_store_field_relationships(session_id, components, filename)
+                relationship_time = time.time() - relationship_start
+                logger.info(f"🔗 Field relationships extracted in {relationship_time:.2f}s")
+            except Exception as rel_error:
+                logger.error(f"❌ Error extracting field relationships: {str(rel_error)}")
             
             total_time = time.time() - start_time
             logger.info(f"✅ COBOL component extraction completed in {total_time:.2f}s")
             
+            return components
+            
         except Exception as e:
             logger.error(f"❌ Error extracting COBOL components from {filename}: {str(e)}")
             logger.error(f"📍 Stack trace: {traceback.format_exc()}")
+            
+            # Return fallback component
+            return [{
+                'name': filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', ''),
+                'friendly_name': self.cobol_parser.generate_friendly_name(filename, 'Program'),
+                'type': 'PROGRAM',
+                'content': content,
+                'total_lines': len(content.split('\n')),
+                'error': str(e)
+            }]
+        
             
     def _generate_component_summary(self, session_id: str, parsed_data: Dict, component_type: str) -> Dict:
         """Generate LLM summary for component"""
