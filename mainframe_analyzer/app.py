@@ -499,7 +499,56 @@ def chat_query():
             'error': str(e),
             'response': 'Chat service error'
         })
-
+    
+@app.route('/api/record-layouts/<session_id>')
+def get_record_layouts_api(session_id):
+    """Get record layouts with friendly names"""
+    try:
+        layouts = analyzer.db_manager.get_record_layouts(session_id)
+        return jsonify({'success': True, 'layouts': layouts})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+    
+@app.route('/api/field-source-code/<session_id>/<field_name>')
+def get_field_source_code(session_id, field_name):
+    """Get source code context for a field"""
+    try:
+        context = analyzer.db_manager.get_context_for_field(session_id, field_name)
+        
+        if context and context.get('field_details'):
+            field_detail = context['field_details'][0]
+            source_code = field_detail.get('program_source_content', '')
+            
+            if not source_code:
+                # Get from component analysis
+                components = analyzer.db_manager.get_session_components(session_id)
+                program_name = field_detail.get('program_name', '')
+                
+                for comp in components:
+                    if comp['component_name'] == program_name:
+                        if comp.get('analysis_result_json'):
+                            analysis = json.loads(comp['analysis_result_json'])
+                            source_code = analysis.get('content', 'Source not available')
+                        break
+            
+            return jsonify({
+                'success': True,
+                'source_code': source_code or 'Source code not available',
+                'field_name': field_name
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'source_code': 'Field not found in analysis',
+                'field_name': field_name
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'source_code': 'Error loading source code'
+        })
 @app.route('/api/components/<session_id>')
 def get_components(session_id):
     """Debug version to see what's happening"""

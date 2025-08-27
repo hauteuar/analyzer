@@ -682,25 +682,37 @@ class DatabaseManager:
             return []
     
     def get_record_layouts(self, session_id: str, program_name: str = None) -> List[Dict]:
-        """Get record layouts for session or specific program"""
+        """Get record layouts with friendly names"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 if program_name:
                     cursor.execute('''
-                        SELECT * FROM record_layouts 
+                        SELECT id, layout_name, friendly_name, program_name, level_number,
+                            line_start, line_end, source_code, fields_count, business_purpose
+                        FROM record_layouts 
                         WHERE session_id = ? AND program_name = ?
                         ORDER BY layout_name
                     ''', (session_id, program_name))
                 else:
                     cursor.execute('''
-                        SELECT * FROM record_layouts 
+                        SELECT id, layout_name, friendly_name, program_name, level_number,
+                            line_start, line_end, source_code, fields_count, business_purpose
+                        FROM record_layouts 
                         WHERE session_id = ?
                         ORDER BY program_name, layout_name
                     ''', (session_id,))
                 
-                return [dict(row) for row in cursor.fetchall()]
+                layouts = []
+                for row in cursor.fetchall():
+                    layout_dict = dict(row)
+                    # Ensure we use the stored friendly name
+                    if not layout_dict['friendly_name']:
+                        layout_dict['friendly_name'] = self.generate_friendly_name(layout_dict['layout_name'], 'Record Layout')
+                    layouts.append(layout_dict)
+                
+                return layouts
         except Exception as e:
             logger.error(f"Error getting record layouts: {str(e)}")
             return []

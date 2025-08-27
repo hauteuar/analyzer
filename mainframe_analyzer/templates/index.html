@@ -2036,67 +2036,117 @@
         
         // Display field mappings in table
         function displayFieldMappings(mappings) {
-            const tbody = document.getElementById('fieldMappingTableBody');
-            tbody.innerHTML = '';
+    const tbody = document.getElementById('fieldMappingTableBody');
+    tbody.innerHTML = '';
 
-            if (!mappings || mappings.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No field mappings found</td></tr>';
-                return;
+    if (!mappings || mappings.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No field mappings found</td></tr>';
+        return;
+    }
+
+    mappings.forEach(mapping => {
+        const row = document.createElement('tr');
+        
+        // Extract operations for modal
+        const fieldOperations = extractFieldOperations(mapping);
+        const operationsJson = JSON.stringify(fieldOperations).replace(/"/g, '&quot;');
+        
+        // Fix population source display
+        let populationSource = mapping.population_source || 'N/A';
+        if (populationSource === 'N/A' && mapping.business_logic_description) {
+            // Try to extract from business logic description
+            if (mapping.business_logic_description.includes('from')) {
+                populationSource = mapping.business_logic_description;
             }
-
-            mappings.forEach(mapping => {
-                const row = document.createElement('tr');
-                
-                // Business logic badge
-                const businessLogicClass = getBadgeClass(mapping.business_logic_type);
-                const programsList = Array.isArray(mapping.programs_involved) 
-                    ? mapping.programs_involved.join(', ') 
-                    : (mapping.programs_involved || 'Unknown');
-
-                // Enhanced I/O classification display
-                let ioIndicator = '';
-                const populationSource = mapping.population_source || '';
-                if (populationSource.includes('CICS READ')) {
-                    ioIndicator = '<span class="io-badge io-input">📥 INPUT</span>';
-                } else if (populationSource.includes('CICS WRITE')) {
-                    ioIndicator = '<span class="io-badge io-output">📤 OUTPUT</span>';
-                } else if (populationSource.includes('CICS REWRITE')) {
-                    ioIndicator = '<span class="io-badge io-both">🔄 I/O</span>';
-                }
-
-                // Extract field operations from mapping data
-                const fieldOperations = extractFieldOperations(mapping);
-                const operationsJson = JSON.stringify(fieldOperations).replace(/"/g, '&quot;');
-
-                row.innerHTML = `
-                    <td>
-                        <strong style="cursor: pointer; color: #667eea; text-decoration: underline;" 
-                                onclick="showFieldOperations('${mapping.field_name}', '${operationsJson}')"
-                                title="Click to view all operations">
-                            ${mapping.field_name}
-                        </strong><br>
-                        <small class="text-muted">${mapping.friendly_name || ''}</small>
-                        <div class="io-indicator">${ioIndicator}</div>
-                        ${fieldOperations.length > 0 ? `<small class="text-info">${fieldOperations.length} operations</small>` : ''}
-                    </td>
-                    <td><code>${mapping.mainframe_data_type}</code></td>
-                    <td><code>${mapping.oracle_data_type}</code></td>
-                    <td>${mapping.mainframe_length}</td>
-                    <td>${mapping.oracle_length}</td>
-                    <td>
-                        ${mapping.population_source || 'N/A'}
-                        ${populationSource.includes('CICS') ? '<br><span class="cics-operation">CICS Operation</span>' : ''}
-                    </td>
-                    <td>
-                        <span class="badge ${businessLogicClass}">${mapping.business_logic_type}</span>
-                        <br><small>${mapping.business_logic_description || ''}</small>
-                    </td>
-                    <td>${programsList}</td>
-                `;
-                tbody.appendChild(row);
-            });
         }
 
+        row.innerHTML = `
+            <td>
+                <strong style="cursor: pointer; color: #667eea; text-decoration: underline;" 
+                        onclick="showFieldOperationsWithCode('${mapping.field_name}', '${operationsJson}', '${mapping.source_record_layout || ''}')"
+                        title="Click to view operations and source code">
+                    ${mapping.field_name}
+                </strong><br>
+                <small class="text-muted">${mapping.friendly_name || ''}</small>
+                ${fieldOperations.length > 0 ? `<br><small class="text-info">${fieldOperations.length} operations</small>` : ''}
+            </td>
+            <td><code>${mapping.mainframe_data_type}</code></td>
+            <td><code>${mapping.oracle_data_type}</code></td>
+            <td>${mapping.mainframe_length}</td>
+            <td>${mapping.oracle_length}</td>
+            <td><strong>${populationSource}</strong></td>
+            <td>
+                <span class="badge ${getBadgeClass(mapping.business_logic_type)}">${mapping.business_logic_type}</span>
+                <br><small>${mapping.business_logic_description || ''}</small>
+            </td>
+            <td>${Array.isArray(mapping.programs_involved) ? mapping.programs_involved.join(', ') : mapping.programs_involved || 'Unknown'}</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+async function showFieldOperationsWithCode(fieldName, operationsJson, layoutName) {
+    let operations;
+    
+    try {
+        operations = JSON.parse(operationsJson.replace(/&quot;/g, '"'));
+    } catch (error) {
+        operations = [];
+    }
+    
+    // Get source code from current session
+    let sourceCode = '';
+    try {
+        const response = await fetch(`/api/field-source-code/${currentSessionId}/${fieldName}`);
+        if (response.ok) {
+            const data = await response.json();
+            sourceCode = data.source_code || 'Source code not available';
+        }
+    } catch (error) {
+        sourceCode = 'Error loading source code';
+    }
+    
+    document.getElementById('fieldModalTitle').textContent = `${fieldName} - Operations & Source Code`;
+    
+    const content = document.getElementById('fieldOperationsContent');
+    content.innerHTML = `
+        <div style="margin-bottom: 1rem;">
+            <h5>Field: <code>${fieldName}</code> from <code>${layoutName}</code></h5>
+        </div>
+        
+        <div style="margin-bottom: 2rem;">
+            <h6>Operations (${operations.length}):</h6>
+            <div style="max-height: 200px; overflow-y: auto;">
+    `;
+    
+    operations.forEach((op, index) => {
+        const badgeClass = getBadgeClass(op.type);
+        content.innerHTML += `
+            <div style="border: 1px solid #dee2e6; border-radius: 6px; padding: 1rem; margin-bottom: 0.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <strong>Operation ${index + 1}: ${op.type.replace('_', ' ')}</strong>
+                    <span class="badge ${badgeClass}">${op.type}</span>
+                </div>
+                <div><strong>Description:</strong> ${op.description}</div>
+                <div><strong>Code:</strong> <code>${op.code}</code></div>
+            </div>
+        `;
+    });
+    
+    content.innerHTML += `
+            </div>
+        </div>
+        
+        <div>
+            <h6>Complete Source Code Context:</h6>
+            <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; max-height: 300px; overflow-y: auto;">
+                <pre style="margin: 0; white-space: pre-wrap; font-size: 0.8rem;">${sourceCode}</pre>
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('fieldOperationsModal').style.display = 'block';
+}
         // Function to extract field operations from mapping data
         function extractFieldOperations(mapping) {
             const operations = [];
@@ -2249,18 +2299,33 @@
         }
         // Add this function to load and display dependencies
         async function loadDependenciesVisualization() {
-            try {
-                const response = await fetch(`/api/dependencies/${currentSessionId}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success) {
-                        displayCityView(data.dependencies, data.dependency_groups);
-                    }
+    try {
+        // Get both dependencies and record layouts
+        const [depsResponse, layoutsResponse] = await Promise.all([
+            fetch(`/api/dependencies/${currentSessionId}`),
+            fetch(`/api/record-layouts/${currentSessionId}`)
+        ]);
+        
+        if (depsResponse.ok && layoutsResponse.ok) {
+            const depsData = await depsResponse.json();
+            const layoutsData = await layoutsResponse.json();
+            
+            if (depsData.success) {
+                // Create friendly name lookup
+                const friendlyNames = {};
+                if (layoutsData.success) {
+                    layoutsData.layouts.forEach(layout => {
+                        friendlyNames[layout.layout_name] = layout.friendly_name || layout.layout_name;
+                    });
                 }
-            } catch (error) {
-                console.error('Error loading dependencies:', error);
+                
+                displayCityView(depsData.dependencies, depsData.dependency_groups, friendlyNames);
             }
         }
+    } catch (error) {
+        console.error('Error loading dependencies:', error);
+    }
+}
 
         function displayCityView(dependencies, dependencyGroups) {
             // Clear all sections
@@ -2273,7 +2338,7 @@
                 return;
             }
             
-            const categorizedDeps = categorizeDependencies(dependencies);
+            const categorizedDeps = categorizeDependencies(dependencies, friendlyNames);
             
             // Populate each section
             populateFlowSection('inputSources', categorizedDeps.inputs, 'input');
@@ -2284,101 +2349,124 @@
         }
 
         function categorizeDependencies(dependencies) {
-            const categorized = {
-                inputs: new Set(),
-                interfaces: new Set(),
-                components: new Set(),
-                outputs: new Set(),
-                missing: new Set()
-            };
-            
-            dependencies.forEach(dep => {
-                const source = dep.source_component;
-                const target = dep.target_component;
-                const type = dep.relationship_type;
-                
-                // Add source as core component
-                categorized.components.add({
-                    name: source,
-                    type: 'PROGRAM',
-                    confidence: dep.confidence_score
-                });
-                
-                // Categorize based on relationship type
-                if (type === 'INPUT_FILE') {
-                    categorized.inputs.add({
-                        name: target,
-                        type: 'Input File',
-                        confidence: dep.confidence_score
-                    });
-                } else if (type === 'OUTPUT_FILE') {
-                    categorized.outputs.add({
-                        name: target,
-                        type: 'Output File',
-                        confidence: dep.confidence_score
-                    });
-                } else if (type === 'CICS_FILE') {
-                    categorized.interfaces.add({
-                        name: target,
-                        type: 'CICS File',
-                        confidence: dep.confidence_score
-                    });
-                } else if (type === 'PROGRAM_CALL') {
-                    // Check if target program exists
-                    const programExists = dependencies.some(d => d.source_component === target);
-                    
-                    if (!programExists) {
-                        categorized.missing.add({
-                            name: target,
-                            type: 'Missing Called Program',
-                            reason: 'Program called but not analyzed',
-                            confidence: dep.confidence_score
-                        });
-                    } else {
-                        categorized.components.add({
-                            name: target,
-                            type: 'Called Program',
-                            confidence: dep.confidence_score
-                        });
-                    }
-                }
+    const categorized = {
+        inputs: new Set(),
+        interfaces: new Set(),
+        components: new Set(),
+        outputs: new Set(),
+        missing: new Set()
+    };
+    
+    dependencies.forEach(dep => {
+        const source = dep.source_component;
+        const target = dep.target_component;
+        const type = dep.relationship_type;
+        
+        // Add source as core component with friendly name
+        categorized.components.add({
+        name: target,
+        friendly_name: friendlyNames[target] || generateFriendlyName(target),
+        type: 'Record Layout',
+        confidence: dep.confidence_score
+    });
+        
+        // Enhanced categorization
+        if (type === 'INPUT_FILE') {
+            categorized.inputs.add({
+                name: target,
+                friendly_name: generateFriendlyName(target),
+                type: 'Input File',
+                confidence: dep.confidence_score
             });
-            
-            // Convert Sets to Arrays
-            Object.keys(categorized).forEach(key => {
-                categorized[key] = Array.from(categorized[key]);
+        } else if (type === 'OUTPUT_FILE') {
+            categorized.outputs.add({
+                name: target,
+                friendly_name: generateFriendlyName(target),
+                type: 'Output File', 
+                confidence: dep.confidence_score
             });
-            
-            return categorized;
+        } else if (type === 'CICS_FILE') {
+            categorized.interfaces.add({
+                name: target,
+                friendly_name: generateFriendlyName(target),
+                type: 'CICS Interface',
+                confidence: dep.confidence_score
+            });
+        } else if (type === 'MQ_QUEUE' || target.includes('MQ') || target.includes('QUEUE')) {
+            categorized.interfaces.add({
+                name: target,
+                friendly_name: generateFriendlyName(target),
+                type: 'MQ Queue',
+                confidence: dep.confidence_score
+            });
+        } else if (type === 'XML_SERVICE' || target.includes('XML') || target.includes('JSON')) {
+            categorized.interfaces.add({
+                name: target,
+                friendly_name: generateFriendlyName(target),
+                type: 'XML/JSON API',
+                confidence: dep.confidence_score
+            });
         }
+    });
+    
+    // Convert Sets to Arrays
+    Object.keys(categorized).forEach(key => {
+        categorized[key] = Array.from(categorized[key]);
+    });
+    
+    return categorized;
+}
+
+function generateFriendlyName(technicalName) {
+    if (!technicalName) return 'Unknown';
+    
+    return technicalName
+        .replace(/[-_]/g, ' ')
+        .toLowerCase()
+        .replace(/\b\w/g, l => l.toUpperCase())
+        .replace(/\bWs\b/g, 'Working Storage')
+        .replace(/\bFd\b/g, 'File Description')
+        .replace(/\bMq\b/g, 'Message Queue')
+        .replace(/\bDb2\b/g, 'DB2')
+        .replace(/\bCics\b/g, 'CICS')
+        .replace(/\bXml\b/g, 'XML')
+        .replace(/\bJson\b/g, 'JSON')
+        .replace(/\bSql\b/g, 'SQL')
+        .replace(/\bAcc\b/g, 'Account')
+        .replace(/\bCust\b/g, 'Customer')
+        .replace(/\bTxn\b/g, 'Transaction')
+        .replace(/\bRec\b/g, 'Record')
+        .replace(/\bTbl\b/g, 'Table');
+}
 
         function populateFlowSection(sectionId, items, sectionType) {
-                    const container = document.getElementById(sectionId);
-                    
-                    if (!items || items.length === 0) {
-                        container.innerHTML = `<p class="text-muted">No ${sectionType} dependencies found</p>`;
-                        return;
-                    }
-                    
-                    items.forEach(item => {
-                        const flowItem = document.createElement('div');
-                        flowItem.className = 'flow-item';
-                        flowItem.onclick = () => showItemDetails(item);
-                        
-                        const confidence = item.confidence ? `${(item.confidence * 100).toFixed(0)}%` : 'N/A';
-                        
-                        flowItem.innerHTML = `
-                            <div class="flow-item-title">${item.name}</div>
-                            <div class="flow-item-type">${item.type}</div>
-                            <div style="font-size: 0.7rem; color: #6c757d; margin-top: 0.25rem;">
-                                Confidence: ${confidence}
-                            </div>
-                            ${item.reason ? `<div style="font-size: 0.7rem; color: #dc3545;">${item.reason}</div>` : ''}
-                        `;
-                        
-                        container.appendChild(flowItem);
-                    });
-                }
+    const container = document.getElementById(sectionId);
+    
+    if (!items || items.length === 0) {
+        container.innerHTML = `<p class="text-muted">No ${sectionType} dependencies found</p>`;
+        return;
+    }
+    
+    items.forEach(item => {
+        const flowItem = document.createElement('div');
+        flowItem.className = 'flow-item';
+        flowItem.onclick = () => showItemDetails(item);
+        
+        const confidence = item.confidence ? `${(item.confidence * 100).toFixed(0)}%` : 'N/A';
+        
+        flowItem.innerHTML = `
+            <div class="flow-item-title">${item.friendly_name || item.name}</div>
+            <div class="flow-item-type">${item.type}</div>
+            <div style="font-size: 0.65rem; color: #888; margin-top: 0.25rem;">
+                ${item.name !== (item.friendly_name || item.name) ? `Technical: ${item.name}<br>` : ''}
+                Confidence: ${confidence}
+            </div>
+            ${item.reason ? `<div style="font-size: 0.7rem; color: #dc3545; margin-top: 0.25rem;">${item.reason}</div>` : ''}
+        `;
+        
+        container.appendChild(flowItem);
+    });
+}
 
         function showItemDetails(item) {
             alert(`Details for ${item.name}:\nType: ${item.type}\nConfidence: ${item.confidence || 'N/A'}`);
@@ -2776,63 +2864,85 @@
         }
 
         // Display components in hierarchical structure
-        // Fixed displayComponentsHierarchy function - replace the existing one in your HTML
-// Fix displayComponentsHierarchy function
-function displayComponentsHierarchy(components) {
-    const mainProgramsBody = document.getElementById('mainProgramsTableBody');
-    mainProgramsBody.innerHTML = '';
+              
+        function displayComponentsHierarchy(components) {
+            const mainProgramsBody = document.getElementById('mainProgramsTableBody');
+            const derivedComponentsBody = document.getElementById('derivedComponentsTableBody');
+            
+            mainProgramsBody.innerHTML = '';
+            derivedComponentsBody.innerHTML = '';
 
-    const mainPrograms = components.filter(c => c.component_type === 'PROGRAM');
+            const mainPrograms = components.filter(c => c.component_type === 'PROGRAM');
+            const derivedComponents = components.filter(c => c.component_type !== 'PROGRAM');
 
-    if (mainPrograms.length === 0) {
-        mainProgramsBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No programs available</td></tr>';
-        return;
-    }
-
-    mainPrograms.forEach(program => {
-        const row = document.createElement('tr');
-        
-        // Parse the stored analysis results properly
-        let analysisResult = {};
-        let businessPurpose = 'Analysis pending';
-        let complexity = 0;
-        
-        try {
-            if (program.analysis_result_json) {
-                analysisResult = JSON.parse(program.analysis_result_json);
-                businessPurpose = analysisResult.business_purpose || 
-                               analysisResult.llm_summary?.business_purpose || 
-                               'Analysis complete';
-                complexity = analysisResult.llm_summary?.complexity_score || 0;
+            if (mainPrograms.length === 0) {
+                mainProgramsBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No programs available</td></tr>';
+                return;
             }
-        } catch (e) {
-            console.error('Error parsing analysis result for', program.component_name, e);
-        }
-        
-        const derivedCount = analysisResult.record_layouts?.length || 0;
-        
-        row.innerHTML = `
-            <td>
-                <strong>${program.component_name}</strong>
-                <br><small class="text-muted">${program.friendly_name || ''}</small>
-            </td>
-            <td style="max-width: 250px;">${businessPurpose}</td>
-            <td>
-                <div><strong>${program.total_lines || 0}</strong> total</div>
-                <div><small>${analysisResult.executable_lines || 0} executable</small></div>
-            </td>
-            <td>${(complexity * 100).toFixed(0)}%</td>
-            <td>
-                <span class="derived-count">${derivedCount}</span>
-            </td>
-            <td>
-                <button class="btn btn-secondary btn-sm" onclick="viewComponentDetails('${program.component_name}')">View Details</button>
-            </td>
-        `;
-        mainProgramsBody.appendChild(row);
-    });
-}
 
+            mainPrograms.forEach(program => {
+                const row = document.createElement('tr');
+                
+                let businessPurpose = program.business_purpose || 'Analysis complete';
+                let complexity = program.complexity_score || 0;
+                let derivedCount = 0;
+                
+                try {
+                    if (program.analysis_result_json) {
+                        const analysisResult = JSON.parse(program.analysis_result_json);
+                        derivedCount = analysisResult.derived_components ? analysisResult.derived_components.length : 0;
+                        if (!businessPurpose && analysisResult.business_purpose) {
+                            businessPurpose = analysisResult.business_purpose;
+                        }
+                        if (analysisResult.llm_summary) {
+                            businessPurpose = analysisResult.llm_summary.business_purpose || businessPurpose;
+                            complexity = analysisResult.llm_summary.complexity_score || complexity;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Analysis result parsing failed for', program.component_name);
+                    // Count derived components from the components list
+                    derivedCount = derivedComponents.filter(d => 
+                        d.parent_program === program.component_name || 
+                        d.program_name === program.component_name
+                    ).length;
+                }
+                
+                row.innerHTML = `
+                    <td>
+                        <strong>${program.component_name}</strong>
+                        <br><small class="text-muted">${program.friendly_name || ''}</small>
+                        <div class="complexity-bar">
+                            <div class="complexity-fill" style="width: ${complexity * 100}%"></div>
+                        </div>
+                    </td>
+                    <td style="max-width: 250px;">${businessPurpose}</td>
+                    <td>
+                        <div><strong>${program.total_lines || 0}</strong> total</div>
+                        <div><small>${program.executable_lines || 0} executable</small></div>
+                    </td>
+                    <td>${(complexity * 100).toFixed(0)}%</td>
+                    <td>
+                        <span class="derived-count">${derivedCount}</span>
+                        ${derivedCount > 0 ? `<button class="expand-btn" onclick="toggleDerivedComponents('${program.component_name}')">View Derived</button>` : ''}
+                    </td>
+                    <td>
+                        <button class="btn btn-secondary btn-sm" onclick="viewComponentDetails('${program.component_name}')">View Details</button>
+                    </td>
+                `;
+                mainProgramsBody.appendChild(row);
+            });
+
+            // Store derived components globally for the toggle function
+            window.derivedComponentsData = {};
+            derivedComponents.forEach(component => {
+                const parent = component.parent_program || component.program_name || 'Unknown';
+                if (!window.derivedComponentsData[parent]) {
+                    window.derivedComponentsData[parent] = [];
+                }
+                window.derivedComponentsData[parent].push(component);
+            });
+        }
         // Toggle derived components display
         function toggleDerivedComponents(programName) {
             const section = document.getElementById('derivedComponentsSection');
@@ -2981,72 +3091,81 @@ function displayComponentsHierarchy(components) {
 
         // Display component summaries on dashboard
         function displayComponentSummaries(components) {
-            const container = document.getElementById('componentSummaries');
-            container.innerHTML = '';
+    const container = document.getElementById('componentSummaries');
+    container.innerHTML = '';
 
-            const programs = components.filter(c => c.component_type === 'PROGRAM');
-            
-            if (programs.length === 0) {
-                container.innerHTML = '<p class="text-muted">Upload COBOL files to see AI-generated business summaries</p>';
-                return;
-            }
+    const programs = components.filter(c => c.component_type === 'PROGRAM');
+    
+    if (programs.length === 0) {
+        container.innerHTML = '<p class="text-muted">Upload COBOL files to see AI-generated business summaries</p>';
+        return;
+    }
 
-            programs.forEach(program => {
-                // Fix: Parse the analysis_result_json to get llm_summary
-                let llmSummary = {};
-                let businessPurpose = 'Analysis in progress...';
-                let complexityScore = 0;
-                
-                try {
-                    if (program.analysis_result_json) {
-                        const analysisResult = JSON.parse(program.analysis_result_json);
-                        llmSummary = analysisResult.llm_summary || {};
-                        businessPurpose = program.business_purpose || llmSummary.business_purpose || 'Analysis pending';
-                        complexityScore = program.complexity_score || llmSummary.complexity_score || 0;
-                    }
-                } catch (e) {
-                    console.error('Error parsing LLM summary for', program.component_name, e);
-                }
-                
-                const card = document.createElement('div');
-                card.className = 'component-summary-card';
-                
-                card.innerHTML = `
-                    <div class="component-header">
-                        <div>
-                            <div class="component-title">${program.component_name}</div>
-                            <div class="text-muted" style="font-size: 0.8rem;">${program.friendly_name || ''}</div>
-                        </div>
-                        <span class="component-type badge badge-primary">PROGRAM</span>
-                    </div>
-                    
-                    <div class="business-purpose">${businessPurpose}</div>
-                    
-                    <div class="component-metrics">
-                        <div class="metric">
-                            <span class="metric-value">${program.total_lines || 0}</span>
-                            <span class="metric-label">Lines</span>
-                        </div>
-                        <div class="metric">
-                            <span class="metric-value">${(complexityScore * 100).toFixed(0)}%</span>
-                            <span class="metric-label">Complexity</span>
-                        </div>
-                        <div class="metric">
-                            <span class="metric-value">${program.total_fields || 0}</span>
-                            <span class="metric-label">Fields</span>
-                        </div>
-                    </div>
-                    
-                    <div class="complexity-bar">
-                        <div class="complexity-fill" style="width: ${complexityScore * 100}%"></div>
-                    </div>
-                    
-                    ${llmSummary.business_domain ? `<span class="domain-badge domain-${llmSummary.business_domain.toLowerCase()}">${llmSummary.business_domain}</span>` : ''}
-                `;
-                
-                container.appendChild(card);
-            });
+    programs.forEach(program => {
+        let businessPurpose = 'Analysis in progress...';
+        let complexityScore = 0;
+        let derivedCount = 0;
+        
+        // Try to get business purpose from direct field first
+        if (program.business_purpose) {
+            businessPurpose = program.business_purpose;
         }
+        
+        // Try to parse analysis_result_json for additional info
+        try {
+            if (program.analysis_result_json) {
+                const analysisResult = JSON.parse(program.analysis_result_json);
+                if (!program.business_purpose && analysisResult.business_purpose) {
+                    businessPurpose = analysisResult.business_purpose;
+                }
+                if (analysisResult.llm_summary) {
+                    businessPurpose = analysisResult.llm_summary.business_purpose || businessPurpose;
+                    complexityScore = analysisResult.llm_summary.complexity_score || 0;
+                }
+                derivedCount = analysisResult.derived_components ? analysisResult.derived_components.length : 0;
+            }
+        } catch (e) {
+            // If JSON parsing fails, just use what we have
+            console.warn('JSON parsing failed for', program.component_name, 'using fallback data');
+        }
+        
+        const card = document.createElement('div');
+        card.className = 'component-summary-card';
+        
+        card.innerHTML = `
+            <div class="component-header">
+                <div>
+                    <div class="component-title">${program.component_name}</div>
+                    <div class="text-muted" style="font-size: 0.8rem;">${program.friendly_name || ''}</div>
+                </div>
+                <span class="component-type badge badge-primary">PROGRAM</span>
+            </div>
+            
+            <div class="business-purpose">${businessPurpose}</div>
+            
+            <div class="component-metrics">
+                <div class="metric">
+                    <span class="metric-value">${program.total_lines || 0}</span>
+                    <span class="metric-label">Lines</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-value">${(complexityScore * 100).toFixed(0)}%</span>
+                    <span class="metric-label">Complexity</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-value">${derivedCount}</span>
+                    <span class="metric-label">Derived</span>
+                </div>
+            </div>
+            
+            <div class="complexity-bar">
+                <div class="complexity-fill" style="width: ${complexityScore * 100}%"></div>
+            </div>
+        `;
+        
+        container.appendChild(card);
+    });
+}
 
         // Display domain analysis
         function displayDomainAnalysis(components) {

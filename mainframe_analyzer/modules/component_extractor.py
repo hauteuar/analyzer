@@ -131,7 +131,7 @@ class ComponentExtractor:
             return []
     
     def _extract_cobol_components(self, session_id: str, content: str, filename: str) -> List[Dict]:
-        """FIXED: Prevent duplicate program components"""
+        """Extract COBOL components with LLM-enhanced layout summaries"""
         logger.info(f"Starting COBOL analysis for {filename}")
         
         try:
@@ -139,13 +139,11 @@ class ComponentExtractor:
             parsed_data = self.cobol_parser.parse_cobol_file(content, filename)
             logger.info(f"Parsed {len(parsed_data['record_layouts'])} record layouts from {filename}")
             
-            # Generate LLM summary ONCE
+            # Generate program summary
             program_summary = self._generate_component_summary(session_id, parsed_data, 'PROGRAM')
             
-            # Create program name from filename (remove duplicates)
+            # Create program component
             program_name = filename.replace('.cbl', '').replace('.CBL', '').replace('.cob', '').replace('.COB', '')
-            
-            # Create SINGLE main program component
             program_component = {
                 'name': program_name,
                 'friendly_name': parsed_data['friendly_name'],
@@ -168,14 +166,21 @@ class ComponentExtractor:
                 'fields': []
             }
             
-            components = [program_component]  # Start with single program
+            components = [program_component]
             
-            # Process record layouts
+            # Process record layouts with LLM summaries
             for layout_idx, layout in enumerate(parsed_data['record_layouts'], 1):
                 layout_name = layout.name
                 logger.info(f"Processing layout {layout_idx}: {layout_name} ({len(layout.fields)} fields)")
                 
-                # Store layout in database
+                # THIS IS THE MISSING CALL - Generate LLM summary for layout
+                layout_summary = self._generate_layout_summary(session_id, layout, parsed_data)
+                
+                # Update layout with LLM-generated friendly name and business purpose
+                layout.friendly_name = layout_summary.get('friendly_name', layout.friendly_name)
+                layout_business_purpose = layout_summary.get('business_purpose', f"Data structure with {len(layout.fields)} fields")
+                
+                # Store layout in database with enhanced information
                 try:
                     with self.db_manager.get_connection() as conn:
                         cursor = conn.cursor()
@@ -186,14 +191,15 @@ class ComponentExtractor:
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (session_id, layout_name, layout.friendly_name, program_name,
                             str(layout.level), layout.line_start, layout.line_end,
-                            layout.source_code, len(layout.fields), f"Data structure with {len(layout.fields)} fields"))
+                            layout.source_code, len(layout.fields), layout_business_purpose))
                         
                         layout_id = cursor.lastrowid
+                        logger.info(f"Stored layout {layout_name} with friendly name: {layout.friendly_name}")
                 except Exception as db_error:
                     logger.error(f"Error storing layout {layout_name}: {str(db_error)}")
                     continue
                 
-                # Process fields
+                # Process fields for this layout
                 enhanced_fields = []
                 for field in layout.fields:
                     try:
@@ -207,7 +213,8 @@ class ComponentExtractor:
                             'line_number': field.line_number,
                             'usage_type': field_analysis['primary_usage'],
                             'business_purpose': field_analysis['business_purpose'],
-                            'total_program_references': len(field_analysis['all_references'])
+                            'total_program_references': len(field_analysis['all_references']),
+                            'source_field': field_analysis.get('primary_source_field', ''),  # Add this for population source
                         }
                         
                         enhanced_fields.append(enhanced_field)
@@ -224,6 +231,8 @@ class ComponentExtractor:
                 program_component['derived_components'].append(layout_name)
                 program_component['record_layouts'].append({
                     'name': layout_name,
+                    'friendly_name': layout.friendly_name,  # Use LLM-generated name
+                    'business_purpose': layout_business_purpose,  # Use LLM-generated purpose
                     'fields': enhanced_fields
                 })
                 program_component['fields'].extend(enhanced_fields)
@@ -234,15 +243,13 @@ class ComponentExtractor:
             # Extract dependencies
             self._extract_and_store_dependencies(session_id, components, filename)
             
-            logger.info(f"✅ Analysis complete: 1 program, {len(parsed_data['record_layouts'])} layouts, {program_component['total_fields']} fields")
+            logger.info(f"Analysis complete: 1 program, {len(parsed_data['record_layouts'])} layouts, {program_component['total_fields']} fields")
             
-            return components  # Return single component list
+            return components
             
         except Exception as e:
             logger.error(f"Error in COBOL component extraction: {str(e)}")
             return []
-                
-            
 
 
     def store_field_details(self, session_id: str, field_data: Dict, program_name: str, layout_id: int = None):
@@ -517,7 +524,7 @@ Please provide a JSON response with:
     
     
     def _generate_layout_summary(self, session_id: str, layout, parsed_data: Dict) -> Dict:
-        """Generate summary for record layout"""
+        """Generate LLM summary for record layout with friendly name"""
         try:
             field_count = len(layout.fields)
             field_types = {}
@@ -528,12 +535,53 @@ Please provide a JSON response with:
                     field_types['alphanumeric'] = field_types.get('alphanumeric', 0) + 1
                 elif '9' in field.picture:
                     field_types['numeric'] = field_types.get('numeric', 0) + 1
-                else:
-                    field_types['other'] = field_types.get('other', 0) + 1
             
+            # Create LLM prompt for layout analysis
+            field_names = [f.name for f in layout.fields[:10]]  # First 10 fields
+            
+            prompt = f"""
+    Analyze this COBOL record layout and provide business context.
+
+    Layout: {layout.name}
+    Fields ({field_count}): {', '.join(field_names)}
+    Field Types: {', '.join([f'{count} {type}' for type, count in field_types.items()])}
+
+    Provide JSON response:
+    {{
+        "friendly_name": "Business-friendly name for this record layout",
+        "business_purpose": "What this record structure represents in business terms",
+        "usage_pattern": "How this record is typically used (INPUT|OUTPUT|WORKING_STORAGE|PARAMETER)",
+        "business_domain": "Business area (CUSTOMER|ACCOUNT|TRANSACTION|EMPLOYEE|GENERAL)"
+    }}
+    """
+            
+            response = self.llm_client.call_llm(prompt, max_tokens=400, temperature=0.3)
+            
+            # Log LLM call
+            self.db_manager.log_llm_call(
+                session_id, 'layout_summary', 1, 1,
+                response.prompt_tokens, response.response_tokens, response.processing_time_ms,
+                response.success, response.error_message
+            )
+            
+            if response.success:
+                llm_summary = self.llm_client.extract_json_from_response(response.content)
+                if llm_summary:
+                    return {
+                        'friendly_name': llm_summary.get('friendly_name', layout.friendly_name),
+                        'business_purpose': llm_summary.get('business_purpose', f"Data structure with {field_count} fields"),
+                        'usage_pattern': llm_summary.get('usage_pattern', 'WORKING_STORAGE'),
+                        'business_domain': llm_summary.get('business_domain', 'GENERAL'),
+                        'field_analysis': field_types,
+                        'complexity_score': min(0.9, field_count / 50)
+                    }
+            
+            # Fallback
             return {
-                'business_purpose': f"Data structure with {field_count} fields containing {', '.join([f'{count} {type}' for type, count in field_types.items()])} fields",
-                'usage_pattern': 'DATA_STRUCTURE',
+                'friendly_name': layout.friendly_name,
+                'business_purpose': f"Data structure with {field_count} fields",
+                'usage_pattern': 'WORKING_STORAGE',
+                'business_domain': 'GENERAL',
                 'field_analysis': field_types,
                 'complexity_score': min(0.9, field_count / 50)
             }
@@ -541,22 +589,12 @@ Please provide a JSON response with:
         except Exception as e:
             logger.error(f"Error generating layout summary: {str(e)}")
             return {
-                'business_purpose': 'Data structure - analysis failed',
+                'friendly_name': layout.friendly_name,
+                'business_purpose': 'Analysis failed',
                 'usage_pattern': 'UNKNOWN',
                 'field_analysis': {},
                 'complexity_score': 0.5
-            } 
-            # Fallback to basic parsing
-            components = [{
-                'name': filename,
-                'friendly_name': self.cobol_parser.generate_friendly_name(filename, 'Program'),
-                'type': 'PROGRAM',
-                'content': content,
-                'total_lines': len(content.split('\n')),
-                'error': str(e)
-            }]
-        
-        return components
+            }
     
     def _extract_jcl_components(self, session_id: str, content: str, filename: str) -> List[Dict]:
         """Extract components from JCL"""
