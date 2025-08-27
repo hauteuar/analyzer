@@ -464,19 +464,67 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error logging LLM call: {str(e)}")
     
+        # Add this method to DatabaseManager to check field limits
+    def check_database_limits(self):
+        """Check database field limitations"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(component_analysis)")
+                columns = cursor.fetchall()
+                
+                for column in columns:
+                    if column[1] == 'analysis_result_json':
+                        logger.info(f"analysis_result_json column type: {column[2]}")
+                        
+        except Exception as e:
+            logger.error(f"Error checking database limits: {e}")
+
     def store_component_analysis(self, session_id: str, component_name: str, 
                            component_type: str, file_path: str, analysis_result: Dict):
-        """Store component analysis - FIXED VERSION"""
+        """Store component analysis with better JSON handling"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Debug logging
-                logger.info(f"📥 Storing component: {component_name}")
-                logger.info(f"🔍 Analysis result keys: {list(analysis_result.keys())}")
-                logger.info(f"📊 Derived components count: {len(analysis_result.get('derived_components', []))}")
+                # Debug the incoming data
+                derived_count_before = len(analysis_result.get('derived_components', []))
+                logger.info(f"Before JSON serialization: {component_name} has {derived_count_before} derived components")
                 
-                # Check if component already exists
+                # Better JSON serialization
+                try:
+                    # Create a clean copy for JSON serialization
+                    clean_analysis = {}
+                    for key, value in analysis_result.items():
+                        if key == 'derived_components':
+                            # Ensure derived_components is preserved properly
+                            clean_analysis[key] = value if isinstance(value, list) else []
+                            logger.info(f"Preserving {len(clean_analysis[key])} derived components")
+                        elif isinstance(value, (str, int, float, bool, list, dict)):
+                            clean_analysis[key] = value
+                        else:
+                            clean_analysis[key] = str(value)
+                    
+                    # Serialize with proper encoding
+                    analysis_json = json.dumps(clean_analysis, ensure_ascii=False, indent=None, separators=(',', ':'))
+                    
+                    # Verify JSON after serialization
+                    test_parse = json.loads(analysis_json)
+                    derived_count_after = len(test_parse.get('derived_components', []))
+                    logger.info(f"After JSON serialization: {component_name} has {derived_count_after} derived components")
+                    
+                    if derived_count_before != derived_count_after:
+                        logger.error(f"DATA LOSS: derived components went from {derived_count_before} to {derived_count_after}")
+                        # Log the actual data for debugging
+                        logger.error(f"Original derived_components: {analysis_result.get('derived_components', [])[:3]}")
+                        logger.error(f"Serialized derived_components: {test_parse.get('derived_components', [])[:3]}")
+                    
+                except Exception as json_error:
+                    logger.error(f"JSON serialization failed: {json_error}")
+                    # Fallback to simple serialization
+                    analysis_json = json.dumps({'error': 'serialization_failed', 'component_name': component_name})
+                
+                # Check if component exists
                 cursor.execute('''
                     SELECT COUNT(*) FROM component_analysis 
                     WHERE session_id = ? AND component_name = ? AND component_type = ?
@@ -484,25 +532,28 @@ class DatabaseManager:
                 
                 exists = cursor.fetchone()[0] > 0
                 
-                # Prepare data with proper handling
+                # Prepare other fields
                 total_lines = int(analysis_result.get('total_lines', 0))
                 total_fields = len(analysis_result.get('fields', []))
-                
-                # IMPORTANT: Preserve business_purpose from analysis_result
-                business_purpose = analysis_result.get('business_purpose', '')
-                if not business_purpose and analysis_result.get('llm_summary'):
-                    business_purpose = analysis_result['llm_summary'].get('business_purpose', '')
-                
+                business_purpose = str(analysis_result.get('business_purpose', ''))[:500]
                 complexity_score = float(analysis_result.get('complexity_score', 0.5))
-                if analysis_result.get('llm_summary'):
-                    complexity_score = float(analysis_result['llm_summary'].get('complexity_score', complexity_score))
-                
-                # Store the COMPLETE analysis_result as JSON
-                analysis_json = json.dumps(analysis_result, default=str, ensure_ascii=False)
                 source_content = str(analysis_result.get('content', ''))
                 
-                logger.info(f"💾 Storing: business_purpose='{business_purpose[:50]}...', complexity={complexity_score}")
-                logger.info(f"📝 JSON length: {len(analysis_json)} characters")
+                # Store with length check
+                if len(analysis_json) > 1000000:  # 1MB limit
+                    logger.warning(f"JSON too large ({len(analysis_json)} chars), truncating...")
+                    # Keep essential data only
+                    essential_data = {
+                        'name': analysis_result.get('name'),
+                        'type': analysis_result.get('type'),
+                        'business_purpose': analysis_result.get('business_purpose'),
+                        'complexity_score': analysis_result.get('complexity_score'),
+                        'llm_summary': analysis_result.get('llm_summary'),
+                        'derived_components': analysis_result.get('derived_components', []),
+                        'total_lines': analysis_result.get('total_lines'),
+                        'total_fields': len(analysis_result.get('fields', []))
+                    }
+                    analysis_json = json.dumps(essential_data, ensure_ascii=False)
                 
                 if exists:
                     cursor.execute('''
@@ -512,7 +563,7 @@ class DatabaseManager:
                             source_content = ?
                         WHERE session_id = ? AND component_name = ? AND component_type = ?
                     ''', (
-                        total_lines, total_fields, business_purpose[:500], complexity_score, 
+                        total_lines, total_fields, business_purpose, complexity_score, 
                         analysis_json, source_content,
                         session_id, component_name, component_type
                     ))
@@ -525,28 +576,39 @@ class DatabaseManager:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         session_id, component_name, component_type, file_path,
-                        total_lines, total_fields, business_purpose[:500], complexity_score,
+                        total_lines, total_fields, business_purpose, complexity_score,
                         source_content, analysis_json
                     ))
                 
-                # Verify what was actually stored
+                # CRITICAL: Verify what was actually stored
                 cursor.execute('''
-                    SELECT business_purpose, complexity_score, LENGTH(analysis_result_json) as json_length
-                    FROM component_analysis 
+                    SELECT analysis_result_json FROM component_analysis 
                     WHERE session_id = ? AND component_name = ? AND component_type = ?
                 ''', (session_id, component_name, component_type))
                 
-                stored_data = cursor.fetchone()
-                if stored_data:
-                    logger.info(f"✅ Verified storage: business_purpose='{stored_data[0][:50]}...', complexity={stored_data[1]}, json_length={stored_data[2]}")
+                stored_row = cursor.fetchone()
+                if stored_row:
+                    try:
+                        stored_json = stored_row[0]
+                        stored_data = json.loads(stored_json)
+                        final_derived_count = len(stored_data.get('derived_components', []))
+                        logger.info(f"VERIFICATION: {component_name} stored with {final_derived_count} derived components")
+                        
+                        if final_derived_count != derived_count_before:
+                            logger.error(f"CRITICAL: Data corruption detected! Expected {derived_count_before}, got {final_derived_count}")
+                            logger.error(f"Stored JSON length: {len(stored_json)}")
+                            logger.error(f"First 500 chars: {stored_json[:500]}")
+                    except Exception as verify_error:
+                        logger.error(f"Verification failed: {verify_error}")
                 
-                logger.info(f"✅ Successfully stored component: {component_name}")
+                logger.info(f"Component storage completed: {component_name}")
                 
         except Exception as e:
-            logger.error(f"❌ Error storing component {component_name}: {str(e)}")
-            logger.error(f"📋 Analysis result sample: {str(analysis_result)[:200]}...")
-            raise  # Re-raise to see the full error
-                # Don't re-raise the exception to prevent stopping the entire process
+            logger.error(f"Error storing component {component_name}: {str(e)}")
+            import traceback
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            raise
+                        # Don't re-raise the exception to prevent stopping the entire process
     
     def store_record_layout(self, session_id: str, layout_data: Dict, program_name: str):
         """Simplified record layout storage"""
