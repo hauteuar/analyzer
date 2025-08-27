@@ -131,26 +131,27 @@ class ComponentExtractor:
             return []
     
     def _extract_cobol_components(self, session_id: str, content: str, filename: str) -> List[Dict]:
-        """Complete COBOL component extraction with full source code analysis"""
-        logger.info(f"Starting complete COBOL analysis for {filename}")
+        """FIXED: Prevent duplicate program components"""
+        logger.info(f"Starting COBOL analysis for {filename}")
         
         try:
             # Parse COBOL structure
-            start_time = time.time()
             parsed_data = self.cobol_parser.parse_cobol_file(content, filename)
-            logger.info(f"COBOL parsing completed: {len(parsed_data['record_layouts'])} layouts found")
+            logger.info(f"Parsed {len(parsed_data['record_layouts'])} record layouts from {filename}")
             
-            # Generate LLM summary
+            # Generate LLM summary ONCE
             program_summary = self._generate_component_summary(session_id, parsed_data, 'PROGRAM')
-            logger.info(f"program_summary{program_summary   }")
-            # Create main program component with complete source
-            program_name = filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', '')
+            
+            # Create program name from filename (remove duplicates)
+            program_name = filename.replace('.cbl', '').replace('.CBL', '').replace('.cob', '').replace('.COB', '')
+            
+            # Create SINGLE main program component
             program_component = {
                 'name': program_name,
                 'friendly_name': parsed_data['friendly_name'],
                 'type': 'PROGRAM',
                 'file_path': filename,
-                'content': content,  # CRITICAL: Store complete source code
+                'content': content,
                 'total_lines': parsed_data['total_lines'],
                 'executable_lines': parsed_data.get('executable_lines', 0),
                 'comment_lines': parsed_data.get('comment_lines', 0),
@@ -167,28 +168,14 @@ class ComponentExtractor:
                 'fields': []
             }
             
-            components = [program_component]
+            components = [program_component]  # Start with single program
             
-            # Process each record layout with complete field analysis
+            # Process record layouts
             for layout_idx, layout in enumerate(parsed_data['record_layouts'], 1):
                 layout_name = layout.name
-                logger.info(f"Processing layout {layout_idx}/{len(parsed_data['record_layouts'])}: {layout_name}")
+                logger.info(f"Processing layout {layout_idx}: {layout_name} ({len(layout.fields)} fields)")
                 
-                # Generate layout summary
-                layout_summary = self._generate_layout_summary(session_id, layout, parsed_data)
-                
-                # Store record layout in database first
-                layout_data = {
-                    'name': layout_name,
-                    'friendly_name': layout.friendly_name,
-                    'level': str(layout.level),
-                    'line_start': layout.line_start,
-                    'line_end': layout.line_end,
-                    'source_code': layout.source_code,
-                    'fields': []  # Will be populated below
-                }
-                
-                # Store layout in database and get ID
+                # Store layout in database
                 try:
                     with self.db_manager.get_connection() as conn:
                         cursor = conn.cursor()
@@ -199,125 +186,63 @@ class ComponentExtractor:
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (session_id, layout_name, layout.friendly_name, program_name,
                             str(layout.level), layout.line_start, layout.line_end,
-                            layout.source_code, len(layout.fields),
-                            layout_summary.get('business_purpose', '')))
+                            layout.source_code, len(layout.fields), f"Data structure with {len(layout.fields)} fields"))
                         
                         layout_id = cursor.lastrowid
-                        logger.info(f"Stored layout {layout_name} with ID {layout_id}")
                 except Exception as db_error:
                     logger.error(f"Error storing layout {layout_name}: {str(db_error)}")
-                    layout_id = None
+                    continue
                 
-                # Process each field with complete source code analysis
+                # Process fields
                 enhanced_fields = []
-                for field_idx, field in enumerate(layout.fields, 1):
+                for field in layout.fields:
                     try:
-                        logger.debug(f"Analyzing field {field_idx}/{len(layout.fields)}: {field.name}")
+                        field_analysis = self._complete_field_source_analysis(field.name, content, program_name)
                         
-                        # Perform complete source code analysis for this field
-                        field_source_analysis = self._complete_field_source_analysis(
-                            field.name, content, program_name
-                        )
-                        
-                        # Create enhanced field data with complete context
                         enhanced_field = {
                             'name': field.name,
                             'friendly_name': field.friendly_name or field.name.replace('-', ' ').title(),
                             'level': field.level,
                             'picture': field.picture,
-                            'usage': field.usage,
-                            'occurs': field.occurs,
-                            'redefines': field.redefines,
-                            'value': field.value,
                             'line_number': field.line_number,
-                            'code_snippet': f"{field.level:02d} {field.name}" + (f" PIC {field.picture}" if field.picture else ""),
-                            'usage_type': field_source_analysis['primary_usage'],
-                            'operation_type': 'COMPREHENSIVE_DEFINITION',
-                            'business_purpose': field_source_analysis['business_purpose'],
-                            'confidence': 0.95,
-                            'source_field': field_source_analysis.get('primary_source_field', ''),
-                            'target_field': field.name if field_source_analysis.get('receives_data', False) else '',
-                            
-                            # Complete source code context for database
-                            'definition_line_number': field_source_analysis.get('definition_line', field.line_number),
-                            'definition_code': field_source_analysis.get('definition_code', ''),
-                            'program_source_content': content,  # Store complete program source
-                            'field_references_json': json.dumps(field_source_analysis['all_references']),
-                            'usage_summary_json': json.dumps(field_source_analysis['usage_summary']),
-                            'total_program_references': len(field_source_analysis['all_references']),
-                            'move_source_count': field_source_analysis['counts']['move_source'],
-                            'move_target_count': field_source_analysis['counts']['move_target'],
-                            'arithmetic_count': field_source_analysis['counts']['arithmetic'],
-                            'conditional_count': field_source_analysis['counts']['conditional'],
-                            'cics_count': field_source_analysis['counts']['cics']
+                            'usage_type': field_analysis['primary_usage'],
+                            'business_purpose': field_analysis['business_purpose'],
+                            'total_program_references': len(field_analysis['all_references'])
                         }
                         
                         enhanced_fields.append(enhanced_field)
                         
-                        # Store field details in database with complete context
+                        # Store field in database
                         if layout_id:
-                            try:
-                                self.db_manager.store_field_details(session_id, enhanced_field, program_name, layout_id)
-                                logger.debug(f"Stored field {field.name} with {len(field_source_analysis['all_references'])} source references")
-                            except Exception as field_db_error:
-                                logger.error(f"Error storing field {field.name}: {str(field_db_error)}")
-                        
+                            self.db_manager.store_field_details(session_id, enhanced_field, program_name, layout_id)
+                            
                     except Exception as field_error:
                         logger.error(f"Error analyzing field {field.name}: {str(field_error)}")
-                        # Create basic field entry as fallback
-                        enhanced_field = {
-                            'name': field.name,
-                            'level': field.level,
-                            'picture': field.picture,
-                            'line_number': field.line_number,
-                            'error': str(field_error)
-                        }
-                        enhanced_fields.append(enhanced_field)
+                        continue
                 
-                # Update layout data with enhanced fields
-                layout_data['fields'] = enhanced_fields
-                
-                # Create layout component
-                layout_component = {
-                    'name': layout_name,
-                    'friendly_name': layout.friendly_name,
-                    'type': 'RECORD_LAYOUT',
-                    'parent_program': program_name,
-                    'level': layout.level,
-                    'line_start': layout.line_start,
-                    'line_end': layout.line_end,
-                    'source_code': layout.source_code,
-                    'fields': enhanced_fields,
-                    'llm_summary': layout_summary,
-                    'business_purpose': layout_summary.get('business_purpose', ''),
-                    'usage_pattern': layout_summary.get('usage_pattern', 'UNKNOWN')
-                }
-                
-                components.append(layout_component)
+                # Add to program component
                 program_component['derived_components'].append(layout_name)
-                program_component['record_layouts'].append(layout_data)
+                program_component['record_layouts'].append({
+                    'name': layout_name,
+                    'fields': enhanced_fields
+                })
                 program_component['fields'].extend(enhanced_fields)
-                
-                logger.info(f"Completed layout {layout_name}: {len(enhanced_fields)} fields analyzed")
             
-            # Update final counts
+            # Update counts
             program_component['total_fields'] = len(program_component['fields'])
             
-            total_time = time.time() - start_time
-            logger.info(f"COBOL extraction completed in {total_time:.2f}s: {len(components)} components, {program_component['total_fields']} fields")
+            # Extract dependencies
+            self._extract_and_store_dependencies(session_id, components, filename)
             
-            if components:
-                self._extract_and_store_dependencies(session_id, components, filename)
-                has_layouts = any(c.get('type') == 'RECORD_LAYOUT' for c in components)
-                if has_layouts:
-                    self._extract_and_store_field_relationships(session_id, components, filename)
-
-
-            return components
+            logger.info(f"✅ Analysis complete: 1 program, {len(parsed_data['record_layouts'])} layouts, {program_component['total_fields']} fields")
+            
+            return components  # Return single component list
             
         except Exception as e:
             logger.error(f"Error in COBOL component extraction: {str(e)}")
             return []
+                
+            
 
 
     def store_field_details(self, session_id: str, field_data: Dict, program_name: str, layout_id: int = None):

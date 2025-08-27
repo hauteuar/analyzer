@@ -39,6 +39,7 @@ class RecordLayout:
     line_end: int
     source_code: str
     friendly_name: str = ""
+    section: str = ""  # Add this field
 
 @dataclass
 class CobolComponent:
@@ -79,7 +80,8 @@ class COBOLParser:
         # Data movement patterns
         self.move_pattern = re.compile(r'MOVE\s+([A-Z0-9\-\(\)]+)\s+TO\s+([A-Z0-9\-\(\)]+)', re.IGNORECASE)
         self.compute_pattern = re.compile(r'COMPUTE\s+([A-Z0-9\-]+)\s*=\s*(.+)', re.IGNORECASE)
-    
+        self.section_pattern = re.compile(r'^\s*([A-Z\-]+)\s+SECTION\s*\.', re.IGNORECASE)
+        
     def generate_friendly_name(self, cobol_name: str, context: str = "") -> str:
         """Generate friendly names for COBOL components"""
         if not cobol_name:
@@ -336,38 +338,51 @@ class COBOLParser:
         return components
     
     def extract_record_layouts(self, lines: List[str]) -> List[RecordLayout]:
-        """Extract ALL 01 level record layouts separately"""
+        """Extract 01 level record layouts from all DATA DIVISION sections"""
         layouts = []
         current_layout = None
         current_fields = []
         in_data_division = False
+        current_section = None
         
         for i, line in enumerate(lines):
+            line_upper = line.upper().strip()
+            
+            # Check for division
             if self.division_pattern.match(line):
                 division_name = self.division_pattern.match(line).group(1).upper()
                 in_data_division = (division_name == 'DATA')
+                current_section = None
                 continue
             
             if not in_data_division:
                 continue
             
-            data_match = self.data_item_pattern.match(line.strip())
+            # Check for section within DATA DIVISION
+            if line_upper.endswith(' SECTION.'):
+                current_section = line_upper.replace(' SECTION.', '').strip()
+                logger.debug(f"Entered section: {current_section}")
+                continue
+            
+            # Parse data items (01 level and below)
+            data_match = self.data_item_pattern.match(line_upper)
             if data_match:
                 level = int(data_match.group(1))
                 name = data_match.group(2)
                 rest_of_line = data_match.group(3) or ""
                 
                 if level == 1:
-                    # Finalize previous layout if it exists
+                    # Finalize previous layout
                     if current_layout is not None:
-                        if current_fields:  # Only store if has fields
-                            current_layout.fields = current_fields
-                            current_layout.line_end = i
-                            # Get actual source lines for this layout
-                            source_lines = lines[current_layout.line_start-1:current_layout.line_end]
-                            current_layout.source_code = '\n'.join(source_lines)
+                        current_layout.line_end = i
+                        current_layout.fields = current_fields
+                        source_lines = lines[current_layout.line_start-1:current_layout.line_end]
+                        current_layout.source_code = '\n'.join(source_lines)
+                        
+                        # Only add if it has fields
+                        if current_fields:
                             layouts.append(current_layout)
-                            logger.info(f"Completed layout: {current_layout.name} with {len(current_fields)} fields")
+                            logger.info(f"Completed layout: {current_layout.name} ({current_layout.section}) with {len(current_fields)} fields")
                     
                     # Skip FILLER 01 levels
                     if name.upper() == 'FILLER':
@@ -375,7 +390,7 @@ class COBOLParser:
                         current_fields = []
                         continue
                     
-                    # Start new 01 level layout
+                    # Create new layout with section info
                     current_layout = RecordLayout(
                         name=name,
                         level=level,
@@ -385,26 +400,40 @@ class COBOLParser:
                         source_code="",
                         friendly_name=self.generate_friendly_name(name, 'Record Layout')
                     )
+                    
+                    # Add section information to layout
+                    current_layout.section = current_section or 'UNKNOWN-SECTION'
                     current_fields = []
-                    logger.info(f"Started new 01 layout: {name}")
+                    logger.info(f"Started new 01 layout: {name} in {current_layout.section}")
                     
                 elif current_layout and level > 1:
-                    # Only add field if we have a current layout
-                    if name.upper() != 'FILLER':  # Skip FILLER fields
+                    # Add field to current layout
+                    if name.upper() != 'FILLER':
                         field = self.parse_cobol_field(line, i + 1, level, name, rest_of_line)
                         current_fields.append(field)
-                        logger.debug(f"Added field {name} (level {level}) to layout {current_layout.name}")
+                        logger.debug(f"Added field: {name} (level {level}) to {current_layout.name}")
         
-        # Don't forget the last layout
+        # Process final layout
         if current_layout is not None and current_fields:
-            current_layout.fields = current_fields
             current_layout.line_end = len(lines)
+            current_layout.fields = current_fields
             source_lines = lines[current_layout.line_start-1:current_layout.line_end]
             current_layout.source_code = '\n'.join(source_lines)
             layouts.append(current_layout)
-            logger.info(f"Completed final layout: {current_layout.name} with {len(current_fields)} fields")
+            logger.info(f"Completed final layout: {current_layout.name} ({current_layout.section}) with {len(current_fields)} fields")
         
-        logger.info(f"Total layouts extracted: {len(layouts)}")
+        # Log summary by section
+        section_summary = {}
+        for layout in layouts:
+            section = getattr(layout, 'section', 'UNKNOWN')
+            if section not in section_summary:
+                section_summary[section] = []
+            section_summary[section].append(f"{layout.name}({len(layout.fields)} fields)")
+        
+        logger.info("LAYOUT EXTRACTION SUMMARY:")
+        for section, layout_list in section_summary.items():
+            logger.info(f"  {section}: {', '.join(layout_list)}")
+        
         return layouts
         
     def parse_cobol_field(self, line: str, line_number: int, level: int, name: str, definition: str) -> CobolField:

@@ -466,84 +466,54 @@ class DatabaseManager:
     
     def store_component_analysis(self, session_id: str, component_name: str, 
                            component_type: str, file_path: str, analysis_result: Dict):
-        """Store component analysis results - FIXED VERSION"""
-        logger.info(f"Storing component: {component_name} ({component_type})")
-        
+        """Store component analysis - prevent duplicates"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Extract data with fallbacks for missing fields
-                total_lines = 0
-                total_fields = 0
-                
-                # Handle different data structures from component extractor
-                if isinstance(analysis_result, dict):
-                    # Try different field name variations
-                    total_lines = (analysis_result.get('total_lines', 0) or 
-                                analysis_result.get('lines', 0) or 
-                                len(str(analysis_result.get('content', '')).split('\n')))
-                    
-                    # Count fields from different sources
-                    fields = analysis_result.get('fields', [])
-                    if not fields and 'record_layouts' in analysis_result:
-                        # Count fields in all record layouts
-                        for layout in analysis_result['record_layouts']:
-                            if isinstance(layout, dict) and 'fields' in layout:
-                                fields.extend(layout['fields'])
-                    
-                    total_fields = len(fields)
-                    
-                    # Add essential data that might be missing
-                    if 'business_purpose' not in analysis_result and component_type == 'PROGRAM':
-                        analysis_result['business_purpose'] = f'COBOL program component with {total_lines} lines'
-                    
-                    if 'friendly_name' not in analysis_result:
-                        analysis_result['friendly_name'] = component_name.replace('_', ' ').replace('-', ' ').title()
-                
-                logger.debug(f"Component data: lines={total_lines}, fields={total_fields}")
-                llm_summary = analysis_result.get('llm_summary', {})
-                business_purpose = (analysis_result.get('business_purpose') or 
-                                llm_summary.get('business_purpose', ''))
-                complexity_score = (analysis_result.get('complexity_score') or 
-                                llm_summary.get('complexity_score', 0.5))
-                # Store main component with complete data
+                # Check if component already exists
                 cursor.execute('''
-                    INSERT OR REPLACE INTO component_analysis 
-                    (session_id, component_name, component_type, file_path, 
-                    total_lines, total_fields, business_purpose, complexity_score, 
-                               analysis_result_json, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ''', (session_id, component_name, component_type, file_path,
-                    analysis_result.get('total_lines', 0),
-                    len(analysis_result.get('fields', [])),
-                    business_purpose,
-                    float(complexity_score),
-                    analysis_result.get('content', ''),
-                    json.dumps(analysis_result)
-                ))
+                    SELECT COUNT(*) FROM component_analysis 
+                    WHERE session_id = ? AND component_name = ? AND component_type = ?
+                ''', (session_id, component_name, component_type))
                 
-                logger.info(f"Successfully stored component: {component_name}")
+                if cursor.fetchone()[0] > 0:
+                    logger.info(f"Component {component_name} already exists, updating...")
+                    cursor.execute('''
+                        UPDATE component_analysis 
+                        SET total_lines = ?, total_fields = ?, business_purpose = ?, 
+                            complexity_score = ?, analysis_result_json = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE session_id = ? AND component_name = ? AND component_type = ?
+                    ''', (
+                        analysis_result.get('total_lines', 0),
+                        len(analysis_result.get('fields', [])),
+                        analysis_result.get('business_purpose', ''),
+                        float(analysis_result.get('complexity_score', 0.5)),
+                        json.dumps(analysis_result),
+                        session_id, component_name, component_type
+                    ))
+                else:
+                    cursor.execute('''
+                        INSERT INTO component_analysis 
+                        (session_id, component_name, component_type, file_path, 
+                        total_lines, total_fields, business_purpose, complexity_score,
+                        source_content, analysis_result_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        session_id, component_name, component_type, file_path,
+                        analysis_result.get('total_lines', 0),
+                        len(analysis_result.get('fields', [])),
+                        analysis_result.get('business_purpose', ''),
+                        float(analysis_result.get('complexity_score', 0.5)),
+                        analysis_result.get('content', ''),
+                        json.dumps(analysis_result)
+                    ))
                 
-                # Store record layouts if present (skip if already stored by component extractor)
-                if component_type == 'PROGRAM' and 'record_layouts' in analysis_result:
-                    existing_layouts = self.get_record_layouts(session_id, component_name)
-                    
-                    if not existing_layouts:  # Only store if not already stored
-                        logger.info(f"Storing {len(analysis_result['record_layouts'])} record layouts for {component_name}")
-                        
-                        for layout_data in analysis_result['record_layouts']:
-                            try:
-                                self.store_record_layout(session_id, layout_data, component_name)
-                            except Exception as layout_error:
-                                logger.error(f"Error storing layout {layout_data.get('name', 'unknown')}: {str(layout_error)}")
-                                continue
-                    else:
-                        logger.debug(f"Record layouts already exist for {component_name}, skipping storage")
+                logger.info(f"Successfully stored/updated component: {component_name}")
                 
         except Exception as e:
-                logger.error(f"Error storing component analysis for {component_name}: {str(e)}")
-                raise
+            logger.error(f"Error storing component {component_name}: {str(e)}")
+            raise
 
     
     def store_record_layout(self, session_id: str, layout_data: Dict, program_name: str):
