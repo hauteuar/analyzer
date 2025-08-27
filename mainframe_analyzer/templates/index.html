@@ -2343,12 +2343,14 @@ async function showFieldOperationsWithCode(fieldName, operationsJson, layoutName
         displayEmptyDependencies();
     }
 }
+
 function displayEmptyDependencies() {
     document.getElementById('coreComponents').innerHTML = 
         '<p class="text-muted">Upload and analyze COBOL programs to see system architecture</p>';
     ['inputSources', 'externalInterfaces', 'outputFiles', 'missingDependencies']
         .forEach(id => document.getElementById(id).innerHTML = '<p class="text-muted">No data available</p>');
 }
+
 
 function displayCityView(dependencies, dependencyGroups) {
     console.log('Displaying city view with', dependencies.length, 'dependencies');
@@ -2368,10 +2370,10 @@ function displayCityView(dependencies, dependencyGroups) {
     populateFlowSection('missingDependencies', categorizedDeps.missing, 'missing');
 }
 
-        function categorizeDependencies(dependencies) {
+function categorizeDependencies(dependencies) {
     const categorized = {
         inputs: new Set(),
-        interfaces: new Set(),
+        interfaces: new Set(), 
         components: new Set(),
         outputs: new Set(),
         missing: new Set()
@@ -2379,52 +2381,56 @@ function displayCityView(dependencies, dependencyGroups) {
     
     dependencies.forEach(dep => {
         const source = dep.source_component;
-        const target = dep.target_component;
+        const target = dep.target_component; 
         const type = dep.relationship_type;
         
-        // Add source as core component with friendly name
-        categorized.components.add({
-        name: target,
-        friendly_name: friendlyNames[target] || generateFriendlyName(target),
-        type: 'Record Layout',
-        confidence: dep.confidence_score
-    });
+        console.log('Processing dependency:', source, '->', target, '(', type, ')');
         
-        // Enhanced categorization
-        if (type === 'INPUT_FILE') {
+        // Add source as core component
+        categorized.components.add({
+            name: source,
+            friendly_name: generateFriendlyName(source),
+            type: 'Program',
+            confidence: dep.confidence_score || 0.8
+        });
+        
+        // Categorize target based on relationship type
+        if (type === 'INPUT_FILE' || type === 'FILE_ACCESS') {
             categorized.inputs.add({
                 name: target,
                 friendly_name: generateFriendlyName(target),
                 type: 'Input File',
-                confidence: dep.confidence_score
+                confidence: dep.confidence_score || 0.8
             });
         } else if (type === 'OUTPUT_FILE') {
             categorized.outputs.add({
                 name: target,
                 friendly_name: generateFriendlyName(target),
                 type: 'Output File', 
-                confidence: dep.confidence_score
+                confidence: dep.confidence_score || 0.8
             });
         } else if (type === 'CICS_FILE') {
             categorized.interfaces.add({
                 name: target,
                 friendly_name: generateFriendlyName(target),
                 type: 'CICS Interface',
-                confidence: dep.confidence_score
+                confidence: dep.confidence_score || 0.8
             });
-        } else if (type === 'MQ_QUEUE' || target.includes('MQ') || target.includes('QUEUE')) {
-            categorized.interfaces.add({
+        } else if (type === 'PROGRAM_CALL') {
+            categorized.components.add({
                 name: target,
                 friendly_name: generateFriendlyName(target),
-                type: 'MQ Queue',
-                confidence: dep.confidence_score
+                type: 'Called Program',
+                confidence: dep.confidence_score || 0.8
             });
-        } else if (type === 'XML_SERVICE' || target.includes('XML') || target.includes('JSON')) {
-            categorized.interfaces.add({
+        } else {
+            // Default to missing/unknown
+            categorized.missing.add({
                 name: target,
                 friendly_name: generateFriendlyName(target),
-                type: 'XML/JSON API',
-                confidence: dep.confidence_score
+                type: type.replace('_', ' '),
+                confidence: dep.confidence_score || 0.5,
+                reason: 'Unknown relationship type'
             });
         }
     });
@@ -2434,6 +2440,7 @@ function displayCityView(dependencies, dependencyGroups) {
         categorized[key] = Array.from(categorized[key]);
     });
     
+    console.log('Final categorized dependencies:', categorized);
     return categorized;
 }
 
