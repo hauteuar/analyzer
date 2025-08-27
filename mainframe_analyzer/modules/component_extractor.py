@@ -1154,6 +1154,143 @@ File Content ({filename}):
         
         return components
     
+    def _extract_and_store_field_relationships(self, session_id: str, components: List[Dict], filename: str):
+        """Extract and store field relationships in database"""
+        try:
+            # Get program component
+            program_component = None
+            record_layouts = []
+            
+            for component in components:
+                if component['type'] == 'PROGRAM':
+                    program_component = component
+                elif component['type'] == 'RECORD_LAYOUT':
+                    record_layouts.append(component)
+            
+            if not program_component:
+                return
+            
+            # Extract data movements from program content
+            program_content = program_component.get('content', '')
+            data_movements = self.cobol_parser.extract_data_movements(program_content.split('\n'))
+            
+            # Store field relationships
+            for movement in data_movements:
+                if movement['operation'] == 'MOVE':
+                    # Store field details for both source and target
+                    self._store_field_operation(
+                        session_id, movement['source_field'], program_component['name'],
+                        'SOURCE', movement['line_number'], movement['line_content']
+                    )
+                    self._store_field_operation(
+                        session_id, movement['target_field'], program_component['name'],
+                        'TARGET', movement['line_number'], movement['line_content']
+                    )
+                    
+                elif movement['operation'] == 'COMPUTE':
+                    self._store_field_operation(
+                        session_id, movement['target_field'], program_component['name'],
+                        'COMPUTED', movement['line_number'], movement['line_content']
+                    )
+            
+            # Analyze field usage for each field in record layouts
+            for layout in record_layouts:
+                for field_data in layout.get('fields', []):
+                    field_usage = self.cobol_parser.analyze_field_usage(
+                        program_content.split('\n'), field_data['name']
+                    )
+                    
+                    # Determine usage type
+                    usage_type = self._determine_field_usage_type(field_usage)
+                    
+                    # Store enhanced field details
+                    self.db_manager.store_field_details(session_id, {
+                        'name': field_data['name'],
+                        'operation_type': 'DEFINITION',
+                        'line_number': field_data.get('line_number', 0),
+                        'code_snippet': f"Level {field_data['level']} {field_data['name']} {field_data.get('picture', '')}",
+                        'usage': usage_type,
+                        'business_purpose': self._infer_business_purpose_from_usage(field_usage, field_data['name'])
+                    }, program_component['name'])
+                    
+        except Exception as e:
+            logger.error(f"Error extracting field relationships: {str(e)}")
+    
+    def _store_field_operation(self, session_id: str, field_name: str, program_name: str,
+                             operation_type: str, line_number: int, code_snippet: str):
+        """Store individual field operation"""
+        try:
+            self.db_manager.store_field_details(session_id, {
+                'name': field_name,
+                'operation_type': operation_type,
+                'line_number': line_number,
+                'code_snippet': code_snippet,
+                'usage': self._map_operation_to_usage(operation_type),
+                'business_purpose': f"Field used in {operation_type.lower()} operation"
+            }, program_name)
+        except Exception as e:
+            logger.error(f"Error storing field operation: {str(e)}")
+    
+    def _determine_field_usage_type(self, field_usage: Dict) -> str:
+        """Determine field usage type from analysis"""
+        if field_usage['target_operations']:
+            if field_usage['source_operations']:
+                return 'INPUT_OUTPUT'
+            else:
+                return 'INPUT'
+        elif field_usage['source_operations']:
+            return 'OUTPUT'
+        elif field_usage['operations']:
+            return 'REFERENCE'
+        elif field_usage['references']:
+            return 'REFERENCE'
+        else:
+            return 'UNUSED'
+    
+    def _determine_enhanced_usage_type(self, usage_analysis: Dict) -> str:
+        """Determine enhanced usage type from comprehensive analysis"""
+        if usage_analysis.get('target_operations') and usage_analysis.get('source_operations'):
+            return 'INPUT_OUTPUT'
+        elif usage_analysis.get('target_operations'):
+            return 'INPUT'
+        elif usage_analysis.get('source_operations'):
+            return 'OUTPUT'
+        elif usage_analysis.get('operations'):
+            # Check if used in conditions
+            conditions = [op for op in usage_analysis['operations'] if op.get('operation') == 'CONDITION']
+            if conditions:
+                return 'REFERENCE'
+            return 'DERIVED'
+        elif usage_analysis.get('references'):
+            return 'REFERENCE'
+        else:
+            return 'STATIC'
+
+    def _map_operation_to_usage(self, operation_type: str) -> str:
+        """Map operation type to usage type"""
+        mapping = {
+            'SOURCE': 'OUTPUT',
+            'TARGET': 'INPUT',
+            'COMPUTED': 'DERIVED',
+            'DEFINITION': 'STATIC'
+        }
+        return mapping.get(operation_type, 'REFERENCE')
+    
+    def _infer_business_purpose_from_usage(self, field_usage: Dict, field_name: str) -> str:
+        """Infer business purpose from field usage analysis"""
+        if field_usage['target_operations']:
+            return f"Populated field - receives data from other sources"
+        elif field_usage['source_operations']:
+            return f"Source field - provides data to other fields"
+        elif field_usage['operations']:
+            operation_types = [op['operation'] for op in field_usage['operations']]
+            if 'CONDITION' in operation_types:
+                return f"Control field - used in conditional logic"
+            else:
+                return f"Processing field - used in {', '.join(set(operation_types)).lower()} operations"
+        else:
+            return f"Static field - defined but not actively processed"
+        
     def _extract_and_store_dependencies(self, session_id: str, components: List[Dict], filename: str):
         """Enhanced dependency extraction including file operations"""
         try:
@@ -1244,186 +1381,6 @@ File Content ({filename}):
                         ))
                 
                 logger.info(f"Stored {len(dependencies)} dependencies for {program_name}")
-            
-        except Exception as e:
-            logger.error(f"Error extracting dependencies: {str(e)}")
-    
-    def _store_field_operation(self, session_id: str, field_name: str, program_name: str,
-                             operation_type: str, line_number: int, code_snippet: str):
-        """Store individual field operation"""
-        try:
-            self.db_manager.store_field_details(session_id, {
-                'name': field_name,
-                'operation_type': operation_type,
-                'line_number': line_number,
-                'code_snippet': code_snippet,
-                'usage': self._map_operation_to_usage(operation_type),
-                'business_purpose': f"Field used in {operation_type.lower()} operation"
-            }, program_name)
-        except Exception as e:
-            logger.error(f"Error storing field operation: {str(e)}")
-    
-    def _determine_field_usage_type(self, field_usage: Dict) -> str:
-        """Determine field usage type from analysis"""
-        if field_usage['target_operations']:
-            if field_usage['source_operations']:
-                return 'INPUT_OUTPUT'
-            else:
-                return 'INPUT'
-        elif field_usage['source_operations']:
-            return 'OUTPUT'
-        elif field_usage['operations']:
-            return 'REFERENCE'
-        elif field_usage['references']:
-            return 'REFERENCE'
-        else:
-            return 'UNUSED'
-    
-    def _determine_enhanced_usage_type(self, usage_analysis: Dict) -> str:
-        """Determine enhanced usage type from comprehensive analysis"""
-        if usage_analysis.get('target_operations') and usage_analysis.get('source_operations'):
-            return 'INPUT_OUTPUT'
-        elif usage_analysis.get('target_operations'):
-            return 'INPUT'
-        elif usage_analysis.get('source_operations'):
-            return 'OUTPUT'
-        elif usage_analysis.get('operations'):
-            # Check if used in conditions
-            conditions = [op for op in usage_analysis['operations'] if op.get('operation') == 'CONDITION']
-            if conditions:
-                return 'REFERENCE'
-            return 'DERIVED'
-        elif usage_analysis.get('references'):
-            return 'REFERENCE'
-        else:
-            return 'STATIC'
-
-    def _map_operation_to_usage(self, operation_type: str) -> str:
-        """Map operation type to usage type"""
-        mapping = {
-            'SOURCE': 'OUTPUT',
-            'TARGET': 'INPUT',
-            'COMPUTED': 'DERIVED',
-            'DEFINITION': 'STATIC'
-        }
-        return mapping.get(operation_type, 'REFERENCE')
-    
-    def _infer_business_purpose_from_usage(self, field_usage: Dict, field_name: str) -> str:
-        """Infer business purpose from field usage analysis"""
-        if field_usage['target_operations']:
-            return f"Populated field - receives data from other sources"
-        elif field_usage['source_operations']:
-            return f"Source field - provides data to other fields"
-        elif field_usage['operations']:
-            operation_types = [op['operation'] for op in field_usage['operations']]
-            if 'CONDITION' in operation_types:
-                return f"Control field - used in conditional logic"
-            else:
-                return f"Processing field - used in {', '.join(set(operation_types)).lower()} operations"
-        else:
-            return f"Static field - defined but not actively processed"
-        
-    def _extract_and_store_dependencies(self, session_id: str, components: List[Dict], filename: str):
-        """Extract and store component dependencies"""
-        try:
-            logger.info(f"Extracting dependencies for {len(components)} components")
-            
-            dependencies = []
-            
-            # Get main program component
-            main_program = None
-            for component in components:
-                if component.get('type') == 'PROGRAM':
-                    main_program = component
-                    break
-            
-            if not main_program:
-                logger.warning("No main program found for dependency extraction")
-                return
-            
-            # Extract program calls as dependencies
-            for call in main_program.get('program_calls', []):
-                dependency = {
-                    'source_component': main_program['name'],
-                    'target_component': call.get('program_name', call.get('name', 'Unknown')),
-                    'relationship_type': 'PROGRAM_CALL',
-                    'interface_type': 'COBOL_CALL',
-                    'confidence_score': 0.9,
-                    'analysis_details_json': json.dumps({
-                        'line_number': call.get('line_number', 0),
-                        'call_type': call.get('call_type', 'STATIC'),
-                        'parameters': call.get('parameters', [])
-                    })
-                }
-                dependencies.append(dependency)
-            
-            # Extract copybook dependencies
-            for copybook in main_program.get('copybooks', []):
-                dependency = {
-                    'source_component': main_program['name'],
-                    'target_component': copybook.get('copybook_name', copybook.get('name', 'Unknown')),
-                    'relationship_type': 'COPYBOOK_INCLUDE',
-                    'interface_type': 'COBOL_COPY',
-                    'confidence_score': 0.95,
-                    'analysis_details_json': json.dumps({
-                        'line_number': copybook.get('line_number', 0),
-                        'include_type': 'COPY',
-                        'library': copybook.get('library', '')
-                    })
-                }
-                dependencies.append(dependency)
-            
-            # Extract CICS file dependencies
-            for cics_op in main_program.get('cics_operations', []):
-                if 'file_name' in cics_op:
-                    dependency = {
-                        'source_component': main_program['name'],
-                        'target_component': cics_op['file_name'],
-                        'relationship_type': 'CICS_FILE_ACCESS',
-                        'interface_type': 'CICS',
-                        'confidence_score': 0.9,
-                        'analysis_details_json': json.dumps({
-                            'operation': cics_op.get('operation', 'UNKNOWN'),
-                            'access_type': cics_op.get('access_type', 'READ_WRITE'),
-                            'line_number': cics_op.get('line_number', 0)
-                        })
-                    }
-                    dependencies.append(dependency)
-            
-            # Extract record layout dependencies
-            for layout in main_program.get('record_layouts', []):
-                dependency = {
-                    'source_component': main_program['name'],
-                    'target_component': layout.get('name', 'Unknown'),
-                    'relationship_type': 'USES_RECORD_LAYOUT',
-                    'interface_type': 'DATA_STRUCTURE',
-                    'confidence_score': 0.95,
-                    'analysis_details_json': json.dumps({
-                        'layout_level': layout.get('level', '01'),
-                        'field_count': len(layout.get('fields', [])),
-                        'line_start': layout.get('line_start', 0)
-                    })
-                }
-                dependencies.append(dependency)
-            
-            # Store all dependencies
-            if dependencies:
-                logger.info(f"Storing {len(dependencies)} dependencies")
-                
-                with self.db_manager.get_connection() as conn:
-                    cursor = conn.cursor()
-                    
-                    for dep in dependencies:
-                        cursor.execute('''
-                            INSERT OR REPLACE INTO dependency_relationships 
-                            (session_id, source_component, target_component, relationship_type,
-                            interface_type, confidence_score, analysis_details_json)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        ''', (session_id, dep['source_component'], dep['target_component'],
-                            dep['relationship_type'], dep['interface_type'],
-                            dep['confidence_score'], dep['analysis_details_json']))
-                
-                logger.info(f"Successfully stored {len(dependencies)} dependencies")
             
         except Exception as e:
             logger.error(f"Error extracting dependencies: {str(e)}")
