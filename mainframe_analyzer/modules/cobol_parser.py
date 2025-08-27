@@ -336,7 +336,7 @@ class COBOLParser:
         return components
     
     def extract_record_layouts(self, lines: List[str]) -> List[RecordLayout]:
-        """Extract 01 level record layouts, filtering out FILLER entries"""
+        """Extract ALL 01 level record layouts separately"""
         layouts = []
         current_layout = None
         current_fields = []
@@ -355,16 +355,19 @@ class COBOLParser:
             if data_match:
                 level = int(data_match.group(1))
                 name = data_match.group(2)
+                rest_of_line = data_match.group(3) or ""
                 
                 if level == 1:
-                    # Finalize previous layout
-                    if current_layout and current_fields:
-                        current_layout.line_end = i
-                        current_layout.fields = current_fields
-                        # Calculate proper source code lines
-                        source_lines = lines[current_layout.line_start-1:current_layout.line_end]
-                        current_layout.source_code = '\n'.join(source_lines)
-                        layouts.append(current_layout)
+                    # Finalize previous layout if it exists
+                    if current_layout is not None:
+                        if current_fields:  # Only store if has fields
+                            current_layout.fields = current_fields
+                            current_layout.line_end = i
+                            # Get actual source lines for this layout
+                            source_lines = lines[current_layout.line_start-1:current_layout.line_end]
+                            current_layout.source_code = '\n'.join(source_lines)
+                            layouts.append(current_layout)
+                            logger.info(f"Completed layout: {current_layout.name} with {len(current_fields)} fields")
                     
                     # Skip FILLER 01 levels
                     if name.upper() == 'FILLER':
@@ -372,7 +375,7 @@ class COBOLParser:
                         current_fields = []
                         continue
                     
-                    # Start new layout
+                    # Start new 01 level layout
                     current_layout = RecordLayout(
                         name=name,
                         level=level,
@@ -383,21 +386,25 @@ class COBOLParser:
                         friendly_name=self.generate_friendly_name(name, 'Record Layout')
                     )
                     current_fields = []
-                
+                    logger.info(f"Started new 01 layout: {name}")
+                    
                 elif current_layout and level > 1:
-                    # Skip FILLER sub-fields too
-                    if name.upper() != 'FILLER':
-                        field = self.parse_cobol_field(line, i + 1, level, name, data_match.group(3) or "")
+                    # Only add field if we have a current layout
+                    if name.upper() != 'FILLER':  # Skip FILLER fields
+                        field = self.parse_cobol_field(line, i + 1, level, name, rest_of_line)
                         current_fields.append(field)
+                        logger.debug(f"Added field {name} (level {level}) to layout {current_layout.name}")
         
-        # Close last layout
-        if current_layout and current_fields:
+        # Don't forget the last layout
+        if current_layout is not None and current_fields:
+            current_layout.fields = current_fields
             current_layout.line_end = len(lines)
             source_lines = lines[current_layout.line_start-1:current_layout.line_end]
             current_layout.source_code = '\n'.join(source_lines)
-            current_layout.fields = current_fields
             layouts.append(current_layout)
+            logger.info(f"Completed final layout: {current_layout.name} with {len(current_fields)} fields")
         
+        logger.info(f"Total layouts extracted: {len(layouts)}")
         return layouts
         
     def parse_cobol_field(self, line: str, line_number: int, level: int, name: str, definition: str) -> CobolField:
@@ -438,10 +445,54 @@ class COBOLParser:
         return field
     
     def extract_file_operations(self, lines: List[str]) -> List[Dict]:
-        """Extract file operations"""
+        """Extract file operations including FD declarations"""
         operations = []
         
+        # Enhanced patterns for file operations
+        fd_pattern = r'FD\s+([A-Z0-9\-]+)'  # File Description
+        select_pattern = r'SELECT\s+([A-Z0-9\-]+)\s+ASSIGN\s+TO\s+([A-Z0-9\-]+)'  # File assignment
+        
         for i, line in enumerate(lines):
+            line_upper = line.upper().strip()
+            
+            # Detect FD (File Description) entries
+            fd_match = re.search(fd_pattern, line_upper)
+            if fd_match:
+                file_name = fd_match.group(1)
+                
+                # Determine if input or output based on common naming patterns
+                operation_type = 'READ'  # Default
+                if any(pattern in file_name.upper() for pattern in ['INPUT', 'IN-', 'READ']):
+                    operation_type = 'READ'
+                elif any(pattern in file_name.upper() for pattern in ['OUTPUT', 'OUT-', 'WRITE', 'REPORT']):
+                    operation_type = 'WRITE'
+                
+                operations.append({
+                    'operation': operation_type,
+                    'file_name': file_name,
+                    'friendly_name': self.generate_friendly_name(file_name, 'File'),
+                    'line_number': i + 1,
+                    'line_content': line.strip(),
+                    'file_type': 'FD_FILE'
+                })
+            
+            # Detect SELECT statements
+            select_match = re.search(select_pattern, line_upper)
+            if select_match:
+                logical_name = select_match.group(1)
+                physical_name = select_match.group(2)
+                
+                operations.append({
+                    'operation': 'SELECT',
+                    'file_name': logical_name,
+                    'physical_name': physical_name,
+                    'friendly_name': self.generate_friendly_name(logical_name, 'File'),
+                    'line_number': i + 1,
+                    'line_content': line.strip(),
+                    'file_type': 'SELECT_FILE'
+                })
+            
+            # Existing READ/WRITE/OPEN/CLOSE detection
             matches = self.file_op_pattern.findall(line)
             for operation, file_name in matches:
                 operations.append({
@@ -449,7 +500,8 @@ class COBOLParser:
                     'file_name': file_name,
                     'friendly_name': self.generate_friendly_name(file_name, 'File'),
                     'line_number': i + 1,
-                    'line_content': line.strip()
+                    'line_content': line.strip(),
+                    'file_type': 'PROCEDURAL_FILE'
                 })
         
         return operations

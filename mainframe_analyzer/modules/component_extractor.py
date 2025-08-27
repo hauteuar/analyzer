@@ -142,7 +142,7 @@ class ComponentExtractor:
             
             # Generate LLM summary
             program_summary = self._generate_component_summary(session_id, parsed_data, 'PROGRAM')
-            console.log(program_summary)
+            logger.info(f"program_summary{program_summary   }")
             # Create main program component with complete source
             program_name = filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', '')
             program_component = {
@@ -1154,67 +1154,99 @@ File Content ({filename}):
         
         return components
     
-    def _extract_and_store_field_relationships(self, session_id: str, components: List[Dict], filename: str):
-        """Extract and store field relationships in database"""
+    def _extract_and_store_dependencies(self, session_id: str, components: List[Dict], filename: str):
+        """Enhanced dependency extraction including file operations"""
         try:
-            # Get program component
-            program_component = None
-            record_layouts = []
-            
+            main_program = None
             for component in components:
-                if component['type'] == 'PROGRAM':
-                    program_component = component
-                elif component['type'] == 'RECORD_LAYOUT':
-                    record_layouts.append(component)
+                if component.get('type') == 'PROGRAM':
+                    main_program = component
+                    break
             
-            if not program_component:
+            if not main_program:
                 return
             
-            # Extract data movements from program content
-            program_content = program_component.get('content', '')
-            data_movements = self.cobol_parser.extract_data_movements(program_content.split('\n'))
+            dependencies = []
+            program_name = main_program['name']
             
-            # Store field relationships
-            for movement in data_movements:
-                if movement['operation'] == 'MOVE':
-                    # Store field details for both source and target
-                    self._store_field_operation(
-                        session_id, movement['source_field'], program_component['name'],
-                        'SOURCE', movement['line_number'], movement['line_content']
-                    )
-                    self._store_field_operation(
-                        session_id, movement['target_field'], program_component['name'],
-                        'TARGET', movement['line_number'], movement['line_content']
-                    )
+            # Extract FILE dependencies (FD files)
+            file_operations = main_program.get('file_operations', [])
+            for file_op in file_operations:
+                file_name = file_op.get('file_name')
+                operation = file_op.get('operation', 'UNKNOWN')
+                
+                if file_name:
+                    # Determine relationship type based on operation
+                    if operation in ['READ', 'OPEN'] or 'INPUT' in file_name.upper():
+                        relationship_type = 'INPUT_FILE'
+                    elif operation in ['WRITE', 'REWRITE'] or 'OUTPUT' in file_name.upper():
+                        relationship_type = 'OUTPUT_FILE'
+                    else:
+                        relationship_type = 'FILE_ACCESS'
                     
-                elif movement['operation'] == 'COMPUTE':
-                    self._store_field_operation(
-                        session_id, movement['target_field'], program_component['name'],
-                        'COMPUTED', movement['line_number'], movement['line_content']
-                    )
+                    dependencies.append({
+                        'source_component': program_name,
+                        'target_component': file_name,
+                        'relationship_type': relationship_type,
+                        'interface_type': 'FILE_SYSTEM',
+                        'confidence_score': 0.9,
+                        'analysis_details_json': json.dumps({
+                            'operation': operation,
+                            'line_number': file_op.get('line_number', 0),
+                            'file_type': file_op.get('file_type', 'UNKNOWN')
+                        })
+                    })
             
-            # Analyze field usage for each field in record layouts
-            for layout in record_layouts:
-                for field_data in layout.get('fields', []):
-                    field_usage = self.cobol_parser.analyze_field_usage(
-                        program_content.split('\n'), field_data['name']
-                    )
-                    
-                    # Determine usage type
-                    usage_type = self._determine_field_usage_type(field_usage)
-                    
-                    # Store enhanced field details
-                    self.db_manager.store_field_details(session_id, {
-                        'name': field_data['name'],
-                        'operation_type': 'DEFINITION',
-                        'line_number': field_data.get('line_number', 0),
-                        'code_snippet': f"Level {field_data['level']} {field_data['name']} {field_data.get('picture', '')}",
-                        'usage': usage_type,
-                        'business_purpose': self._infer_business_purpose_from_usage(field_usage, field_data['name'])
-                    }, program_component['name'])
-                    
+            # Extract CICS dependencies
+            cics_operations = main_program.get('cics_operations', [])
+            for cics_op in cics_operations:
+                if 'file_name' in cics_op:
+                    dependencies.append({
+                        'source_component': program_name,
+                        'target_component': cics_op['file_name'],
+                        'relationship_type': 'CICS_FILE',
+                        'interface_type': 'CICS',
+                        'confidence_score': 0.9,
+                        'analysis_details_json': json.dumps({
+                            'operation': cics_op.get('operation', 'READ'),
+                            'line_number': cics_op.get('line_number', 0)
+                        })
+                    })
+            
+            # Extract PROGRAM CALL dependencies
+            program_calls = main_program.get('program_calls', [])
+            for call in program_calls:
+                dependencies.append({
+                    'source_component': program_name,
+                    'target_component': call.get('program_name', 'Unknown'),
+                    'relationship_type': 'PROGRAM_CALL',
+                    'interface_type': 'COBOL',
+                    'confidence_score': 0.95,
+                    'analysis_details_json': json.dumps({
+                        'line_number': call.get('line_number', 0)
+                    })
+                })
+            
+            # Store dependencies
+            if dependencies:
+                with self.db_manager.get_connection() as conn:
+                    cursor = conn.cursor()
+                    for dep in dependencies:
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO dependency_relationships 
+                            (session_id, source_component, target_component, relationship_type,
+                            interface_type, confidence_score, analysis_details_json)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            session_id, dep['source_component'], dep['target_component'],
+                            dep['relationship_type'], dep['interface_type'],
+                            dep['confidence_score'], dep['analysis_details_json']
+                        ))
+                
+                logger.info(f"Stored {len(dependencies)} dependencies for {program_name}")
+            
         except Exception as e:
-            logger.error(f"Error extracting field relationships: {str(e)}")
+            logger.error(f"Error extracting dependencies: {str(e)}")
     
     def _store_field_operation(self, session_id: str, field_name: str, program_name: str,
                              operation_type: str, line_number: int, code_snippet: str):

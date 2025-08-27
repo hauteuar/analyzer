@@ -108,7 +108,27 @@
             font-weight: 600;
             color: #667eea;
         }
+        .panel-restore {
+            position: fixed;
+            top: 50%;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.5rem;
+            border-radius: 0 4px 4px 0;
+            cursor: pointer;
+            transform: translateY(-50%);
+            z-index: 1001;
+            font-size: 0.8rem;
+        }
 
+        .panel-restore.left {
+            left: 0;
+        }
+
+        .panel-restore.right {
+            right: 0;
+        }
         .collapse-btn {
             background: none;
             border: none;
@@ -2276,7 +2296,6 @@
                 const source = dep.source_component;
                 const target = dep.target_component;
                 const type = dep.relationship_type;
-                const details = dep.details || {};
                 
                 // Add source as core component
                 categorized.components.add({
@@ -2285,48 +2304,27 @@
                     confidence: dep.confidence_score
                 });
                 
-                // Categorize based on operation type
-                if (type === 'CICS_FILE') {
-                    const operation = details.operation || 'UNKNOWN';
-                    
-                    if (operation.includes('READ') || operation.includes('READ')) {
-                        categorized.inputs.add({
-                            name: target,
-                            type: 'CICS Input File',
-                            operation: operation,
-                            confidence: dep.confidence_score
-                        });
-                    } else if (operation.includes('WRITE')) {
-                        categorized.outputs.add({
-                            name: target,
-                            type: 'CICS Output File',
-                            operation: operation,
-                            confidence: dep.confidence_score
-                        });
-                    } else if (operation.includes('REWRITE')) {
-                        // Add to both input and output
-                        categorized.inputs.add({
-                            name: target + ' (Read)',
-                            type: 'CICS I/O File',
-                            operation: operation,
-                            confidence: dep.confidence_score
-                        });
-                        categorized.outputs.add({
-                            name: target + ' (Write)',
-                            type: 'CICS I/O File', 
-                            operation: operation,
-                            confidence: dep.confidence_score
-                        });
-                    } else {
-                        categorized.interfaces.add({
-                            name: target,
-                            type: 'CICS File',
-                            operation: operation,
-                            confidence: dep.confidence_score
-                        });
-                    }
+                // Categorize based on relationship type
+                if (type === 'INPUT_FILE') {
+                    categorized.inputs.add({
+                        name: target,
+                        type: 'Input File',
+                        confidence: dep.confidence_score
+                    });
+                } else if (type === 'OUTPUT_FILE') {
+                    categorized.outputs.add({
+                        name: target,
+                        type: 'Output File',
+                        confidence: dep.confidence_score
+                    });
+                } else if (type === 'CICS_FILE') {
+                    categorized.interfaces.add({
+                        name: target,
+                        type: 'CICS File',
+                        confidence: dep.confidence_score
+                    });
                 } else if (type === 'PROGRAM_CALL') {
-                    // Check if called program exists in our analysis
+                    // Check if target program exists
                     const programExists = dependencies.some(d => d.source_component === target);
                     
                     if (!programExists) {
@@ -2343,19 +2341,6 @@
                             confidence: dep.confidence_score
                         });
                     }
-                } else if (type === 'COPYBOOK_INCLUDE') {
-                    categorized.missing.add({
-                        name: target,
-                        type: 'Missing Copybook',
-                        reason: 'Referenced but not included in analysis',
-                        confidence: dep.confidence_score
-                    });
-                } else if (type === 'USES_RECORD_LAYOUT') {
-                    categorized.components.add({
-                        name: target,
-                        type: 'Record Layout',
-                        confidence: dep.confidence_score
-                    });
                 }
             });
             
@@ -2368,32 +2353,32 @@
         }
 
         function populateFlowSection(sectionId, items, sectionType) {
-            const container = document.getElementById(sectionId);
-            
-            if (!items || items.length === 0) {
-                container.innerHTML = `<p class="text-muted">No ${sectionType} dependencies found</p>`;
-                return;
-            }
-            
-            items.forEach(item => {
-                const flowItem = document.createElement('div');
-                flowItem.className = 'flow-item';
-                flowItem.onclick = () => showItemDetails(item);
-                
-                const confidence = item.confidence ? `${(item.confidence * 100).toFixed(0)}%` : 'N/A';
-                
-                flowItem.innerHTML = `
-                    <div class="flow-item-title">${item.name}</div>
-                    <div class="flow-item-type">${item.type}</div>
-                    <div style="font-size: 0.7rem; color: #6c757d; margin-top: 0.25rem;">
-                        Confidence: ${confidence}
-                    </div>
-                    ${item.reason ? `<div style="font-size: 0.7rem; color: #dc3545;">${item.reason}</div>` : ''}
-                `;
-                
-                container.appendChild(flowItem);
-            });
-        }
+                    const container = document.getElementById(sectionId);
+                    
+                    if (!items || items.length === 0) {
+                        container.innerHTML = `<p class="text-muted">No ${sectionType} dependencies found</p>`;
+                        return;
+                    }
+                    
+                    items.forEach(item => {
+                        const flowItem = document.createElement('div');
+                        flowItem.className = 'flow-item';
+                        flowItem.onclick = () => showItemDetails(item);
+                        
+                        const confidence = item.confidence ? `${(item.confidence * 100).toFixed(0)}%` : 'N/A';
+                        
+                        flowItem.innerHTML = `
+                            <div class="flow-item-title">${item.name}</div>
+                            <div class="flow-item-type">${item.type}</div>
+                            <div style="font-size: 0.7rem; color: #6c757d; margin-top: 0.25rem;">
+                                Confidence: ${confidence}
+                            </div>
+                            ${item.reason ? `<div style="font-size: 0.7rem; color: #dc3545;">${item.reason}</div>` : ''}
+                        `;
+                        
+                        container.appendChild(flowItem);
+                    });
+                }
 
         function showItemDetails(item) {
             alert(`Details for ${item.name}:\nType: ${item.type}\nConfidence: ${item.confidence || 'N/A'}`);
@@ -2745,17 +2730,34 @@
             const panel = document.getElementById(side + 'Panel');
             const isCollapsed = panel.classList.contains('collapsed');
             
-            panel.classList.toggle('collapsed');
-            
-            // Update button text and add restore capability
-            const button = panel.querySelector('.collapse-btn');
             if (isCollapsed) {
-                button.textContent = side === 'left' ? '◀' : '▶';
-                button.title = 'Collapse panel';
+                // Restore panel
+                panel.classList.remove('collapsed');
+                removeRestoreButton(side);
             } else {
-                button.textContent = side === 'left' ? '▶' : '◀';
-                button.title = 'Restore panel';
+                // Collapse panel
+                panel.classList.add('collapsed');
+                addRestoreButton(side);
             }
+        }
+
+        function addRestoreButton(side) {
+            const existing = document.getElementById(`restore-${side}`);
+            if (existing) existing.remove();
+            
+            const button = document.createElement('button');
+            button.id = `restore-${side}`;
+            button.className = `panel-restore ${side}`;
+            button.textContent = side === 'left' ? '📁' : '💬';
+            button.title = `Restore ${side} panel`;
+            button.onclick = () => togglePanel(side);
+            
+            document.body.appendChild(button);
+        }
+
+        function removeRestoreButton(side) {
+            const button = document.getElementById(`restore-${side}`);
+            if (button) button.remove();
         }
 
         // Load components table with hierarchy support
