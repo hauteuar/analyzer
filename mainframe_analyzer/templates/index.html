@@ -1896,6 +1896,22 @@
                             showErrorInStep(file.name, data.error);
                         }
                     }
+                    console.log('Upload response:', data);
+                    console.log('Components received:', data.components);
+
+                    // Check if components have LLM summaries
+                    data.components.forEach(component => {
+                        console.log('Component:', component.name);
+                        console.log('Business purpose:', component.business_purpose);
+                        console.log('LLM summary:', component.llm_summary);
+                    });
+                    // In handleFileUpload, after successful processing:
+                    setTimeout(() => {
+                        hideLoading();
+                        refreshUI();  // Make sure this is called
+                        loadComponentsList();  // Explicitly call this too
+                        loadDashboardSummaries();  // And this
+                    }, 1500);
                 } catch (error) {
                     console.error(`💥 Error processing ${file.name}:`, error);
                     showErrorInStep(file.name, error.message);
@@ -3254,8 +3270,12 @@ function displayComponentsHierarchy(components) {
         let complexityScore = 0;
         let derivedCount = 0;
         
-        // Try to get business purpose from direct field first
-        if (program.business_purpose) {
+        console.log('Processing program for display:', program.component_name);
+        console.log('Direct business_purpose:', program.business_purpose);
+        console.log('Analysis result JSON:', program.analysis_result_json);
+        
+        // Try to get business purpose from multiple sources
+        if (program.business_purpose && program.business_purpose !== 'Analysis in progress...') {
             businessPurpose = program.business_purpose;
         }
         
@@ -3263,18 +3283,41 @@ function displayComponentsHierarchy(components) {
         try {
             if (program.analysis_result_json) {
                 const analysisResult = JSON.parse(program.analysis_result_json);
-                if (!program.business_purpose && analysisResult.business_purpose) {
+                console.log('Parsed analysis result:', analysisResult);
+                
+                // Check multiple possible locations for business purpose
+                if (analysisResult.business_purpose && !program.business_purpose) {
                     businessPurpose = analysisResult.business_purpose;
                 }
+                
                 if (analysisResult.llm_summary) {
+                    console.log('Found LLM summary:', analysisResult.llm_summary);
                     businessPurpose = analysisResult.llm_summary.business_purpose || businessPurpose;
                     complexityScore = analysisResult.llm_summary.complexity_score || 0;
+                } else {
+                    console.log('No LLM summary found in analysis result');
                 }
+                
                 derivedCount = analysisResult.derived_components ? analysisResult.derived_components.length : 0;
+                if (analysisResult.record_layouts) {
+                    derivedCount = Math.max(derivedCount, analysisResult.record_layouts.length);
+                }
+            } else {
+                console.log('No analysis_result_json found');
             }
         } catch (e) {
-            // If JSON parsing fails, just use what we have
-            console.warn('JSON parsing failed for', program.component_name, 'using fallback data');
+            console.error('JSON parsing failed for', program.component_name, 'Error:', e);
+        }
+        
+        // If still pending, check if this is a recent upload
+        if (businessPurpose === 'Analysis in progress...' && program.created_at) {
+            const createdTime = new Date(program.created_at);
+            const now = new Date();
+            const minutesAgo = (now - createdTime) / (1000 * 60);
+            
+            if (minutesAgo > 5) {
+                businessPurpose = 'Analysis may have failed - check LLM server connection';
+            }
         }
         
         const card = document.createElement('div');
@@ -3478,50 +3521,85 @@ function displayComponentsHierarchy(components) {
 
         // Update components list display
         function updateComponentsList(components) {
-            const container = document.getElementById('componentsList');
-            container.innerHTML = '';
+    const container = document.getElementById('componentsList');
+    container.innerHTML = '';
 
-            if (!components || components.length === 0) {
-                container.innerHTML = '<p class="text-muted">No components uploaded yet</p>';
-                return;
-            }
+    console.log('Updating components list with:', components);
 
-            const list = document.createElement('div');
-            const typeGroups = {};
+    if (!components || components.length === 0) {
+        container.innerHTML = '<p class="text-muted">No components uploaded yet</p>';
+        return;
+    }
 
-            // Group by type
-            components.forEach(component => {
-                const type = component.component_type;
-                if (!typeGroups[type]) {
-                    typeGroups[type] = [];
-                }
-                typeGroups[type].push(component);
-            });
+    const list = document.createElement('div');
+    const typeGroups = {};
 
-            // Display grouped components
-            Object.keys(typeGroups).forEach(type => {
-                const typeHeader = document.createElement('h5');
-                typeHeader.textContent = `${type}s (${typeGroups[type].length})`;
-                typeHeader.style.color = '#667eea';
-                typeHeader.style.marginTop = '1rem';
-                list.appendChild(typeHeader);
-
-                typeGroups[type].forEach(component => {
-                    const item = document.createElement('div');
-                    item.style.padding = '0.25rem 0';
-                    item.style.borderLeft = '3px solid #667eea';
-                    item.style.paddingLeft = '0.5rem';
-                    item.style.marginBottom = '0.25rem';
-                    item.innerHTML = `
-                        <small><strong>${component.component_name}</strong></small><br>
-                        <small class="text-muted">${component.total_lines || 0} lines</small>
-                    `;
-                    list.appendChild(item);
-                });
-            });
-
-            container.appendChild(list);
+    // Group by type
+    components.forEach(component => {
+        const type = component.component_type;
+        if (!typeGroups[type]) {
+            typeGroups[type] = [];
         }
+        typeGroups[type].push(component);
+    });
+
+    console.log('Grouped components:', typeGroups);
+
+    // Display grouped components
+    Object.keys(typeGroups).forEach(type => {
+        const typeHeader = document.createElement('h5');
+        typeHeader.textContent = `${type}s (${typeGroups[type].length})`;
+        typeHeader.style.color = '#667eea';
+        typeHeader.style.marginTop = '1rem';
+        typeHeader.style.fontSize = '0.9rem';
+        list.appendChild(typeHeader);
+
+        typeGroups[type].forEach(component => {
+            const item = document.createElement('div');
+            item.style.padding = '0.5rem';
+            item.style.borderLeft = '3px solid #667eea';
+            item.style.paddingLeft = '0.5rem';
+            item.style.marginBottom = '0.5rem';
+            item.style.backgroundColor = '#f8f9ff';
+            item.style.borderRadius = '4px';
+            item.style.cursor = 'pointer';
+            
+            let businessPurpose = component.business_purpose || 'Analysis pending';
+            
+            // Try to extract from analysis_result_json if available
+            try {
+                if (component.analysis_result_json) {
+                    const analysis = JSON.parse(component.analysis_result_json);
+                    if (analysis.llm_summary && analysis.llm_summary.business_purpose) {
+                        businessPurpose = analysis.llm_summary.business_purpose;
+                    }
+                }
+            } catch (e) {
+                console.warn('Could not parse analysis for', component.component_name);
+            }
+            
+            item.innerHTML = `
+                <div style="font-weight: bold; font-size: 0.8rem;">${component.component_name}</div>
+                <div style="font-size: 0.7rem; color: #666; margin-top: 0.2rem;">
+                    ${component.total_lines || 0} lines
+                </div>
+                <div style="font-size: 0.7rem; color: #888; margin-top: 0.2rem; 
+                           max-height: 2.4em; overflow: hidden; line-height: 1.2em;">
+                    ${businessPurpose}
+                </div>
+            `;
+            
+            // Add click handler to show more details
+            item.onclick = () => {
+                alert(`${component.component_name}\n\nLines: ${component.total_lines || 0}\n\nPurpose: ${businessPurpose}`);
+            };
+            
+            list.appendChild(item);
+        });
+    });
+
+    container.appendChild(list);
+}
 
         // Utility functions
         function updateTokenCounters() {

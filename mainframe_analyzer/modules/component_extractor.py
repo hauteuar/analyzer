@@ -487,7 +487,8 @@ Please provide a JSON response with:
 """
             
             response = self.llm_client.call_llm(prompt, max_tokens=800, temperature=0.3)
-            
+            logger.info(f"📊 LLM Response - Success: {response.success}, Content length: {len(response.content)}")
+        
             # Log LLM call
             self.db_manager.log_llm_call(
                 session_id, 'component_summary', 1, 1,
@@ -498,7 +499,12 @@ Please provide a JSON response with:
             if response.success:
                 summary = self.llm_client.extract_json_from_response(response.content)
                 if summary:
+                    logger.info(f"✅ Successfully extracted LLM summary: {summary.get('business_purpose', 'No purpose')}")
                     return summary
+                else:
+                    logger.warning(f"⚠️ Could not extract JSON from LLM response: {response.content[:200]}")
+            else:
+                logger.error(f"❌ LLM call failed: {response.error_message}")
             
             # Fallback summary
             return {
