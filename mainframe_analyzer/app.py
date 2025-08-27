@@ -502,67 +502,43 @@ def chat_query():
 
 @app.route('/api/components/<session_id>')
 def get_components(session_id):
-    """Get all components for session with proper data transformation"""
+    """Get components with proper LLM summary extraction"""
     try:
-        # Get raw components from database
         components = analyzer.db_manager.get_session_components(session_id)
         
-        # Transform data for UI
         transformed_components = []
         for component in components:
-            # Parse analysis_result_json to get the actual component data
+            # Parse the stored analysis result
             analysis_result = {}
             if component.get('analysis_result_json'):
                 try:
                     analysis_result = json.loads(component['analysis_result_json'])
-                except (json.JSONDecodeError, TypeError):
-                    logger.warning(f"Failed to parse analysis_result_json for component {component['component_name']}")
+                except:
+                    logger.warning(f"Failed to parse analysis_result_json for {component['component_name']}")
             
-            # Transform component data for UI
+            # Extract LLM summary properly
+            llm_summary = analysis_result.get('llm_summary', {})
+            
             transformed_component = {
                 'component_name': component['component_name'],
                 'friendly_name': analysis_result.get('friendly_name', component['component_name']),
                 'component_type': component['component_type'],
-                'file_path': component.get('file_path', ''),
-                'total_lines': component.get('total_lines', 0) or analysis_result.get('total_lines', 0),
-                'executable_lines': analysis_result.get('executable_lines', 0),
-                'comment_lines': analysis_result.get('comment_lines', 0),
-                'total_fields': component.get('total_fields', 0) or len(analysis_result.get('fields', [])),
-                'dependencies_count': component.get('dependencies_count', 0),
-                'created_at': component.get('created_at', ''),
-                'analysis_status': component.get('analysis_status', 'completed'),
-                
-                # Extract business information
-                'business_purpose': analysis_result.get('business_purpose', '') or 
-                                  (analysis_result.get('llm_summary', {}).get('business_purpose', '')),
-                'complexity_score': analysis_result.get('complexity_score', 0.5) or 
-                                   (analysis_result.get('llm_summary', {}).get('complexity_score', 0.5)),
-                
-                # LLM Summary data
-                'llm_summary': analysis_result.get('llm_summary', {}),
-                
-                # Additional data for different component types
-                'derived_components': analysis_result.get('derived_components', []),
-                'record_layouts': analysis_result.get('record_layouts', []),
-                'cics_operations': analysis_result.get('cics_operations', []),
-                'file_operations': analysis_result.get('file_operations', []),
-                
-                # Store full analysis result for detailed views
+                'total_lines': component.get('total_lines', 0),
+                'total_fields': component.get('total_fields', 0),
+                'business_purpose': component.get('business_purpose', llm_summary.get('business_purpose', '')),
+                'complexity_score': component.get('complexity_score', llm_summary.get('complexity_score', 0.5)),
+                'llm_summary': llm_summary,  # Ensure this is included
                 'analysis_result_json': component.get('analysis_result_json', '{}')
             }
             
             transformed_components.append(transformed_component)
         
-        logger.info(f"Retrieved {len(transformed_components)} components for session {session_id[:8]}")
-        
-        return jsonify({
-            'success': True, 
-            'components': transformed_components
-        })
+        return jsonify({'success': True, 'components': transformed_components})
         
     except Exception as e:
         logger.error(f"Error retrieving components: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
+    
     
 @app.route('/api/dependencies/<session_id>')
 def get_dependencies(session_id):

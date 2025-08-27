@@ -40,46 +40,107 @@ class ChatManager:
         }
     
     def process_query(self, session_id: str, message: str, conversation_id: str) -> str:
-        """Process chat query and return comprehensive response with source code"""
+        """Process chat query with better routing logic"""
         logger.info(f"Processing chat query: '{message[:100]}...'")
         
         try:
-            # Extract field names from user message
+            # Extract field names more carefully
             field_names = self._extract_field_names(message)
-            logger.info(f"Extracted field names: {field_names}")
+            logger.info(f"Extracted potential field names: {field_names}")
             
-            # Handle different query types
-            if field_names:
-                return self._handle_field_query(session_id, field_names, message)
-            elif any(word in message.lower() for word in ['layout', 'record', 'structure']):
-                return self._handle_layout_query(session_id, message)
-            elif any(word in message.lower() for word in ['program', 'component', 'module']):
-                return self._handle_program_query(session_id, message)
-            elif any(word in message.lower() for word in ['summary', 'overview', 'status']):
+            # Check message intent first
+            message_lower = message.lower()
+            
+            # Priority routing based on keywords
+            if any(word in message_lower for word in ['help', 'what can you', 'how do i']):
+                return self._get_help_response()
+            
+            elif any(word in message_lower for word in ['summary', 'overview', 'status']):
                 return self._handle_summary_query(session_id)
+            
+            elif any(word in message_lower for word in ['layout', 'record', 'structure']) and not field_names:
+                return self._handle_layout_query(session_id, message)
+            
+            elif any(word in message_lower for word in ['program', 'component', 'module']) and not field_names:
+                return self._handle_program_query(session_id, message)
+            
+            elif field_names:
+                # Only if we found actual field names
+                return self._handle_field_query(session_id, field_names, message)
+            
             else:
+                # General query - don't assume field names
                 return self._handle_general_query(session_id, message)
-                
+                    
         except Exception as e:
             logger.error(f"Error processing chat query: {str(e)}")
             return f"I encountered an error processing your question: {str(e)}"
     
+    def _search_for_similar_fields(self, session_id: str, query_term: str) -> List[str]:
+        """Search for fields similar to the query term"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Search for fields that contain the query term
+                cursor.execute('''
+                    SELECT DISTINCT field_name FROM field_analysis_details 
+                    WHERE session_id = ? AND (
+                        UPPER(field_name) LIKE ? OR
+                        UPPER(business_purpose) LIKE ?
+                    )
+                    ORDER BY field_name 
+                    LIMIT 5
+                ''', (session_id, f'%{query_term.upper()}%', f'%{query_term.upper()}%'))
+                
+                return [row[0] for row in cursor.fetchall()]
+                
+        except Exception as e:
+            logger.error(f"Error searching for similar fields: {str(e)}")
+            return []
+
     def _extract_field_names(self, message: str) -> List[str]:
-        """Extract COBOL field names from user message"""
+        """Extract COBOL field names more intelligently"""
         field_names = set()
         
         try:
-            # Apply all field extraction patterns
-            for pattern in self.field_patterns:
+            # More specific field extraction patterns
+            specific_patterns = [
+                r'\b([A-Z][A-Z0-9\-]{4,})\b',                    # At least 5 chars, COBOL-style
+                r'field\s+([A-Za-z][A-Za-z0-9\-_]{3,})',         # "field CUSTOMER-NAME"
+                r'about\s+([A-Z][A-Z0-9\-_]{3,})',               # "about ACCOUNT-NO" 
+                r'([A-Z][A-Z0-9\-_]{4,})\s+field',               # "CUSTOMER-NAME field"
+                r'tell\s+me\s+about\s+([A-Z][A-Z0-9\-_]{3,})',   # "tell me about FIELD-NAME"
+                r'what\s+is\s+([A-Z][A-Z0-9\-_]{3,})',           # "what is FIELD-NAME" (only ALL CAPS)
+                r'show\s+me\s+([A-Z][A-Z0-9\-_]{3,})',           # "show me FIELD-NAME"
+                r'\b([A-Z]{2,}[-_][A-Z0-9\-_]{2,})\b'            # COBOL naming convention
+            ]
+            
+            # English stop words to exclude
+            english_words = {
+                'WHAT', 'WHERE', 'WHEN', 'HOW', 'WHO', 'WHY', 'WHICH', 'THE', 'THIS', 'THAT',
+                'CUSTOMER', 'RECORD', 'STRUCTURE', 'FIELD', 'FIELDS', 'PROGRAM', 'PROGRAMS',
+                'LAYOUT', 'LAYOUTS', 'FILE', 'FILES', 'TABLE', 'TABLES', 'SHOW', 'TELL',
+                'ABOUT', 'EXPLAIN', 'DESCRIBE', 'LIST', 'FIND', 'SEARCH', 'HELP', 'CAN',
+                'WILL', 'WOULD', 'SHOULD', 'COULD', 'AND', 'OR', 'BUT', 'FOR', 'WITH',
+                'FROM', 'INTO', 'ONTO', 'OVER', 'UNDER', 'ABOVE', 'BELOW'
+            }
+            
+            for pattern in specific_patterns:
                 matches = re.findall(pattern, message, re.IGNORECASE)
                 for match in matches:
-                    # Convert to standard COBOL naming
                     cobol_name = match.upper().replace('_', '-')
-                    if len(cobol_name) > 2 and cobol_name not in self.cobol_keywords:
+                    
+                    # More strict filtering
+                    if (len(cobol_name) > 3 and 
+                        cobol_name not in self.cobol_keywords and
+                        cobol_name not in english_words and
+                        not cobol_name.isdigit() and
+                        '-' in cobol_name or len(cobol_name) > 6):  # Either has dash or is long
                         field_names.add(cobol_name)
             
             result = list(field_names)
-            logger.debug(f"Extracted field names: {result}")
+            logger.debug(f"Extracted field names from '{message}': {result}")
             return result
             
         except Exception as e:
@@ -87,18 +148,32 @@ class ChatManager:
             return []
     
     def _handle_field_query(self, session_id: str, field_names: List[str], message: str) -> str:
-        """Handle queries about specific fields"""
+        """Handle queries about specific fields with better error messages"""
         try:
             response_parts = []
+            found_fields = []
+            not_found_fields = []
             
-            for field_name in field_names[:2]:  # Limit to 2 fields per response
+            for field_name in field_names[:2]:
                 field_info = self._get_comprehensive_field_info(session_id, field_name, message)
-                if field_info:
+                if field_info and "was not found" not in field_info:
                     response_parts.append(field_info)
+                    found_fields.append(field_name)
+                else:
+                    not_found_fields.append(field_name)
             
-            if not response_parts:
-                available_fields = self._get_available_fields_sample(session_id)
-                return f"I couldn't find information about {', '.join(field_names)} in the analyzed programs.\n\nAvailable fields include: {available_fields}\n\nTry asking about one of these fields instead."
+            # If no fields found, search for similar ones
+            if not response_parts and not_found_fields:
+                similar_suggestions = []
+                for field_name in not_found_fields:
+                    similar = self._search_for_similar_fields(session_id, field_name)
+                    similar_suggestions.extend(similar)
+                
+                if similar_suggestions:
+                    return f"I couldn't find exact matches for {', '.join(not_found_fields)}, but I found these similar fields: {', '.join(similar_suggestions[:5])}. Try asking about one of these specific field names."
+                else:
+                    available_fields = self._get_available_fields_sample(session_id)
+                    return f"I couldn't find fields matching {', '.join(not_found_fields)}.\n\nAvailable fields include: {available_fields}\n\nTry asking about one of these field names, or ask a general question about your programs."
             
             return '\n\n'.join(response_parts)
             

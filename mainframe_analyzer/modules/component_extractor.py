@@ -142,7 +142,7 @@ class ComponentExtractor:
             
             # Generate LLM summary
             program_summary = self._generate_component_summary(session_id, parsed_data, 'PROGRAM')
-            
+            console.log(program_summary)
             # Create main program component with complete source
             program_name = filename.replace('.cob', '').replace('.CBL', '').replace('.cbl', '')
             program_component = {

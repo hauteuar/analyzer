@@ -932,6 +932,108 @@
             grid-template-columns: 1fr 1fr;
             gap: 1rem;
         }
+        .city-view-container {
+            display: grid;
+            grid-template-areas: 
+                "inputs interfaces"
+                "components components"
+                "outputs missing";
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            padding: 1rem;
+            min-height: 600px;
+        }
+
+        .flow-section {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .input-section { 
+            grid-area: inputs;
+            border-color: #28a745;
+            background: linear-gradient(135deg, #d4edda 0%, #ffffff 100%);
+        }
+
+        .interface-section { 
+            grid-area: interfaces;
+            border-color: #007bff;
+            background: linear-gradient(135deg, #d1ecf1 0%, #ffffff 100%);
+        }
+
+        .component-section { 
+            grid-area: components;
+            border-color: #667eea;
+            background: linear-gradient(135deg, #e8ecff 0%, #ffffff 100%);
+        }
+
+        .output-section { 
+            grid-area: outputs;
+            border-color: #ffc107;
+            background: linear-gradient(135deg, #fff3cd 0%, #ffffff 100%);
+        }
+
+        .missing-section { 
+            grid-area: missing;
+            border-color: #dc3545;
+            background: linear-gradient(135deg, #f8d7da 0%, #ffffff 100%);
+        }
+
+        .flow-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .flow-item {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 0.75rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            cursor: pointer;
+        }
+
+        .flow-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .main-components .flow-item {
+            border-left: 4px solid #667eea;
+        }
+
+        .missing-items .flow-item {
+            border: 2px dashed #dc3545;
+            background: #fff5f5;
+        }
+
+        .flow-item-title {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 0.25rem;
+        }
+
+        .flow-item-type {
+            font-size: 0.8rem;
+            color: #6c757d;
+            background: #f8f9fa;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        .connection-line {
+            position: absolute;
+            height: 2px;
+            background: #667eea;
+            z-index: 1;
+        }
 
         @media (max-width: 768px) {
             .config-grid {
@@ -1260,13 +1362,53 @@
                 </div>
 
                 <!-- Dependencies Flow Tab -->
-                <div id="dependencies" class="tab-pane">
-                    <h2>🔗 Dependencies Flow</h2>
-                    <div id="dependenciesVisualization">
-                        <p class="text-muted">Dependencies will be visualized here after analysis</p>
-                    </div>
+<div id="dependencies" class="tab-pane">
+    <h2>System Architecture Flow</h2>
+    <div id="dependenciesVisualization">
+        <!-- City View Container -->
+        <div class="city-view-container">
+            <!-- Input Sources -->
+            <div class="flow-section input-section">
+                <h4>Input Sources</h4>
+                <div id="inputSources" class="flow-items">
+                    <!-- Will be populated by JavaScript -->
                 </div>
-
+            </div>
+            
+            <!-- External Interfaces -->
+            <div class="flow-section interface-section">
+                <h4>External Interfaces</h4>
+                <div id="externalInterfaces" class="flow-items">
+                    <!-- CICS Files, DB2, MQ, etc. -->
+                </div>
+            </div>
+            
+            <!-- Core Components -->
+            <div class="flow-section component-section">
+                <h4>Core Components</h4>
+                <div id="coreComponents" class="flow-items main-components">
+                    <!-- Main programs and record layouts -->
+                </div>
+            </div>
+            
+            <!-- Output Files -->
+            <div class="flow-section output-section">
+                <h4>Output Files</h4>
+                <div id="outputFiles" class="flow-items">
+                    <!-- Output files and reports -->
+                </div>
+            </div>
+            
+            <!-- Missing Dependencies -->
+            <div class="flow-section missing-section">
+                <h4>Missing Dependencies</h4>
+                <div id="missingDependencies" class="flow-items missing-items">
+                    <!-- Unresolved copybooks, includes, etc. -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
                 <!-- Field Matrix Tab -->
                 <div id="fieldMatrix" class="tab-pane">
                     <h2>📊 Field Matrix</h2>
@@ -1882,17 +2024,126 @@
                 if (response.ok) {
                     const data = await response.json();
                     if (data.success) {
-                        displayDependenciesTable(data.dependencies, data.dependency_groups);
-                    } else {
-                        document.getElementById('dependenciesVisualization').innerHTML = 
-                            `<p class="text-muted">Error loading dependencies: ${data.error}</p>`;
+                        displayCityView(data.dependencies, data.dependency_groups);
                     }
                 }
             } catch (error) {
                 console.error('Error loading dependencies:', error);
-                document.getElementById('dependenciesVisualization').innerHTML = 
-                    '<p class="text-muted">Error loading dependencies visualization</p>';
             }
+        }
+
+        function displayCityView(dependencies, dependencyGroups) {
+            // Clear all sections
+            ['inputSources', 'externalInterfaces', 'coreComponents', 'outputFiles', 'missingDependencies']
+                .forEach(id => document.getElementById(id).innerHTML = '');
+            
+            if (!dependencies || dependencies.length === 0) {
+                document.getElementById('coreComponents').innerHTML = 
+                    '<p class="text-muted">Upload and analyze COBOL programs to see system architecture</p>';
+                return;
+            }
+            
+            const categorizedDeps = categorizeDependencies(dependencies);
+            
+            // Populate each section
+            populateFlowSection('inputSources', categorizedDeps.inputs, 'input');
+            populateFlowSection('externalInterfaces', categorizedDeps.interfaces, 'interface');
+            populateFlowSection('coreComponents', categorizedDeps.components, 'component');
+            populateFlowSection('outputFiles', categorizedDeps.outputs, 'output');
+            populateFlowSection('missingDependencies', categorizedDeps.missing, 'missing');
+        }
+
+        function categorizeDependencies(dependencies) {
+            const categorized = {
+                inputs: new Set(),
+                interfaces: new Set(),
+                components: new Set(),
+                outputs: new Set(),
+                missing: new Set()
+            };
+            
+            dependencies.forEach(dep => {
+                const source = dep.source_component;
+                const target = dep.target_component;
+                const type = dep.relationship_type;
+                const interfaceType = dep.interface_type;
+                
+                // Add source as core component
+                categorized.components.add({
+                    name: source,
+                    type: 'PROGRAM',
+                    confidence: dep.confidence_score
+                });
+                
+                // Categorize target based on relationship type
+                if (type === 'CICS_FILE') {
+                    categorized.interfaces.add({
+                        name: target,
+                        type: 'CICS File',
+                        interface: interfaceType,
+                        confidence: dep.confidence_score
+                    });
+                } else if (type === 'COPYBOOK_INCLUDE') {
+                    // Check if copybook exists - if not, it's missing
+                    categorized.missing.add({
+                        name: target,
+                        type: 'Missing Copybook',
+                        reason: 'Referenced but not found',
+                        confidence: dep.confidence_score
+                    });
+                } else if (type === 'PROGRAM_CALL') {
+                    categorized.components.add({
+                        name: target,
+                        type: 'Called Program',
+                        confidence: dep.confidence_score
+                    });
+                } else if (type === 'USES_RECORD_LAYOUT') {
+                    categorized.components.add({
+                        name: target,
+                        type: 'Record Layout',
+                        confidence: dep.confidence_score
+                    });
+                }
+            });
+            
+            // Convert Sets to Arrays
+            Object.keys(categorized).forEach(key => {
+                categorized[key] = Array.from(categorized[key]);
+            });
+            
+            return categorized;
+        }
+
+        function populateFlowSection(sectionId, items, sectionType) {
+            const container = document.getElementById(sectionId);
+            
+            if (!items || items.length === 0) {
+                container.innerHTML = `<p class="text-muted">No ${sectionType} dependencies found</p>`;
+                return;
+            }
+            
+            items.forEach(item => {
+                const flowItem = document.createElement('div');
+                flowItem.className = 'flow-item';
+                flowItem.onclick = () => showItemDetails(item);
+                
+                const confidence = item.confidence ? `${(item.confidence * 100).toFixed(0)}%` : 'N/A';
+                
+                flowItem.innerHTML = `
+                    <div class="flow-item-title">${item.name}</div>
+                    <div class="flow-item-type">${item.type}</div>
+                    <div style="font-size: 0.7rem; color: #6c757d; margin-top: 0.25rem;">
+                        Confidence: ${confidence}
+                    </div>
+                    ${item.reason ? `<div style="font-size: 0.7rem; color: #dc3545;">${item.reason}</div>` : ''}
+                `;
+                
+                container.appendChild(flowItem);
+            });
+        }
+
+        function showItemDetails(item) {
+            alert(`Details for ${item.name}:\nType: ${item.type}\nConfidence: ${item.confidence || 'N/A'}`);
         }
 
         // Add this function to display dependencies

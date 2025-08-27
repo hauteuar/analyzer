@@ -502,15 +502,26 @@ class DatabaseManager:
                         analysis_result['friendly_name'] = component_name.replace('_', ' ').replace('-', ' ').title()
                 
                 logger.debug(f"Component data: lines={total_lines}, fields={total_fields}")
-                
+                llm_summary = analysis_result.get('llm_summary', {})
+                business_purpose = (analysis_result.get('business_purpose') or 
+                                llm_summary.get('business_purpose', ''))
+                complexity_score = (analysis_result.get('complexity_score') or 
+                                llm_summary.get('complexity_score', 0.5))
                 # Store main component with complete data
                 cursor.execute('''
                     INSERT OR REPLACE INTO component_analysis 
                     (session_id, component_name, component_type, file_path, 
-                    total_lines, total_fields, analysis_result_json, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    total_lines, total_fields, business_purpose, complexity_score, 
+                               analysis_result_json, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ''', (session_id, component_name, component_type, file_path,
-                    total_lines, total_fields, json.dumps(analysis_result)))
+                    analysis_result.get('total_lines', 0),
+                    len(analysis_result.get('fields', [])),
+                    business_purpose,
+                    float(complexity_score),
+                    analysis_result.get('content', ''),
+                    json.dumps(analysis_result)
+                ))
                 
                 logger.info(f"Successfully stored component: {component_name}")
                 
