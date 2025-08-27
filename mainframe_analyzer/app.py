@@ -88,7 +88,12 @@ class MainframeAnalyzer:
         """Test connection to LLM server with provided configuration"""
         try:
             # Create temporary LLM client with new config
+            from modules.llm_client import LLMClient
+            
             test_client = LLMClient(config.get('endpoint', 'http://localhost:8100/generate'))
+            test_client.timeout = config.get('timeout', 60)
+            test_client.default_max_tokens = config.get('maxTokens', 100)
+            test_client.default_temperature = config.get('temperature', 0.1)
             
             # Test with simple prompt
             test_prompt = "Hello! Please respond with 'VLLM_TEST_OK' to confirm you are working properly."
@@ -338,6 +343,28 @@ def create_session():
     session_id = analyzer.create_session(project_name)
     return jsonify({'session_id': session_id, 'project_name': project_name})
 
+@app.route('/api/test-llm', methods=['POST'])
+def test_llm_connection():
+    """Test LLM connection with provided configuration"""
+    try:
+        data = request.json
+        config = {
+            'endpoint': data.get('endpoint', 'http://localhost:8100/generate'),
+            'maxTokens': data.get('maxTokens', 6000),
+            'temperature': data.get('temperature', 0.1),
+            'timeout': data.get('timeout', 60)
+        }
+        
+        result = analyzer.test_llm_connection(config)
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error in test LLM endpoint: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
     """Upload and analyze mainframe file"""
@@ -502,12 +529,20 @@ def chat_query():
     
 @app.route('/api/record-layouts/<session_id>')
 def get_record_layouts_api(session_id):
-    """Get record layouts with friendly names"""
+    """Get record layouts with friendly names - FIXED VERSION"""
     try:
         layouts = analyzer.db_manager.get_record_layouts(session_id)
+        
+        # Debug logging
+        logger.info(f"Retrieved {len(layouts)} record layouts for session {session_id}")
+        for layout in layouts[:3]:  # Log first 3 for debugging
+            logger.info(f"Layout: {layout.get('layout_name')} from {layout.get('program_name')}")
+        
         return jsonify({'success': True, 'layouts': layouts})
     except Exception as e:
+        logger.error(f"Error getting record layouts: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
+
     
 @app.route('/api/field-source-code/<session_id>/<field_name>')
 def get_field_source_code(session_id, field_name):

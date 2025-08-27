@@ -1802,30 +1802,50 @@
 
         // Session Management
         async function initializeSession() {
-            try {
-                const response = await fetch('/api/session', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ project_name: `Project_${new Date().toISOString().slice(0,19)}` })
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    currentSessionId = data.session_id;
-                    currentConversationId = generateUUID();
-                    
-                    document.getElementById('sessionId').textContent = currentSessionId.slice(0, 8) + '...';
-                    document.getElementById('projectName').textContent = data.project_name;
-                    
-                    console.log('Session initialized:', currentSessionId);
-                } else {
-                    throw new Error('Failed to create session');
-                }
-            } catch (error) {
-                console.error('Error initializing session:', error);
-                showError('Failed to initialize session');
+    try {
+        // First, try to get existing session from localStorage
+        const savedSessionId = localStorage.getItem('currentSessionId');
+        if (savedSessionId) {
+            currentSessionId = savedSessionId;
+            currentConversationId = generateUUID();
+            
+            // Verify session exists on server
+            const response = await fetch(`/api/components/${currentSessionId}`);
+            if (response.ok) {
+                console.log('Using existing session:', currentSessionId);
+                document.getElementById('sessionId').textContent = currentSessionId.slice(0, 8) + '...';
+                document.getElementById('projectName').textContent = 'Existing Project';
+                return;
             }
         }
+        
+        // Create new session if no existing session or verification failed
+        const response = await fetch('/api/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project_name: `Project_${new Date().toISOString().slice(0,19)}` })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            currentSessionId = data.session_id;
+            currentConversationId = generateUUID();
+            
+            // Save session ID to localStorage
+            localStorage.setItem('currentSessionId', currentSessionId);
+            
+            document.getElementById('sessionId').textContent = currentSessionId.slice(0, 8) + '...';
+            document.getElementById('projectName').textContent = data.project_name;
+            
+            console.log('New session initialized:', currentSessionId);
+        } else {
+            throw new Error('Failed to create session');
+        }
+    } catch (error) {
+        console.error('Error initializing session:', error);
+        showError('Failed to initialize session');
+    }
+}
 
         // Enhanced file upload with progress tracking
         async function handleFileUpload(event) {
@@ -2300,53 +2320,53 @@ async function showFieldOperationsWithCode(fieldName, operationsJson, layoutName
         // Add this function to load and display dependencies
         async function loadDependenciesVisualization() {
     try {
-        // Get both dependencies and record layouts
-        const [depsResponse, layoutsResponse] = await Promise.all([
-            fetch(`/api/dependencies/${currentSessionId}`),
-            fetch(`/api/record-layouts/${currentSessionId}`)
-        ]);
+        console.log('Loading dependencies for session:', currentSessionId);
         
-        if (depsResponse.ok && layoutsResponse.ok) {
-            const depsData = await depsResponse.json();
-            const layoutsData = await layoutsResponse.json();
+        const response = await fetch(`/api/dependencies/${currentSessionId}`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log('Dependencies response:', data);
             
-            if (depsData.success) {
-                // Create friendly name lookup
-                const friendlyNames = {};
-                if (layoutsData.success) {
-                    layoutsData.layouts.forEach(layout => {
-                        friendlyNames[layout.layout_name] = layout.friendly_name || layout.layout_name;
-                    });
-                }
-                
-                displayCityView(depsData.dependencies, depsData.dependency_groups, friendlyNames);
+            if (data.success && data.dependencies && data.dependencies.length > 0) {
+                displayCityView(data.dependencies, data.dependency_groups || {});
+            } else {
+                console.log('No dependencies found or response not successful');
+                displayEmptyDependencies();
             }
+        } else {
+            console.error('Dependencies API response not ok:', response.status);
+            displayEmptyDependencies();
         }
     } catch (error) {
         console.error('Error loading dependencies:', error);
+        displayEmptyDependencies();
     }
 }
+function displayEmptyDependencies() {
+    document.getElementById('coreComponents').innerHTML = 
+        '<p class="text-muted">Upload and analyze COBOL programs to see system architecture</p>';
+    ['inputSources', 'externalInterfaces', 'outputFiles', 'missingDependencies']
+        .forEach(id => document.getElementById(id).innerHTML = '<p class="text-muted">No data available</p>');
+}
 
-        function displayCityView(dependencies, dependencyGroups) {
-            // Clear all sections
-            ['inputSources', 'externalInterfaces', 'coreComponents', 'outputFiles', 'missingDependencies']
-                .forEach(id => document.getElementById(id).innerHTML = '');
-            
-            if (!dependencies || dependencies.length === 0) {
-                document.getElementById('coreComponents').innerHTML = 
-                    '<p class="text-muted">Upload and analyze COBOL programs to see system architecture</p>';
-                return;
-            }
-            
-            const categorizedDeps = categorizeDependencies(dependencies, friendlyNames);
-            
-            // Populate each section
-            populateFlowSection('inputSources', categorizedDeps.inputs, 'input');
-            populateFlowSection('externalInterfaces', categorizedDeps.interfaces, 'interface');
-            populateFlowSection('coreComponents', categorizedDeps.components, 'component');
-            populateFlowSection('outputFiles', categorizedDeps.outputs, 'output');
-            populateFlowSection('missingDependencies', categorizedDeps.missing, 'missing');
-        }
+function displayCityView(dependencies, dependencyGroups) {
+    console.log('Displaying city view with', dependencies.length, 'dependencies');
+    
+    // Clear all sections
+    ['inputSources', 'externalInterfaces', 'coreComponents', 'outputFiles', 'missingDependencies']
+        .forEach(id => document.getElementById(id).innerHTML = '');
+    
+    const categorizedDeps = categorizeDependencies(dependencies);
+    console.log('Categorized dependencies:', categorizedDeps);
+    
+    // Populate each section
+    populateFlowSection('inputSources', categorizedDeps.inputs, 'input');
+    populateFlowSection('externalInterfaces', categorizedDeps.interfaces, 'interface');
+    populateFlowSection('coreComponents', categorizedDeps.components, 'component');
+    populateFlowSection('outputFiles', categorizedDeps.outputs, 'output');
+    populateFlowSection('missingDependencies', categorizedDeps.missing, 'missing');
+}
 
         function categorizeDependencies(dependencies) {
     const categorized = {
@@ -2534,43 +2554,105 @@ function generateFriendlyName(technicalName) {
 
 
         // Load field matrix data
-        async function loadFieldMatrix() {
-            const recordLayout = document.getElementById('recordLayoutSelect').value;
-            const program = document.getElementById('programSelect').value;
-
-            if (!recordLayout && !program) {
-                return;
+        // Fixed loadFieldMatrixSelectors function
+async function loadFieldMatrixSelectors() {
+    try {
+        // Load record layouts from dedicated API endpoint
+        const [componentsResponse, layoutsResponse] = await Promise.all([
+            fetch(`/api/components/${currentSessionId}`),
+            fetch(`/api/record-layouts/${currentSessionId}`)
+        ]);
+        
+        if (componentsResponse.ok) {
+            const componentsData = await componentsResponse.json();
+            if (componentsData.success) {
+                populateProgramSelectors(componentsData.components);
             }
-
-            showLoading('Loading field matrix...');
-
-            try {
-                const params = new URLSearchParams({
-                    session_id: currentSessionId
-                });
-                
-                if (recordLayout) params.append('record_layout', recordLayout);
-                if (program) params.append('program_name', program);
-
-                const response = await fetch(`/api/field-matrix?${params}`);
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success) {
-                        displayFieldMatrix(data.matrix_data);
-                    } else {
-                        showError(data.error || 'Failed to load field matrix');
-                    }
-                } else {
-                    throw new Error('Network error');
-                }
-            } catch (error) {
-                console.error('Error loading field matrix:', error);
-                showError('Failed to load field matrix');
-            }
-
-            hideLoading();
         }
+        
+        if (layoutsResponse.ok) {
+            const layoutsData = await layoutsResponse.json();
+            if (layoutsData.success) {
+                populateLayoutSelectors(layoutsData.layouts);
+            }
+        } else {
+            console.log('No dedicated record layouts endpoint, extracting from components');
+            // Fallback to extracting layouts from components
+            if (componentsResponse.ok) {
+                const componentsData = await componentsResponse.json();
+                if (componentsData.success) {
+                    extractLayoutsFromComponents(componentsData.components);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error loading selectors:', error);
+    }
+}
+
+// Populate program selectors
+function populateProgramSelectors(components) {
+    const programSelect = document.getElementById('programSelect');
+    programSelect.innerHTML = '<option value="">Select Program</option>';
+
+    const programs = components.filter(c => c.component_type === 'PROGRAM');
+    
+    programs.forEach(program => {
+        const option = document.createElement('option');
+        option.value = program.component_name;
+        option.textContent = `${program.component_name} (${program.total_lines || 0} lines)`;
+        programSelect.appendChild(option);
+    });
+}
+
+// Populate layout selectors from dedicated API
+function populateLayoutSelectors(layouts) {
+    const recordLayoutSelect = document.getElementById('recordLayoutSelect');
+    recordLayoutSelect.innerHTML = '<option value="">Select Record Layout</option>';
+
+    layouts.forEach(layout => {
+        const option = document.createElement('option');
+        option.value = layout.layout_name;
+        option.textContent = `${layout.layout_name} (${layout.fields_count || 0} fields) - ${layout.program_name}`;
+        recordLayoutSelect.appendChild(option);
+    });
+}
+
+// Fallback: Extract layouts from components
+function extractLayoutsFromComponents(components) {
+    const recordLayoutSelect = document.getElementById('recordLayoutSelect');
+    recordLayoutSelect.innerHTML = '<option value="">Select Record Layout</option>';
+
+    const layouts = new Set();
+    
+    components.forEach(component => {
+        if (component.component_type === 'PROGRAM' && component.analysis_result_json) {
+            try {
+                const analysisResult = JSON.parse(component.analysis_result_json);
+                if (analysisResult.record_layouts) {
+                    analysisResult.record_layouts.forEach(layout => {
+                        if (layout.name) {
+                            layouts.add({
+                                name: layout.name,
+                                program: component.component_name,
+                                fields: layout.fields ? layout.fields.length : 0
+                            });
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn('Could not parse analysis result for', component.component_name);
+            }
+        }
+    });
+
+    Array.from(layouts).forEach(layout => {
+        const option = document.createElement('option');
+        option.value = layout.name;
+        option.textContent = `${layout.name} (${layout.fields} fields) - ${layout.program}`;
+        recordLayoutSelect.appendChild(option);
+    });
+}
 
         // Display field matrix
         function displayFieldMatrix(matrixData) {
@@ -2865,84 +2947,105 @@ function generateFriendlyName(technicalName) {
 
         // Display components in hierarchical structure
               
-        function displayComponentsHierarchy(components) {
-            const mainProgramsBody = document.getElementById('mainProgramsTableBody');
-            const derivedComponentsBody = document.getElementById('derivedComponentsTableBody');
-            
-            mainProgramsBody.innerHTML = '';
-            derivedComponentsBody.innerHTML = '';
+        // Fixed displayComponentsHierarchy function
+function displayComponentsHierarchy(components) {
+    const mainProgramsBody = document.getElementById('mainProgramsTableBody');
+    const derivedComponentsBody = document.getElementById('derivedComponentsTableBody');
+    
+    mainProgramsBody.innerHTML = '';
+    derivedComponentsBody.innerHTML = '';
 
-            const mainPrograms = components.filter(c => c.component_type === 'PROGRAM');
-            const derivedComponents = components.filter(c => c.component_type !== 'PROGRAM');
+    const mainPrograms = components.filter(c => c.component_type === 'PROGRAM');
+    const derivedComponents = components.filter(c => c.component_type !== 'PROGRAM');
 
-            if (mainPrograms.length === 0) {
-                mainProgramsBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No programs available</td></tr>';
-                return;
-            }
+    console.log('Main programs:', mainPrograms.length);
+    console.log('Derived components:', derivedComponents.length);
+    console.log('All components:', components);
 
-            mainPrograms.forEach(program => {
-                const row = document.createElement('tr');
-                
-                let businessPurpose = program.business_purpose || 'Analysis complete';
-                let complexity = program.complexity_score || 0;
-                let derivedCount = 0;
-                
-                try {
-                    if (program.analysis_result_json) {
-                        const analysisResult = JSON.parse(program.analysis_result_json);
-                        derivedCount = analysisResult.derived_components ? analysisResult.derived_components.length : 0;
-                        if (!businessPurpose && analysisResult.business_purpose) {
-                            businessPurpose = analysisResult.business_purpose;
-                        }
-                        if (analysisResult.llm_summary) {
-                            businessPurpose = analysisResult.llm_summary.business_purpose || businessPurpose;
-                            complexity = analysisResult.llm_summary.complexity_score || complexity;
-                        }
-                    }
-                } catch (e) {
-                    console.warn('Analysis result parsing failed for', program.component_name);
-                    // Count derived components from the components list
-                    derivedCount = derivedComponents.filter(d => 
-                        d.parent_program === program.component_name || 
-                        d.program_name === program.component_name
-                    ).length;
-                }
-                
-                row.innerHTML = `
-                    <td>
-                        <strong>${program.component_name}</strong>
-                        <br><small class="text-muted">${program.friendly_name || ''}</small>
-                        <div class="complexity-bar">
-                            <div class="complexity-fill" style="width: ${complexity * 100}%"></div>
-                        </div>
-                    </td>
-                    <td style="max-width: 250px;">${businessPurpose}</td>
-                    <td>
-                        <div><strong>${program.total_lines || 0}</strong> total</div>
-                        <div><small>${program.executable_lines || 0} executable</small></div>
-                    </td>
-                    <td>${(complexity * 100).toFixed(0)}%</td>
-                    <td>
-                        <span class="derived-count">${derivedCount}</span>
-                        ${derivedCount > 0 ? `<button class="expand-btn" onclick="toggleDerivedComponents('${program.component_name}')">View Derived</button>` : ''}
-                    </td>
-                    <td>
-                        <button class="btn btn-secondary btn-sm" onclick="viewComponentDetails('${program.component_name}')">View Details</button>
-                    </td>
-                `;
-                mainProgramsBody.appendChild(row);
-            });
+    if (mainPrograms.length === 0) {
+        mainProgramsBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No programs available</td></tr>';
+        return;
+    }
 
-            // Store derived components globally for the toggle function
-            window.derivedComponentsData = {};
-            derivedComponents.forEach(component => {
-                const parent = component.parent_program || component.program_name || 'Unknown';
-                if (!window.derivedComponentsData[parent]) {
-                    window.derivedComponentsData[parent] = [];
-                }
-                window.derivedComponentsData[parent].push(component);
-            });
+    // Store derived components globally for the toggle function
+    window.derivedComponentsData = {};
+    
+    // Group derived components by parent program
+    derivedComponents.forEach(component => {
+        // Try multiple ways to find parent program
+        let parent = component.parent_program || 
+                    component.program_name || 
+                    (component.analysis_result_json ? 
+                        JSON.parse(component.analysis_result_json).parent_program : null) ||
+                    'Unknown';
+        
+        if (!window.derivedComponentsData[parent]) {
+            window.derivedComponentsData[parent] = [];
         }
+        window.derivedComponentsData[parent].push(component);
+    });
+
+    mainPrograms.forEach(program => {
+        const row = document.createElement('tr');
+        
+        let businessPurpose = program.business_purpose || 'Analysis complete';
+        let complexity = program.complexity_score || 0;
+        let derivedCount = 0;
+        
+        try {
+            if (program.analysis_result_json) {
+                const analysisResult = JSON.parse(program.analysis_result_json);
+                
+                // Check for derived components in multiple places
+                if (analysisResult.derived_components) {
+                    derivedCount = analysisResult.derived_components.length;
+                } else if (analysisResult.record_layouts) {
+                    derivedCount = analysisResult.record_layouts.length;
+                }
+                
+                if (!businessPurpose && analysisResult.business_purpose) {
+                    businessPurpose = analysisResult.business_purpose;
+                }
+                
+                if (analysisResult.llm_summary) {
+                    businessPurpose = analysisResult.llm_summary.business_purpose || businessPurpose;
+                    complexity = analysisResult.llm_summary.complexity_score || complexity;
+                }
+            }
+        } catch (e) {
+            console.warn('Analysis result parsing failed for', program.component_name, e);
+        }
+        
+        // Also count from our grouped derived components
+        const programDerivedCount = window.derivedComponentsData[program.component_name] ? 
+            window.derivedComponentsData[program.component_name].length : 0;
+        derivedCount = Math.max(derivedCount, programDerivedCount);
+        
+        row.innerHTML = `
+            <td>
+                <strong>${program.component_name}</strong>
+                <br><small class="text-muted">${program.friendly_name || ''}</small>
+                <div class="complexity-bar">
+                    <div class="complexity-fill" style="width: ${complexity * 100}%"></div>
+                </div>
+            </td>
+            <td style="max-width: 250px;">${businessPurpose}</td>
+            <td>
+                <div><strong>${program.total_lines || 0}</strong> total</div>
+                <div><small>${program.executable_lines || 0} executable</small></div>
+            </td>
+            <td>${(complexity * 100).toFixed(0)}%</td>
+            <td>
+                <span class="derived-count">${derivedCount}</span>
+                ${derivedCount > 0 ? `<button class="expand-btn" onclick="toggleDerivedComponents('${program.component_name}')">View Derived</button>` : ''}
+            </td>
+            <td>
+                <button class="btn btn-secondary btn-sm" onclick="viewComponentDetails('${program.component_name}')">View Details</button>
+            </td>
+        `;
+        mainProgramsBody.appendChild(row);
+    });
+}
         // Toggle derived components display
         function toggleDerivedComponents(programName) {
             const section = document.getElementById('derivedComponentsSection');

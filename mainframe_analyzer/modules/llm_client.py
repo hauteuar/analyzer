@@ -178,41 +178,102 @@ class LLMClient:
             )
     
     def extract_json_from_response(self, response_content: str) -> Optional[Dict[Any, Any]]:
-        """Extract JSON from LLM response content"""
-        try:
-            # Try to parse the entire response as JSON
-            return json.loads(response_content)
-        except json.JSONDecodeError:
-            # Look for JSON blocks in the response
-            import re
-            
-            # Pattern to find JSON blocks
-            json_pattern = r'```json\s*(.*?)\s*```'
-            matches = re.findall(json_pattern, response_content, re.DOTALL)
-            
-            if matches:
-                try:
-                    return json.loads(matches[0])
-                except json.JSONDecodeError:
-                    pass
-            
-            # Try to find JSON objects directly
-            brace_patterns = [
-                r'\{.*\}',  # Find JSON objects
-                r'\[.*\]'   # Find JSON arrays
-            ]
-            
-            for pattern in brace_patterns:
-                matches = re.findall(pattern, response_content, re.DOTALL)
-                if matches:
-                    for match in matches:
-                        try:
-                            return json.loads(match)
-                        except json.JSONDecodeError:
-                            continue
-            
-            logger.warning("Could not extract JSON from LLM response")
+        """Extract JSON from LLM response content with enhanced parsing"""
+        if not response_content:
             return None
+            
+        try:
+            # First, try to parse the entire response as JSON
+            return json.loads(response_content.strip())
+        except json.JSONDecodeError:
+            pass
+        
+        # Clean the response content
+        cleaned_content = response_content.strip()
+        
+        # Look for JSON blocks in code fences
+        json_patterns = [
+            r'```json\s*(.*?)\s*```',  # ```json ... ```
+            r'```\s*([\s\S]*?)\s*```',  # ``` ... ``` (any code block)
+            r'<json>(.*?)</json>',      # <json>...</json>
+        ]
+        
+        for pattern in json_patterns:
+            matches = re.findall(pattern, cleaned_content, re.DOTALL | re.IGNORECASE)
+            for match in matches:
+                try:
+                    # Clean the match
+                    clean_match = match.strip()
+                    if clean_match:
+                        return json.loads(clean_match)
+                except json.JSONDecodeError:
+                    continue
+        
+        # Look for JSON-like objects using bracket matching
+        brace_patterns = [
+            r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}',  # Simple nested objects
+            r'\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]'  # Simple nested arrays
+        ]
+        
+        for pattern in brace_patterns:
+            matches = re.findall(pattern, cleaned_content, re.DOTALL)
+            for match in matches:
+                try:
+                    # Try to parse each potential JSON object
+                    parsed = json.loads(match.strip())
+                    if isinstance(parsed, (dict, list)) and parsed:  # Valid non-empty structure
+                        return parsed
+                except json.JSONDecodeError:
+                    continue
+        
+        # Try to extract JSON by finding balanced braces
+        try:
+            start_idx = cleaned_content.find('{')
+            if start_idx != -1:
+                brace_count = 0
+                end_idx = start_idx
+                
+                for i, char in enumerate(cleaned_content[start_idx:], start_idx):
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end_idx = i
+                            break
+                
+                if brace_count == 0:
+                    json_str = cleaned_content[start_idx:end_idx + 1]
+                    return json.loads(json_str)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        
+        # Last resort: try to fix common JSON issues
+        try:
+            # Fix common issues like trailing commas, single quotes, etc.
+            fixed_content = cleaned_content
+            
+            # Replace single quotes with double quotes (be careful with contractions)
+            fixed_content = re.sub(r"'([^']*)':", r'"\1":', fixed_content)  # Keys
+            fixed_content = re.sub(r":\s*'([^']*)'", r': "\1"', fixed_content)  # Values
+            
+            # Remove trailing commas
+            fixed_content = re.sub(r',(\s*[}\]])', r'\1', fixed_content)
+            
+            # Try to extract JSON from the fixed content
+            for pattern in [r'\{.*\}', r'\[.*\]']:
+                matches = re.findall(pattern, fixed_content, re.DOTALL)
+                for match in matches:
+                    try:
+                        return json.loads(match)
+                    except json.JSONDecodeError:
+                        continue
+                        
+        except Exception as e:
+            logger.warning(f"Error in JSON extraction fallback: {str(e)}")
+        
+        logger.warning(f"Could not extract JSON from LLM response. Content preview: {cleaned_content[:200]}...")
+        return None
     
     def call_with_structured_output(self, prompt: str, expected_structure: str = "json") -> Tuple[bool, Dict]:
         """
