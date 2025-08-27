@@ -182,7 +182,7 @@ class ChatManager:
             return f"Error analyzing fields: {str(e)}"
     
     def _get_comprehensive_field_info(self, session_id: str, field_name: str, original_message: str) -> str:
-        """Get comprehensive field information with source code"""
+        """Get comprehensive field information with LLM enhancement"""
         try:
             logger.info(f"Getting comprehensive info for field: {field_name}")
             
@@ -190,7 +190,8 @@ class ChatManager:
             context = self.db_manager.get_context_for_field(session_id, field_name)
             
             if context and context.get('field_details'):
-                return self._format_database_field_response(field_name, context, original_message)
+                # Use LLM to create intelligent response
+                return self._create_llm_enhanced_field_response(field_name, context, original_message, session_id)
             else:
                 # Perform live analysis
                 return self._perform_live_field_analysis(session_id, field_name)
@@ -198,6 +199,110 @@ class ChatManager:
         except Exception as e:
             logger.error(f"Error getting field info: {str(e)}")
             return f"Error analyzing {field_name}: {str(e)}"
+
+    def _create_llm_enhanced_field_response(self, field_name: str, context: Dict, 
+                                        original_message: str, session_id: str) -> str:
+        """Create LLM-enhanced field response"""
+        try:
+            field_details = context.get('field_details', [])
+            field_mappings = context.get('field_mappings', [])
+            
+            if not field_details:
+                return f"No detailed information found for field {field_name}"
+            
+            primary_field = field_details[0]
+            
+            # Build comprehensive context for LLM
+            field_context = {
+                'field_name': field_name,
+                'program_name': primary_field.get('program_name', 'Unknown'),
+                'usage_type': primary_field.get('usage_type', 'Unknown'),
+                'business_purpose': primary_field.get('business_purpose', ''),
+                'total_references': primary_field.get('total_program_references', 0),
+                'definition_code': primary_field.get('definition_code', ''),
+                'operations': {
+                    'move_source': primary_field.get('move_source_count', 0),
+                    'move_target': primary_field.get('move_target_count', 0),
+                    'arithmetic': primary_field.get('arithmetic_count', 0),
+                    'conditional': primary_field.get('conditional_count', 0),
+                    'cics': primary_field.get('cics_count', 0)
+                }
+            }
+            
+            # Parse field references for context
+            field_refs = []
+            field_refs_json = primary_field.get('field_references_json', '[]')
+            try:
+                field_refs = json.loads(field_refs_json) if field_refs_json else []
+            except:
+                pass
+            
+            # Create LLM prompt for field analysis
+            prompt = f"""
+    You are a mainframe COBOL expert analyzing field usage. Based on the field analysis data provided, create a comprehensive, conversational response about this field.
+
+    User asked: "{original_message}"
+
+    Field Analysis Data:
+    - Field Name: {field_name}
+    - Program: {field_context['program_name']}
+    - Usage Type: {field_context['usage_type']}
+    - Total References: {field_context['total_references']}
+    - Business Purpose: {field_context['business_purpose']}
+
+    Field Definition:
+    {field_context['definition_code']}
+
+    Operations Summary:
+    - Data Input Operations: {field_context['operations']['move_target']}
+    - Data Output Operations: {field_context['operations']['move_source']}
+    - Mathematical Operations: {field_context['operations']['arithmetic']}
+    - Conditional Logic: {field_context['operations']['conditional']}
+    - CICS Operations: {field_context['operations']['cics']}
+
+    Key Source Code References:
+    {chr(10).join([f"Line {ref.get('line_number', 'N/A')}: {ref.get('line_content', '')}" for ref in field_refs[:3]])}
+
+    Please provide a conversational, expert analysis that:
+    1. Explains what this field does in business terms
+    2. Describes how it's used in the program flow
+    3. Highlights any important technical details
+    4. Answers the user's specific question
+    5. Provides actionable insights for mainframe-to-modern migration
+
+    Keep the response informative but conversational, as if you're explaining to a colleague.
+    """
+
+            # Call LLM for enhanced response
+            response = self.llm_client.call_llm(prompt, max_tokens=800, temperature=0.3)
+            
+            # Log LLM call
+            self.db_manager.log_llm_call(
+                session_id, 'chat_field_analysis', 1, 1,
+                response.prompt_tokens, response.response_tokens, response.processing_time_ms,
+                response.success, response.error_message
+            )
+            
+            if response.success and response.content:
+                # Add technical details footer
+                technical_footer = f"\n\n**Technical Details:**\n"
+                technical_footer += f"• Program: {field_context['program_name']}\n"
+                technical_footer += f"• Definition: `{field_context['definition_code']}`\n"
+                technical_footer += f"• Total References: {field_context['total_references']}\n"
+                
+                if field_mappings:
+                    mapping = field_mappings[0]
+                    technical_footer += f"• Oracle Mapping: {mapping.get('oracle_data_type', 'Not mapped')}\n"
+                
+                return response.content + technical_footer
+            else:
+                # Fallback to formatted database response
+                return self._format_database_field_response(field_name, context, original_message)
+                
+        except Exception as e:
+            logger.error(f"Error creating LLM enhanced response: {str(e)}")
+            # Fallback to database formatting
+            return self._format_database_field_response(field_name, context, original_message)
     
     def _format_database_field_response(self, field_name: str, context: Dict, message: str) -> str:
         """Format comprehensive field response from database context"""
@@ -656,27 +761,98 @@ class ChatManager:
             return f"Error generating summary: {str(e)}"
     
     def _handle_general_query(self, session_id: str, message: str) -> str:
-        """Handle general queries"""
+        """Handle general queries with LLM context"""
         try:
-            # Check if user is asking for help
+            # Check for help request
             if any(word in message.lower() for word in ['help', 'what can you', 'how do i']):
                 return self._get_help_response()
             
-            # Provide general guidance
-            return ("I can help you analyze your mainframe code! Here's what you can ask:\n\n"
-                   "Field Analysis:\n"
-                   "  - 'Tell me about CUSTOMER-NAME'\n"
-                   "  - 'How is ACCOUNT-NUMBER used?'\n"
-                   "  - 'Show me EMPLOYEE-ID field'\n\n"
-                   "General Information:\n"
-                   "  - 'Show me the project summary'\n"
-                   "  - 'What programs have been analyzed?'\n"
-                   "  - 'List the record layouts'\n\n"
-                   "Ask about any specific field name and I'll show you exactly how it's used in your COBOL programs!")
+            # Get session context for LLM
+            session_context = self._get_session_context(session_id)
             
+            # Create LLM prompt with session context
+            prompt = f"""
+    You are a mainframe COBOL analysis expert. The user has asked: "{message}"
+
+    Current Analysis Context:
+    - Programs Analyzed: {session_context.get('total_programs', 0)}
+    - Record Layouts: {session_context.get('total_layouts', 0)}
+    - Total Fields: {session_context.get('total_fields', 0)}
+
+    Available Components: {', '.join(session_context.get('component_names', [])[:5])}
+    Available Fields: {', '.join(session_context.get('field_names', [])[:10])}
+
+    Please provide a helpful response that:
+    1. Addresses their question directly
+    2. Uses the available analysis data
+    3. Suggests specific fields, programs, or layouts they can ask about
+    4. Provides actionable insights
+
+    If you don't have enough context to answer fully, suggest what they should upload or analyze next.
+    """
+            
+            response = self.llm_client.call_llm(prompt, max_tokens=600, temperature=0.3)
+            
+            # Log LLM call
+            self.db_manager.log_llm_call(
+                session_id, 'chat_general', 1, 1,
+                response.prompt_tokens, response.response_tokens, response.processing_time_ms,
+                response.success, response.error_message
+            )
+            
+            if response.success and response.content:
+                return response.content
+            else:
+                # Fallback response
+                return self._get_contextual_help_response(session_context)
+                
         except Exception as e:
             logger.error(f"Error handling general query: {str(e)}")
             return "I can help analyze your mainframe code. Ask me about specific fields, programs, or record layouts!"
+
+    def _get_session_context(self, session_id: str) -> Dict:
+        """Get current session context for LLM"""
+        try:
+            metrics = self.db_manager.get_session_metrics(session_id)
+            components = self.db_manager.get_session_components(session_id)
+            
+            component_names = [c['component_name'] for c in components[:10]]
+            field_names = self._get_available_fields_sample(session_id).split(', ')[:10]
+            
+            return {
+                'total_programs': metrics.get('component_counts', {}).get('PROGRAM', 0),
+                'total_layouts': metrics.get('component_counts', {}).get('RECORD_LAYOUT', 0),
+                'total_fields': metrics.get('total_fields', 0),
+                'component_names': component_names,
+                'field_names': field_names
+            }
+        except Exception as e:
+            logger.error(f"Error getting session context: {str(e)}")
+            return {}
+
+    def _get_contextual_help_response(self, session_context: Dict) -> str:
+        """Generate contextual help based on session state"""
+        if session_context.get('total_programs', 0) == 0:
+            return ("I don't see any analyzed programs yet. Please upload COBOL files first, "
+                "then I can help you understand fields, record layouts, and business logic!")
+        
+        programs = session_context.get('component_names', [])[:3]
+        fields = session_context.get('field_names', [])[:5]
+        
+        response = f"I can help you analyze your mainframe code! "
+        
+        if programs:
+            response += f"\n\nYour programs: {', '.join(programs)}"
+        if fields:
+            response += f"\n\nSample fields: {', '.join(fields)}"
+        
+        response += "\n\nTry asking:\n"
+        response += "• 'Tell me about [FIELD-NAME]'\n"
+        response += "• 'How is [FIELD-NAME] used?'\n"
+        response += "• 'Show me the record layouts'\n"
+        response += "• 'What does this program do?'"
+        
+        return response
     
     def _get_help_response(self) -> str:
         """Provide help information"""

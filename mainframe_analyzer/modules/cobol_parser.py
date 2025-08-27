@@ -336,7 +336,7 @@ class COBOLParser:
         return components
     
     def extract_record_layouts(self, lines: List[str]) -> List[RecordLayout]:
-        """Extract 01 level record layouts with proper line tracking"""
+        """Extract 01 level record layouts, filtering out FILLER entries"""
         layouts = []
         current_layout = None
         current_fields = []
@@ -357,21 +357,27 @@ class COBOLParser:
                 name = data_match.group(2)
                 
                 if level == 1:
-                    # Finalize previous layout with proper line counts
+                    # Finalize previous layout
                     if current_layout and current_fields:
-                        current_layout.line_end = i - 1  # Previous line
+                        current_layout.line_end = i
                         current_layout.fields = current_fields
-                        # Calculate actual source code
-                        layout_lines = lines[current_layout.line_start-1:current_layout.line_end]
-                        current_layout.source_code = '\n'.join(layout_lines)
+                        # Calculate proper source code lines
+                        source_lines = lines[current_layout.line_start-1:current_layout.line_end]
+                        current_layout.source_code = '\n'.join(source_lines)
                         layouts.append(current_layout)
+                    
+                    # Skip FILLER 01 levels
+                    if name.upper() == 'FILLER':
+                        current_layout = None
+                        current_fields = []
+                        continue
                     
                     # Start new layout
                     current_layout = RecordLayout(
                         name=name,
                         level=level,
                         fields=[],
-                        line_start=i + 1,  # 1-based line numbers
+                        line_start=i + 1,
                         line_end=len(lines),
                         source_code="",
                         friendly_name=self.generate_friendly_name(name, 'Record Layout')
@@ -379,14 +385,16 @@ class COBOLParser:
                     current_fields = []
                 
                 elif current_layout and level > 1:
-                    field = self.parse_cobol_field(line, i + 1, level, name, data_match.group(3) or "")
-                    current_fields.append(field)
+                    # Skip FILLER sub-fields too
+                    if name.upper() != 'FILLER':
+                        field = self.parse_cobol_field(line, i + 1, level, name, data_match.group(3) or "")
+                        current_fields.append(field)
         
-        # Close last layout with proper line calculation
+        # Close last layout
         if current_layout and current_fields:
             current_layout.line_end = len(lines)
-            layout_lines = lines[current_layout.line_start-1:current_layout.line_end]
-            current_layout.source_code = '\n'.join(layout_lines)
+            source_lines = lines[current_layout.line_start-1:current_layout.line_end]
+            current_layout.source_code = '\n'.join(source_lines)
             current_layout.fields = current_fields
             layouts.append(current_layout)
         

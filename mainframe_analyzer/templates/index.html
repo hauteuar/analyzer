@@ -1441,13 +1441,30 @@
                         </table>
                     </div>
                 </div>
-
+                <!-- Field Operations Modal -->
+                <div id="fieldOperationsModal" class="modal">
+                    <div class="modal-content" style="width: 800px;">
+                        <div class="modal-header">
+                            <h3 class="modal-title" id="fieldModalTitle">Field Operations</h3>
+                            <button class="close" onclick="closeFieldOperationsModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="fieldOperationsContent">
+                                <!-- Operations will be populated here -->
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="closeFieldOperationsModal()">Close</button>
+                        </div>
+                    </div>
+                </div>
                 <!-- Field Mapping Analysis Tab -->
                 <div id="fieldMapping" class="tab-pane">
                     <h2>🎯 Field Mapping Analysis</h2>
                     <div class="field-mapping-controls">
                         <input type="text" id="targetFileInput" placeholder="Enter target file name (e.g., CUSTOMER-FILE)">
                         <button class="btn btn-primary" onclick="analyzeFieldMapping()">🔍 Analyze Field Mapping</button>
+                        <button class="btn btn-secondary" onclick="exportFieldMappings()">📊 Export to CSV</button>
                     </div>
                     <div id="fieldMappingResults">
                         <table class="data-table">
@@ -1926,6 +1943,37 @@
             return typeMap[ext] || 'COBOL';
         }
 
+        function exportFieldMappings() {
+            const table = document.getElementById('fieldMappingTableBody');
+            const rows = table.querySelectorAll('tr');
+            
+            if (rows.length === 0 || rows[0].textContent.includes('No field mappings')) {
+                alert('No field mappings to export');
+                return;
+            }
+            
+            let csv = 'Field Name,Mainframe Data Type,Oracle Data Type,MF Length,Oracle Length,Population Source,Business Logic,Programs Involved\n';
+            
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td');
+                const rowData = [];
+                cells.forEach(cell => {
+                    // Clean cell content
+                    const text = cell.textContent.trim().replace(/\n/g, ' ').replace(/,/g, ';');
+                    rowData.push(`"${text}"`);
+                });
+                csv += rowData.join(',') + '\n';
+            });
+            
+            // Download CSV
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `field_mappings_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
         // Field Mapping Analysis
         async function analyzeFieldMapping() {
             const targetFile = document.getElementById('targetFileInput').value.trim();
@@ -1964,6 +2012,8 @@
             hideLoading();
         }
 
+        
+        
         // Display field mappings in table
         function displayFieldMappings(mappings) {
             const tbody = document.getElementById('fieldMappingTableBody');
@@ -1994,11 +2044,20 @@
                     ioIndicator = '<span class="io-badge io-both">🔄 I/O</span>';
                 }
 
+                // Extract field operations from mapping data
+                const fieldOperations = extractFieldOperations(mapping);
+                const operationsJson = JSON.stringify(fieldOperations).replace(/"/g, '&quot;');
+
                 row.innerHTML = `
                     <td>
-                        <strong>${mapping.field_name}</strong><br>
+                        <strong style="cursor: pointer; color: #667eea; text-decoration: underline;" 
+                                onclick="showFieldOperations('${mapping.field_name}', '${operationsJson}')"
+                                title="Click to view all operations">
+                            ${mapping.field_name}
+                        </strong><br>
                         <small class="text-muted">${mapping.friendly_name || ''}</small>
                         <div class="io-indicator">${ioIndicator}</div>
+                        ${fieldOperations.length > 0 ? `<small class="text-info">${fieldOperations.length} operations</small>` : ''}
                     </td>
                     <td><code>${mapping.mainframe_data_type}</code></td>
                     <td><code>${mapping.oracle_data_type}</code></td>
@@ -2016,6 +2075,157 @@
                 `;
                 tbody.appendChild(row);
             });
+        }
+
+        // Function to extract field operations from mapping data
+        function extractFieldOperations(mapping) {
+            const operations = [];
+            
+            try {
+                // Extract from derivation_logic if available
+                if (mapping.derivation_logic) {
+                    operations.push({
+                        type: 'DERIVATION',
+                        line_number: 'Multiple',
+                        code: mapping.derivation_logic,
+                        description: 'Field derivation logic'
+                    });
+                }
+                
+                // Extract from business_logic_description
+                if (mapping.business_logic_description) {
+                    operations.push({
+                        type: mapping.business_logic_type || 'PROCESSING',
+                        line_number: 'Multiple',
+                        code: mapping.business_logic_description,
+                        description: 'Business logic implementation'
+                    });
+                }
+                
+                // Extract from population_source
+                if (mapping.population_source && mapping.population_source !== 'N/A') {
+                    let operationType = 'MOVE';
+                    if (mapping.population_source.includes('CICS READ')) {
+                        operationType = 'CICS_READ';
+                    } else if (mapping.population_source.includes('CICS WRITE')) {
+                        operationType = 'CICS_WRITE';
+                    } else if (mapping.population_source.includes('CICS REWRITE')) {
+                        operationType = 'CICS_REWRITE';
+                    } else if (mapping.population_source.includes('Computed')) {
+                        operationType = 'COMPUTE';
+                    }
+                    
+                    operations.push({
+                        type: operationType,
+                        line_number: 'Runtime',
+                        code: mapping.population_source,
+                        description: 'Data population source'
+                    });
+                }
+                
+                // If we have source_record_layout, add layout reference
+                if (mapping.source_record_layout) {
+                    operations.push({
+                        type: 'LAYOUT_REFERENCE',
+                        line_number: 'Definition',
+                        code: `Defined in ${mapping.source_record_layout}`,
+                        description: 'Field definition location'
+                    });
+                }
+                
+                // Add confidence and program information
+                if (mapping.programs_involved && mapping.programs_involved.length > 0) {
+                    const programs = Array.isArray(mapping.programs_involved) 
+                        ? mapping.programs_involved 
+                        : [mapping.programs_involved];
+                        
+                    operations.push({
+                        type: 'PROGRAM_USAGE',
+                        line_number: 'Multiple',
+                        code: `Used in: ${programs.join(', ')}`,
+                        description: `Field is processed by ${programs.length} program(s)`
+                    });
+                }
+                
+            } catch (error) {
+                console.error('Error extracting field operations:', error);
+            }
+            
+            return operations;
+        }
+
+        // Updated showFieldOperations to handle string parameter
+        function showFieldOperations(fieldName, operationsJson) {
+            let operations;
+            
+            try {
+                // Parse the operations JSON string
+                operations = JSON.parse(operationsJson.replace(/&quot;/g, '"'));
+            } catch (error) {
+                console.error('Error parsing operations:', error);
+                operations = [{
+                    type: 'ERROR',
+                    line_number: 'N/A',
+                    code: 'Failed to load operations',
+                    description: 'Error loading field operation details'
+                }];
+            }
+            
+            document.getElementById('fieldModalTitle').textContent = `${fieldName} - Field Operations`;
+            
+            const content = document.getElementById('fieldOperationsContent');
+            content.innerHTML = `
+                <div style="margin-bottom: 1rem;">
+                    <h5>Field: <code>${fieldName}</code></h5>
+                    <p>Found ${operations.length} operation(s) for this field:</p>
+                </div>
+                <div style="max-height: 400px; overflow-y: auto;">
+            `;
+            
+            operations.forEach((op, index) => {
+                const badgeClass = getBadgeClass(op.type);
+                
+                content.innerHTML += `
+                    <div class="operation-item" style="border: 1px solid #dee2e6; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; background: #f8f9fa;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <strong>Operation ${index + 1}</strong>
+                            <span class="badge ${badgeClass}">${op.type.replace('_', ' ')}</span>
+                        </div>
+                        
+                        <div style="margin-bottom: 0.5rem;">
+                            <strong>Location:</strong> ${op.line_number}
+                        </div>
+                        
+                        <div style="margin-bottom: 0.5rem;">
+                            <strong>Code/Logic:</strong>
+                            <div style="background: white; padding: 0.5rem; border-radius: 4px; font-family: monospace; border: 1px solid #dee2e6; margin-top: 0.25rem;">
+                                ${op.code}
+                            </div>
+                        </div>
+                        
+                        <div style="color: #6c757d; font-style: italic;">
+                            <strong>Description:</strong> ${op.description}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            content.innerHTML += '</div>';
+            document.getElementById('fieldOperationsModal').style.display = 'block';
+            document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        }
+
+        function closeFieldOperationsModal() {
+            document.getElementById('fieldOperationsModal').style.display = 'none';
+            document.body.style.overflow = 'auto'; // Restore scrolling
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('fieldOperationsModal');
+            if (event.target === modal) {
+                closeFieldOperationsModal();
+            }
         }
         // Add this function to load and display dependencies
         async function loadDependenciesVisualization() {
@@ -2066,7 +2276,7 @@
                 const source = dep.source_component;
                 const target = dep.target_component;
                 const type = dep.relationship_type;
-                const interfaceType = dep.interface_type;
+                const details = dep.details || {};
                 
                 // Add source as core component
                 categorized.components.add({
@@ -2075,26 +2285,69 @@
                     confidence: dep.confidence_score
                 });
                 
-                // Categorize target based on relationship type
+                // Categorize based on operation type
                 if (type === 'CICS_FILE') {
-                    categorized.interfaces.add({
-                        name: target,
-                        type: 'CICS File',
-                        interface: interfaceType,
-                        confidence: dep.confidence_score
-                    });
+                    const operation = details.operation || 'UNKNOWN';
+                    
+                    if (operation.includes('READ') || operation.includes('READ')) {
+                        categorized.inputs.add({
+                            name: target,
+                            type: 'CICS Input File',
+                            operation: operation,
+                            confidence: dep.confidence_score
+                        });
+                    } else if (operation.includes('WRITE')) {
+                        categorized.outputs.add({
+                            name: target,
+                            type: 'CICS Output File',
+                            operation: operation,
+                            confidence: dep.confidence_score
+                        });
+                    } else if (operation.includes('REWRITE')) {
+                        // Add to both input and output
+                        categorized.inputs.add({
+                            name: target + ' (Read)',
+                            type: 'CICS I/O File',
+                            operation: operation,
+                            confidence: dep.confidence_score
+                        });
+                        categorized.outputs.add({
+                            name: target + ' (Write)',
+                            type: 'CICS I/O File', 
+                            operation: operation,
+                            confidence: dep.confidence_score
+                        });
+                    } else {
+                        categorized.interfaces.add({
+                            name: target,
+                            type: 'CICS File',
+                            operation: operation,
+                            confidence: dep.confidence_score
+                        });
+                    }
+                } else if (type === 'PROGRAM_CALL') {
+                    // Check if called program exists in our analysis
+                    const programExists = dependencies.some(d => d.source_component === target);
+                    
+                    if (!programExists) {
+                        categorized.missing.add({
+                            name: target,
+                            type: 'Missing Called Program',
+                            reason: 'Program called but not analyzed',
+                            confidence: dep.confidence_score
+                        });
+                    } else {
+                        categorized.components.add({
+                            name: target,
+                            type: 'Called Program',
+                            confidence: dep.confidence_score
+                        });
+                    }
                 } else if (type === 'COPYBOOK_INCLUDE') {
-                    // Check if copybook exists - if not, it's missing
                     categorized.missing.add({
                         name: target,
                         type: 'Missing Copybook',
-                        reason: 'Referenced but not found',
-                        confidence: dep.confidence_score
-                    });
-                } else if (type === 'PROGRAM_CALL') {
-                    categorized.components.add({
-                        name: target,
-                        type: 'Called Program',
+                        reason: 'Referenced but not included in analysis',
                         confidence: dep.confidence_score
                     });
                 } else if (type === 'USES_RECORD_LAYOUT') {
@@ -2490,7 +2743,19 @@
         // Panel Management
         function togglePanel(side) {
             const panel = document.getElementById(side + 'Panel');
+            const isCollapsed = panel.classList.contains('collapsed');
+            
             panel.classList.toggle('collapsed');
+            
+            // Update button text and add restore capability
+            const button = panel.querySelector('.collapse-btn');
+            if (isCollapsed) {
+                button.textContent = side === 'left' ? '◀' : '▶';
+                button.title = 'Collapse panel';
+            } else {
+                button.textContent = side === 'left' ? '▶' : '◀';
+                button.title = 'Restore panel';
+            }
         }
 
         // Load components table with hierarchy support
@@ -2717,7 +2982,7 @@ function displayComponentsHierarchy(components) {
             const container = document.getElementById('componentSummaries');
             container.innerHTML = '';
 
-            const programs = components.filter(c => c.component_type === 'PROGRAM' && c.llm_summary);
+            const programs = components.filter(c => c.component_type === 'PROGRAM');
             
             if (programs.length === 0) {
                 container.innerHTML = '<p class="text-muted">Upload COBOL files to see AI-generated business summaries</p>';
@@ -2725,7 +2990,22 @@ function displayComponentsHierarchy(components) {
             }
 
             programs.forEach(program => {
-                const summary = program.llm_summary;
+                // Fix: Parse the analysis_result_json to get llm_summary
+                let llmSummary = {};
+                let businessPurpose = 'Analysis in progress...';
+                let complexityScore = 0;
+                
+                try {
+                    if (program.analysis_result_json) {
+                        const analysisResult = JSON.parse(program.analysis_result_json);
+                        llmSummary = analysisResult.llm_summary || {};
+                        businessPurpose = program.business_purpose || llmSummary.business_purpose || 'Analysis pending';
+                        complexityScore = program.complexity_score || llmSummary.complexity_score || 0;
+                    }
+                } catch (e) {
+                    console.error('Error parsing LLM summary for', program.component_name, e);
+                }
+                
                 const card = document.createElement('div');
                 card.className = 'component-summary-card';
                 
@@ -2738,7 +3018,7 @@ function displayComponentsHierarchy(components) {
                         <span class="component-type badge badge-primary">PROGRAM</span>
                     </div>
                     
-                    <div class="business-purpose">${summary.business_purpose || 'Analysis in progress...'}</div>
+                    <div class="business-purpose">${businessPurpose}</div>
                     
                     <div class="component-metrics">
                         <div class="metric">
@@ -2746,20 +3026,20 @@ function displayComponentsHierarchy(components) {
                             <span class="metric-label">Lines</span>
                         </div>
                         <div class="metric">
-                            <span class="metric-value">${((summary.complexity_score || 0) * 100).toFixed(0)}%</span>
+                            <span class="metric-value">${(complexityScore * 100).toFixed(0)}%</span>
                             <span class="metric-label">Complexity</span>
                         </div>
                         <div class="metric">
-                            <span class="metric-value">${program.derived_components ? program.derived_components.length : 0}</span>
-                            <span class="metric-label">Components</span>
+                            <span class="metric-value">${program.total_fields || 0}</span>
+                            <span class="metric-label">Fields</span>
                         </div>
                     </div>
                     
                     <div class="complexity-bar">
-                        <div class="complexity-fill" style="width: ${(summary.complexity_score || 0) * 100}%"></div>
+                        <div class="complexity-fill" style="width: ${complexityScore * 100}%"></div>
                     </div>
                     
-                    ${summary.business_domain ? `<span class="domain-badge domain-${summary.business_domain.toLowerCase()}">${summary.business_domain}</span>` : ''}
+                    ${llmSummary.business_domain ? `<span class="domain-badge domain-${llmSummary.business_domain.toLowerCase()}">${llmSummary.business_domain}</span>` : ''}
                 `;
                 
                 container.appendChild(card);
