@@ -57,7 +57,9 @@ class ComponentExtractor:
                         'file_path': file_name,
                         
                         # Content and metrics
-                        'content': component.get('content', ''),
+                        'content': file_content, 
+                        'source_content': component.get('source_code', file_content),  # Component-specific source
+                        'component_source': component.get('content', ''),
                         'total_lines': component.get('total_lines', 0),
                         'executable_lines': component.get('executable_lines', 0),
                         'comment_lines': component.get('comment_lines', 0),

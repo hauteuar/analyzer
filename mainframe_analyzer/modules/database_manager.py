@@ -473,41 +473,43 @@ class DatabaseManager:
                 
                 # Check if component already exists
                 cursor.execute('''
-                    SELECT COUNT(*) FROM component_analysis 
+                SELECT COUNT(*) FROM component_analysis 
+                WHERE session_id = ? AND component_name = ? AND component_type = ?
+            ''', (session_id, component_name, component_type))
+            
+            if cursor.fetchone()[0] > 0:
+                logger.info(f"Component {component_name} already exists, updating...")
+                cursor.execute('''
+                    UPDATE component_analysis 
+                    SET total_lines = ?, total_fields = ?, business_purpose = ?, 
+                        complexity_score = ?, analysis_result_json = ?, updated_at = CURRENT_TIMESTAMP,
+                        source_content = ?
                     WHERE session_id = ? AND component_name = ? AND component_type = ?
-                ''', (session_id, component_name, component_type))
-                
-                if cursor.fetchone()[0] > 0:
-                    logger.info(f"Component {component_name} already exists, updating...")
-                    cursor.execute('''
-                        UPDATE component_analysis 
-                        SET total_lines = ?, total_fields = ?, business_purpose = ?, 
-                            complexity_score = ?, analysis_result_json = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE session_id = ? AND component_name = ? AND component_type = ?
-                    ''', (
-                        analysis_result.get('total_lines', 0),
-                        len(analysis_result.get('fields', [])),
-                        analysis_result.get('business_purpose', ''),
-                        float(analysis_result.get('complexity_score', 0.5)),
-                        json.dumps(analysis_result),
-                        session_id, component_name, component_type
-                    ))
-                else:
-                    cursor.execute('''
-                        INSERT INTO component_analysis 
-                        (session_id, component_name, component_type, file_path, 
-                        total_lines, total_fields, business_purpose, complexity_score,
-                        source_content, analysis_result_json)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        session_id, component_name, component_type, file_path,
-                        analysis_result.get('total_lines', 0),
-                        len(analysis_result.get('fields', [])),
-                        analysis_result.get('business_purpose', ''),
-                        float(analysis_result.get('complexity_score', 0.5)),
-                        analysis_result.get('content', ''),
-                        json.dumps(analysis_result)
-                    ))
+                ''', (
+                    analysis_result.get('total_lines', 0),
+                    len(analysis_result.get('fields', [])),
+                    analysis_result.get('business_purpose', ''),
+                    float(analysis_result.get('complexity_score', 0.5)),
+                    json.dumps(analysis_result),
+                    analysis_result.get('content', ''),  # Store source content
+                    session_id, component_name, component_type
+                ))
+            else:
+                cursor.execute('''
+                    INSERT INTO component_analysis 
+                    (session_id, component_name, component_type, file_path, 
+                    total_lines, total_fields, business_purpose, complexity_score,
+                    source_content, analysis_result_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    session_id, component_name, component_type, file_path,
+                    analysis_result.get('total_lines', 0),
+                    len(analysis_result.get('fields', [])),
+                    analysis_result.get('business_purpose', ''),
+                    float(analysis_result.get('complexity_score', 0.5)),
+                    analysis_result.get('content', ''),  # Store source content
+                    json.dumps(analysis_result)
+                ))
                 
                 logger.info(f"Successfully stored/updated component: {component_name}")
                 
@@ -991,3 +993,124 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error exporting dependencies: {str(e)}")
             return []
+        
+    
+    # Add this method to database_manager.py:
+
+    def get_component_source_code(self, session_id: str, component_name: str = None, 
+                                component_type: str = None, max_size: int = 50000) -> Dict:
+        """Get source code for chat, with size-based truncation"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if component_name:
+                    cursor.execute('''
+                        SELECT component_name, component_type, source_content, 
+                            total_lines, analysis_result_json
+                        FROM component_analysis 
+                        WHERE session_id = ? AND component_name = ?
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    ''', (session_id, component_name))
+                else:
+                    cursor.execute('''
+                        SELECT component_name, component_type, source_content, 
+                            total_lines, analysis_result_json
+                        FROM component_analysis 
+                        WHERE session_id = ?
+                        ORDER BY total_lines ASC, created_at DESC
+                    ''', (session_id,))
+                
+                results = []
+                for row in cursor.fetchall():
+                    row_dict = dict(row)
+                    source_content = row_dict.get('source_content', '')
+                    
+                    # Determine if we should send full or partial source
+                    if len(source_content) <= max_size:
+                        # Send full source for small components
+                        row_dict['source_strategy'] = 'full'
+                        row_dict['source_for_chat'] = source_content
+                    else:
+                        # Send summary + key sections for large components
+                        row_dict['source_strategy'] = 'partial'
+                        row_dict['source_for_chat'] = self._create_source_summary(
+                            source_content, row_dict.get('analysis_result_json', '{}')
+                        )
+                    
+                    results.append(row_dict)
+                
+                return {
+                    'success': True,
+                    'components': results
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting component source code: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'components': []
+            }
+
+    def _create_source_summary(self, source_content: str, analysis_json: str) -> str:
+        """Create a summary of source code for large components"""
+        try:
+            analysis = json.loads(analysis_json) if analysis_json else {}
+            
+            lines = source_content.split('\n')
+            total_lines = len(lines)
+            
+            # Create summary with key sections
+            summary_parts = [
+                f"=== SOURCE CODE SUMMARY (Total: {total_lines} lines) ===",
+                "",
+                "BUSINESS PURPOSE:",
+                analysis.get('business_purpose', 'Not analyzed'),
+                "",
+                "KEY SECTIONS:",
+            ]
+            
+            # Add first 20 lines (header/identification)
+            summary_parts.extend([
+                "--- PROGRAM HEADER (First 20 lines) ---"
+            ])
+            summary_parts.extend(lines[:20])
+            summary_parts.append("")
+            
+            # Add record layouts if available
+            record_layouts = analysis.get('record_layouts', [])
+            if record_layouts:
+                summary_parts.extend([
+                    f"--- RECORD LAYOUTS ({len(record_layouts)} found) ---"
+                ])
+                for layout in record_layouts[:3]:  # Show first 3 layouts
+                    layout_name = layout.get('name', 'Unknown')
+                    field_count = len(layout.get('fields', []))
+                    summary_parts.append(f"Layout: {layout_name} ({field_count} fields)")
+                    
+                    # Show source code for this layout if available
+                    if layout.get('source_code'):
+                        summary_parts.extend(layout['source_code'].split('\n')[:10])
+                    summary_parts.append("")
+            
+            # Add procedure division start if found
+            proc_div_start = -1
+            for i, line in enumerate(lines):
+                if 'PROCEDURE DIVISION' in line.upper():
+                    proc_div_start = i
+                    break
+            
+            if proc_div_start >= 0:
+                summary_parts.extend([
+                    "--- PROCEDURE DIVISION START (Next 15 lines) ---"
+                ])
+                end_idx = min(proc_div_start + 15, total_lines)
+                summary_parts.extend(lines[proc_div_start:end_idx])
+            
+            return '\n'.join(summary_parts)
+            
+        except Exception as e:
+            logger.error(f"Error creating source summary: {str(e)}")
+            return f"Source code available ({len(source_content)} characters) but summary generation failed"

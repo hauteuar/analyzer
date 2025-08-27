@@ -343,6 +343,22 @@ def create_session():
     session_id = analyzer.create_session(project_name)
     return jsonify({'session_id': session_id, 'project_name': project_name})
 
+# Add this to your main.py Flask routes:
+
+@app.route('/api/component-source/<session_id>/<component_name>')
+def get_component_source_api(session_id, component_name):
+    """Get component source code for chat/display"""
+    try:
+        source_data = analyzer.db_manager.get_component_source_code(
+            session_id, component_name, max_size=100000
+        )
+        return jsonify(source_data)
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
 @app.route('/api/test-llm', methods=['POST'])
 def test_llm_connection():
     """Test LLM connection with provided configuration"""

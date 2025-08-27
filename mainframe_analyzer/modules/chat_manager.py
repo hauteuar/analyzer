@@ -39,42 +39,136 @@ class ChatManager:
             'PERFORM', 'UNTIL', 'VARYING', 'WHEN', 'EVALUATE', 'ACCEPT', 'DISPLAY'
         }
     
+    # In chat_manager.py, update the process_query method:
+
     def process_query(self, session_id: str, message: str, conversation_id: str) -> str:
-        """Process chat query with better routing logic"""
-        logger.info(f"Processing chat query: '{message[:100]}...'")
-        
+        """Process chat query with enhanced source code context"""
         try:
-            # Extract field names more carefully
-            field_names = self._extract_field_names(message)
-            logger.info(f"Extracted potential field names: {field_names}")
+            # Get relevant context including source code
+            context = self._get_enhanced_context(session_id, message)
             
-            # Check message intent first
-            message_lower = message.lower()
+            # Build comprehensive prompt with source code
+            prompt = self._build_enhanced_prompt(message, context)
             
-            # Priority routing based on keywords
-            if any(word in message_lower for word in ['help', 'what can you', 'how do i']):
-                return self._get_help_response()
+            # Call LLM
+            response = self.llm_client.call_llm(prompt, max_tokens=2000, temperature=0.1)
             
-            elif any(word in message_lower for word in ['summary', 'overview', 'status']):
-                return self._handle_summary_query(session_id)
+            # Log the call
+            self.db_manager.log_llm_call(
+                session_id, 'chat_query', 1, 1,
+                response.prompt_tokens, response.response_tokens, 
+                response.processing_time_ms, response.success, response.error_message
+            )
             
-            elif any(word in message_lower for word in ['layout', 'record', 'structure']) and not field_names:
-                return self._handle_layout_query(session_id, message)
-            
-            elif any(word in message_lower for word in ['program', 'component', 'module']) and not field_names:
-                return self._handle_program_query(session_id, message)
-            
-            elif field_names:
-                # Only if we found actual field names
-                return self._handle_field_query(session_id, field_names, message)
-            
+            if response.success:
+                # Store conversation
+                self.db_manager.store_chat_message(
+                    session_id, conversation_id, 'user', message,
+                    context_used={'components_referenced': len(context.get('components', []))},
+                    tokens_used=response.prompt_tokens
+                )
+                
+                self.db_manager.store_chat_message(
+                    session_id, conversation_id, 'assistant', response.content,
+                    tokens_used=response.response_tokens,
+                    processing_time_ms=response.processing_time_ms
+                )
+                
+                return response.content
             else:
-                # General query - don't assume field names
-                return self._handle_general_query(session_id, message)
-                    
+                return f"I encountered an error: {response.error_message}"
+                
         except Exception as e:
             logger.error(f"Error processing chat query: {str(e)}")
-            return f"I encountered an error processing your question: {str(e)}"
+            return "I'm sorry, I encountered an error processing your request."
+
+    def _get_enhanced_context(self, session_id: str, message: str) -> Dict:
+        """Get enhanced context including source code based on query"""
+        context = {
+            'components': [],
+            'record_layouts': [],
+            'field_mappings': [],
+            'dependencies': [],
+            'source_code_included': False
+        }
+        
+        try:
+            # Check if user is asking about specific component
+            component_mentioned = self._extract_component_name_from_message(message)
+            
+            if component_mentioned:
+                # Get specific component with source code
+                source_data = self.db_manager.get_component_source_code(
+                    session_id, component_mentioned, max_size=30000
+                )
+                if source_data['success'] and source_data['components']:
+                    context['components'] = source_data['components']
+                    context['source_code_included'] = True
+            else:
+                # Get general context (smaller components with source code)
+                source_data = self.db_manager.get_component_source_code(
+                    session_id, max_size=20000
+                )
+                if source_data['success']:
+                    # Include up to 2 small components with full source
+                    small_components = [c for c in source_data['components'] 
+                                    if c.get('source_strategy') == 'full'][:2]
+                    context['components'] = small_components
+                    context['source_code_included'] = len(small_components) > 0
+            
+            # Get other context as before
+            context['record_layouts'] = self.db_manager.get_record_layouts(session_id)[:5]
+            # ... other context gathering ...
+            
+        except Exception as e:
+            logger.error(f"Error getting enhanced context: {str(e)}")
+        
+        return context
+
+    def _build_enhanced_prompt(self, message: str, context: Dict) -> str:
+        """Build enhanced prompt with source code context"""
+        prompt_parts = [
+            "You are a COBOL/mainframe analysis expert. Answer the user's question using the provided context.",
+            "",
+            f"USER QUESTION: {message}",
+            ""
+        ]
+        
+        # Add source code if available
+        if context.get('source_code_included') and context.get('components'):
+            prompt_parts.extend([
+                "=== SOURCE CODE CONTEXT ===",
+                ""
+            ])
+            
+            for component in context['components'][:2]:  # Limit to 2 components
+                prompt_parts.extend([
+                    f"COMPONENT: {component['component_name']} ({component['component_type']})",
+                    f"LINES: {component.get('total_lines', 0)}",
+                    f"SOURCE STRATEGY: {component.get('source_strategy', 'unknown')}",
+                    "",
+                    "SOURCE CODE:",
+                    component.get('source_for_chat', 'No source available'),
+                    "",
+                    "=" * 50,
+                    ""
+                ])
+        
+        # Add other context...
+        if context.get('record_layouts'):
+            prompt_parts.extend([
+                "=== RECORD LAYOUTS ===",
+                ""
+            ])
+            for layout in context['record_layouts'][:3]:
+                prompt_parts.append(f"- {layout['layout_name']}: {layout.get('fields_count', 0)} fields")
+        
+        prompt_parts.extend([
+            "",
+            "Please provide a helpful, accurate response based on this context. If you reference source code, include specific line numbers or code snippets where relevant."
+        ])
+        
+        return '\n'.join(prompt_parts)
     
     def _search_for_similar_fields(self, session_id: str, query_term: str) -> List[str]:
         """Search for fields similar to the query term"""
