@@ -344,6 +344,48 @@ def create_session():
     return jsonify({'session_id': session_id, 'project_name': project_name})
 
 # Add this to your main.py Flask routes:
+# Add this route to reset database if needed
+@app.route('/api/reset-database', methods=['POST'])
+def reset_database():
+    """Reset database - USE WITH CAUTION"""
+    try:
+        import os
+        if os.path.exists(analyzer.db_manager.db_path):
+            os.remove(analyzer.db_manager.db_path)
+        
+        # Reinitialize
+        analyzer.db_manager.init_executed = False
+        analyzer.db_manager.initialize_database()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Database reset successfully'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/debug-components/<session_id>')
+def debug_components(session_id):
+    """Debug endpoint to see raw component data"""
+    try:
+        analyzer.db_manager.debug_database_schema()
+        
+        components = analyzer.db_manager.get_session_components(session_id)
+        
+        return jsonify({
+            'success': True,
+            'components_count': len(components),
+            'components': components,
+            'session_id': session_id
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 @app.route('/api/component-source/<session_id>/<component_name>')
 def get_component_source_api(session_id, component_name):

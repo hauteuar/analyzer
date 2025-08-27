@@ -46,55 +46,36 @@ class ComponentExtractor:
             
             logger.info(f"✅ Component extraction completed: {len(components)} components extracted")
             
+            # In extract_components method, wrap the storage in better error handling:
+
             for component in components:
                 try:
-                    # Ensure component has the proper structure for database storage
+                    # Validate component data before storing
+                    if not component.get('name'):
+                        logger.warning("Skipping component without name")
+                        continue
+                        
+                    # Ensure required fields exist
                     component_data = {
-                        # Core component information
-                        'name': component.get('name', 'UNKNOWN'),
-                        'friendly_name': component.get('friendly_name', component.get('name', 'UNKNOWN')),
-                        'type': component.get('type', 'UNKNOWN'),
-                        'file_path': file_name,
-                        
-                        # Content and metrics
-                        'content': file_content, 
-                        'source_content': component.get('source_code', file_content),  # Component-specific source
-                        'component_source': component.get('content', ''),
-                        'total_lines': component.get('total_lines', 0),
-                        'executable_lines': component.get('executable_lines', 0),
-                        'comment_lines': component.get('comment_lines', 0),
-                        'total_fields': component.get('total_fields', 0),
-                        
-                        # Business analysis
-                        'business_purpose': component.get('business_purpose', ''),
-                        'complexity_score': component.get('complexity_score', 0.5),
+                        'name': str(component.get('name', 'UNKNOWN')),
+                        'friendly_name': str(component.get('friendly_name', component.get('name', 'UNKNOWN'))),
+                        'type': str(component.get('type', 'UNKNOWN')),
+                        'file_path': str(file_name),
+                        'content': str(file_content),
+                        'total_lines': int(component.get('total_lines', 0)),
+                        'executable_lines': int(component.get('executable_lines', 0)),
+                        'comment_lines': int(component.get('comment_lines', 0)),
+                        'total_fields': len(component.get('fields', [])),
+                        'business_purpose': str(component.get('business_purpose', ''))[:500],
+                        'complexity_score': float(component.get('complexity_score', 0.5)),
                         'llm_summary': component.get('llm_summary', {}),
-                        
-                        # Structural data
                         'divisions': component.get('divisions', []),
                         'file_operations': component.get('file_operations', []),
                         'program_calls': component.get('program_calls', []),
                         'copybooks': component.get('copybooks', []),
                         'cics_operations': component.get('cics_operations', []),
-                        'mq_operations': component.get('mq_operations', []),
-                        'xml_operations': component.get('xml_operations', []),
-                        
-                        # Relationships
-                        'derived_components': component.get('derived_components', []),
                         'record_layouts': component.get('record_layouts', []),
                         'fields': component.get('fields', []),
-                        
-                        # Component-specific data
-                        'parent_program': component.get('parent_program', ''),
-                        'parent_copybook': component.get('parent_copybook', ''),
-                        'level': component.get('level', ''),
-                        'line_start': component.get('line_start', 0),
-                        'line_end': component.get('line_end', 0),
-                        'source_code': component.get('source_code', ''),
-                        'access_pattern': component.get('access_pattern', ''),
-                        'io_classification': component.get('io_classification', ''),
-                        'operations': component.get('operations', []),
-                        'usage_pattern': component.get('usage_pattern', '')
                     }
                     
                     self.db_manager.store_component_analysis(
@@ -105,10 +86,11 @@ class ComponentExtractor:
                         component_data
                     )
                     
-                    logger.info(f"✅ Stored component: {component_data['name']} ({component_data['type']})")
+                    logger.info(f"Successfully stored component: {component_data['name']} ({component_data['type']})")
                     
                 except Exception as e:
-                    logger.error(f"❌ Error storing component {component.get('name', 'UNKNOWN')}: {str(e)}")
+                    logger.error(f"Error storing component {component.get('name', 'UNKNOWN')}: {str(e)}")
+                    logger.error(f"Component data: {component}")
                     # Continue with other components even if one fails
                     continue
             # Log component summary

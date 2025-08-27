@@ -466,57 +466,61 @@ class DatabaseManager:
     
     def store_component_analysis(self, session_id: str, component_name: str, 
                            component_type: str, file_path: str, analysis_result: Dict):
-        """Store component analysis - prevent duplicates"""
+        """Store component analysis - FIXED VERSION"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Check if component already exists
                 cursor.execute('''
-                SELECT COUNT(*) FROM component_analysis 
-                WHERE session_id = ? AND component_name = ? AND component_type = ?
-            ''', (session_id, component_name, component_type))
-            
-            if cursor.fetchone()[0] > 0:
-                logger.info(f"Component {component_name} already exists, updating...")
-                cursor.execute('''
-                    UPDATE component_analysis 
-                    SET total_lines = ?, total_fields = ?, business_purpose = ?, 
-                        complexity_score = ?, analysis_result_json = ?, updated_at = CURRENT_TIMESTAMP,
-                        source_content = ?
+                    SELECT COUNT(*) FROM component_analysis 
                     WHERE session_id = ? AND component_name = ? AND component_type = ?
-                ''', (
-                    analysis_result.get('total_lines', 0),
-                    len(analysis_result.get('fields', [])),
-                    analysis_result.get('business_purpose', ''),
-                    float(analysis_result.get('complexity_score', 0.5)),
-                    json.dumps(analysis_result),
-                    analysis_result.get('content', ''),  # Store source content
-                    session_id, component_name, component_type
-                ))
-            else:
-                cursor.execute('''
-                    INSERT INTO component_analysis 
-                    (session_id, component_name, component_type, file_path, 
-                    total_lines, total_fields, business_purpose, complexity_score,
-                    source_content, analysis_result_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    session_id, component_name, component_type, file_path,
-                    analysis_result.get('total_lines', 0),
-                    len(analysis_result.get('fields', [])),
-                    analysis_result.get('business_purpose', ''),
-                    float(analysis_result.get('complexity_score', 0.5)),
-                    analysis_result.get('content', ''),  # Store source content
-                    json.dumps(analysis_result)
-                ))
+                ''', (session_id, component_name, component_type))
+                
+                exists = cursor.fetchone()[0] > 0
+                
+                # Safely extract values with defaults
+                total_lines = analysis_result.get('total_lines', 0)
+                total_fields = len(analysis_result.get('fields', []))
+                business_purpose = str(analysis_result.get('business_purpose', ''))[:500]  # Limit length
+                complexity_score = float(analysis_result.get('complexity_score', 0.5))
+                source_content = str(analysis_result.get('content', ''))
+                analysis_json = json.dumps(analysis_result)
+                
+                logger.info(f"Storing component: {component_name}, Lines: {total_lines}, Fields: {total_fields}")
+                
+                if exists:
+                    logger.info(f"Component {component_name} already exists, updating...")
+                    cursor.execute('''
+                        UPDATE component_analysis 
+                        SET total_lines = ?, total_fields = ?, business_purpose = ?, 
+                            complexity_score = ?, analysis_result_json = ?, updated_at = CURRENT_TIMESTAMP,
+                            source_content = ?
+                        WHERE session_id = ? AND component_name = ? AND component_type = ?
+                    ''', (
+                        total_lines, total_fields, business_purpose, complexity_score, 
+                        analysis_json, source_content,
+                        session_id, component_name, component_type
+                    ))
+                else:
+                    cursor.execute('''
+                        INSERT INTO component_analysis 
+                        (session_id, component_name, component_type, file_path, 
+                        total_lines, total_fields, business_purpose, complexity_score,
+                        source_content, analysis_result_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        session_id, component_name, component_type, file_path,
+                        total_lines, total_fields, business_purpose, complexity_score,
+                        source_content, analysis_json
+                    ))
                 
                 logger.info(f"Successfully stored/updated component: {component_name}")
                 
         except Exception as e:
             logger.error(f"Error storing component {component_name}: {str(e)}")
-            raise
-
+            logger.error(f"Analysis result keys: {list(analysis_result.keys()) if analysis_result else 'None'}")
+            # Don't re-raise the exception to prevent stopping the entire process
     
     def store_record_layout(self, session_id: str, layout_data: Dict, program_name: str):
         """Simplified record layout storage"""
@@ -994,7 +998,20 @@ class DatabaseManager:
             logger.error(f"Error exporting dependencies: {str(e)}")
             return []
         
-    
+
+        
+    def debug_database_schema(self):
+        """Debug method to check database schema"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(component_analysis)")
+                columns = cursor.fetchall()
+                logger.info("Component Analysis Table Schema:")
+                for column in columns:
+                    logger.info(f"  {column}")
+        except Exception as e:
+            logger.error(f"Error checking schema: {str(e)}")
     # Add this method to database_manager.py:
 
     def get_component_source_code(self, session_id: str, component_name: str = None, 
