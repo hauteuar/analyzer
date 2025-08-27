@@ -502,43 +502,40 @@ def chat_query():
 
 @app.route('/api/components/<session_id>')
 def get_components(session_id):
-    """Get components with proper LLM summary extraction"""
+    """Debug version to see what's happening"""
     try:
-        components = analyzer.db_manager.get_session_components(session_id)
+        # Get raw components
+        raw_components = analyzer.db_manager.get_session_components(session_id)
+        logger.info(f"Retrieved {len(raw_components)} raw components for session {session_id}")
         
+        # Log each component
+        for comp in raw_components:
+            logger.info(f"Component: {comp['component_name']} ({comp['component_type']})")
+        
+        # Transform for UI
         transformed_components = []
-        for component in components:
-            # Parse the stored analysis result
-            analysis_result = {}
-            if component.get('analysis_result_json'):
-                try:
-                    analysis_result = json.loads(component['analysis_result_json'])
-                except:
-                    logger.warning(f"Failed to parse analysis_result_json for {component['component_name']}")
-            
-            # Extract LLM summary properly
-            llm_summary = analysis_result.get('llm_summary', {})
-            
-            transformed_component = {
+        for component in raw_components:
+            transformed = {
                 'component_name': component['component_name'],
-                'friendly_name': analysis_result.get('friendly_name', component['component_name']),
                 'component_type': component['component_type'],
                 'total_lines': component.get('total_lines', 0),
                 'total_fields': component.get('total_fields', 0),
-                'business_purpose': component.get('business_purpose', llm_summary.get('business_purpose', '')),
-                'complexity_score': component.get('complexity_score', llm_summary.get('complexity_score', 0.5)),
-                'llm_summary': llm_summary,  # Ensure this is included
+                'business_purpose': component.get('business_purpose', 'Analysis pending'),
                 'analysis_result_json': component.get('analysis_result_json', '{}')
             }
-            
-            transformed_components.append(transformed_component)
+            transformed_components.append(transformed)
         
-        return jsonify({'success': True, 'components': transformed_components})
+        logger.info(f"Returning {len(transformed_components)} transformed components")
+        
+        return jsonify({
+            'success': True, 
+            'components': transformed_components,
+            'debug_info': f"Found {len(raw_components)} raw components"
+        })
         
     except Exception as e:
         logger.error(f"Error retrieving components: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})
-    
+        return jsonify({'success': False, 'error': str(e)})    
     
 @app.route('/api/dependencies/<session_id>')
 def get_dependencies(session_id):

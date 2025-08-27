@@ -297,7 +297,7 @@ class ComponentExtractor:
     # Add this method to ComponentExtractor class:
 
     def _complete_field_source_analysis(self, field_name: str, program_content: str, program_name: str) -> Dict:
-        """Perform complete source code analysis for a field"""
+        """Enhanced field source analysis with better MOVE detection"""
         analysis = {
             'field_name': field_name,
             'program_name': program_name,
@@ -324,23 +324,20 @@ class ComponentExtractor:
             lines = program_content.split('\n')
             field_upper = field_name.upper()
             
-            # Analyze every line for field usage
             for line_idx, line in enumerate(lines, 1):
                 line_stripped = line.strip()
                 line_upper = line_stripped.upper()
                 
-                # Skip empty lines and comments
                 if not line_stripped or line_stripped.startswith('*'):
                     continue
                 
-                # Check if field is referenced in this line
                 if field_upper in line_upper:
                     operation_type = 'REFERENCE'
                     business_context = ''
                     source_field = ''
                     target_field = ''
                     
-                    # Field definition with PIC clause
+                    # Field definition
                     if ('PIC' in line_upper and 
                         re.match(r'^\s*\d{2}\s+' + re.escape(field_upper), line_upper)):
                         operation_type = 'DEFINITION'
@@ -349,10 +346,12 @@ class ComponentExtractor:
                         analysis['counts']['definition'] += 1
                         business_context = 'Field data structure definition'
                     
-                    # MOVE operations - field receives data
+                    # Enhanced MOVE detection
                     elif 'MOVE' in line_upper:
                         # Pattern: MOVE source TO field_name
-                        move_to_match = re.search(rf'MOVE\s+([A-Z0-9\-\(\)]+)\s+TO\s+{re.escape(field_upper)}', line_upper)
+                        move_to_pattern = rf'MOVE\s+([A-Z0-9\-\(\)\'\"]+)\s+TO\s+{re.escape(field_upper)}'
+                        move_to_match = re.search(move_to_pattern, line_upper)
+                        
                         if move_to_match:
                             operation_type = 'MOVE_TARGET'
                             source_field = move_to_match.group(1)
@@ -361,10 +360,11 @@ class ComponentExtractor:
                             if not analysis['primary_source_field']:
                                 analysis['primary_source_field'] = source_field
                             business_context = f'Receives data from {source_field}'
-                        
-                        # Pattern: MOVE field_name TO target
                         else:
-                            move_from_match = re.search(rf'MOVE\s+{re.escape(field_upper)}\s+TO\s+([A-Z0-9\-\(\)]+)', line_upper)
+                            # Pattern: MOVE field_name TO target
+                            move_from_pattern = rf'MOVE\s+{re.escape(field_upper)}\s+TO\s+([A-Z0-9\-\(\)\'\"]+)'
+                            move_from_match = re.search(move_from_pattern, line_upper)
+                            
                             if move_from_match:
                                 operation_type = 'MOVE_SOURCE'
                                 target_field = move_from_match.group(1)
@@ -372,109 +372,56 @@ class ComponentExtractor:
                                 analysis['provides_data'] = True
                                 business_context = f'Provides data to {target_field}'
                     
-                    # Arithmetic operations
+                    # Add other operation types...
                     elif any(op in line_upper for op in ['COMPUTE', 'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE']):
                         operation_type = 'ARITHMETIC'
                         analysis['counts']['arithmetic'] += 1
                         business_context = 'Used in mathematical computation'
                     
-                    # Conditional operations
                     elif any(op in line_upper for op in ['IF', 'WHEN', 'EVALUATE']):
                         operation_type = 'CONDITIONAL'
                         analysis['counts']['conditional'] += 1
                         business_context = 'Used in business logic decision'
                     
-                    # CICS operations
-                    elif 'CICS' in line_upper:
-                        operation_type = 'CICS'
-                        analysis['counts']['cics'] += 1
-                        business_context = 'Used in CICS transaction processing'
-                    
-                    # Get context lines for complete understanding
-                    context_start = max(0, line_idx - 4)
-                    context_end = min(len(lines), line_idx + 3)
-                    context_lines = lines[context_start:context_end]
-                    
-                    # Create comprehensive reference entry
+                    # Create reference entry
                     reference = {
                         'line_number': line_idx,
                         'line_content': line_stripped,
                         'operation_type': operation_type,
                         'business_context': business_context,
                         'source_field': source_field,
-                        'target_field': target_field,
-                        'context_lines': context_lines,
-                        'context_block': '\n'.join([
-                            f"{context_start + i + 1:4d}: {ctx_line}"
-                            for i, ctx_line in enumerate(context_lines)
-                        ])
+                        'target_field': target_field
                     }
                     
                     analysis['all_references'].append(reference)
             
-            # Determine primary usage based on actual operations
-            counts = analysis['counts']
-            total_ops = sum(counts.values()) - counts['definition']  # Exclude definition from usage count
-            
+            # Determine primary usage and business purpose
             if analysis['receives_data'] and analysis['provides_data']:
                 analysis['primary_usage'] = 'INPUT_OUTPUT'
             elif analysis['receives_data']:
                 analysis['primary_usage'] = 'INPUT'
             elif analysis['provides_data']:
                 analysis['primary_usage'] = 'OUTPUT'
-            elif counts['arithmetic'] > 0:
+            elif analysis['counts']['arithmetic'] > 0:
                 analysis['primary_usage'] = 'DERIVED'
-            elif counts['conditional'] > 0:
+            elif analysis['counts']['conditional'] > 0:
                 analysis['primary_usage'] = 'REFERENCE'
-            elif counts['cics'] > 0:
-                analysis['primary_usage'] = 'CICS_FIELD'
-            elif total_ops == 0:
+            else:
                 analysis['primary_usage'] = 'STATIC'
+            
+            # Generate business purpose
+            if analysis['primary_source_field']:
+                analysis['business_purpose'] = f"{field_name} - receives data from {analysis['primary_source_field']}"
+            elif analysis['provides_data']:
+                analysis['business_purpose'] = f"{field_name} - provides data to other fields"
             else:
-                analysis['primary_usage'] = 'PROCESSED'
+                analysis['business_purpose'] = f"{field_name} - {analysis['primary_usage'].lower()} field"
             
-            # Generate comprehensive business purpose
-            purpose_elements = []
-            if counts['move_target'] > 0:
-                purpose_elements.append(f"receives data ({counts['move_target']} operations)")
-            if counts['move_source'] > 0:
-                purpose_elements.append(f"provides data ({counts['move_source']} operations)")
-            if counts['arithmetic'] > 0:
-                purpose_elements.append(f"mathematical calculations ({counts['arithmetic']} operations)")
-            if counts['conditional'] > 0:
-                purpose_elements.append(f"business decisions ({counts['conditional']} operations)")
-            if counts['cics'] > 0:
-                purpose_elements.append(f"CICS transactions ({counts['cics']} operations)")
-            
-            if purpose_elements:
-                analysis['business_purpose'] = f"{field_name} - {', '.join(purpose_elements)}"
-            elif counts['definition'] > 0:
-                analysis['business_purpose'] = f"{field_name} - Static data field (defined but not actively used)"
-            else:
-                analysis['business_purpose'] = f"{field_name} - Field usage could not be determined"
-            
-            # Create usage summary
-            analysis['usage_summary'] = {
-                'total_references': len(analysis['all_references']),
-                'definition_found': analysis['definition_line'] is not None,
-                'actively_used': total_ops > 0,
-                'primary_pattern': analysis['primary_usage'],
-                'operation_breakdown': dict(counts)
-            }
-            
-            logger.debug(f"Field {field_name}: {analysis['primary_usage']}, {len(analysis['all_references'])} refs")
             return analysis
             
         except Exception as e:
-            logger.error(f"Error in complete field analysis for {field_name}: {str(e)}")
-            return {
-                'field_name': field_name,
-                'all_references': [],
-                'primary_usage': 'ERROR',
-                'business_purpose': f'Analysis failed: {str(e)}',
-                'counts': {},
-                'usage_summary': {}
-            }
+            logger.error(f"Error in field analysis for {field_name}: {str(e)}")
+            return analysis
 
     def _generate_component_summary(self, session_id: str, parsed_data: Dict, component_type: str) -> Dict:
         """Generate LLM summary for component"""

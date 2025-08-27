@@ -286,15 +286,27 @@ class FieldAnalyzer:
         return mappings
     
     def _create_field_mapping(self, field_detail: Dict, program: Dict, 
-                            target_file: str, layout: Dict) -> Optional[FieldMapping]:
-        """Create field mapping from field detail"""
+                        target_file: str, layout: Dict) -> Optional[FieldMapping]:
+        """Create field mapping with proper population source"""
         try:
             field_name = field_detail['field_name']
             
-            # Determine business logic type from usage
-            business_logic_type = self._determine_business_logic_type(field_detail)
+            # Extract population source from field analysis
+            population_source = 'Unknown'
             
-            # Convert COBOL type to Oracle
+            # Check if field has source field information
+            if field_detail.get('source_field') and field_detail['source_field'] != '':
+                population_source = f"Moved from {field_detail['source_field']}"
+            elif field_detail.get('business_purpose'):
+                if 'receives data from' in field_detail['business_purpose']:
+                    # Extract source from business purpose
+                    source_match = re.search(r'receives data from ([A-Z0-9\-]+)', field_detail['business_purpose'])
+                    if source_match:
+                        population_source = f"Input from {source_match.group(1)}"
+                elif 'provides data to' in field_detail['business_purpose']:
+                    population_source = f"Output from {program['component_name']} processing"
+            
+            # Determine Oracle type
             cobol_type = self._extract_cobol_type_from_detail(field_detail)
             oracle_type, oracle_length = self.cobol_parser.convert_pic_to_oracle_type(
                 cobol_type.get('picture', ''), cobol_type.get('usage', '')
@@ -307,12 +319,13 @@ class FieldAnalyzer:
                 oracle_data_type=oracle_type,
                 mainframe_length=cobol_type.get('length', 10),
                 oracle_length=oracle_length,
-                population_source=field_detail.get('source_field', 'Unknown'),
-                business_logic_type=business_logic_type,
-                business_logic_description=self._generate_business_logic_description(field_detail, business_logic_type),
+                population_source=population_source,  # This should now have real data
+                business_logic_type=self._determine_business_logic_type(field_detail),
+                business_logic_description=self._generate_business_logic_description(field_detail, self._determine_business_logic_type(field_detail)),
                 programs_involved=[program['component_name']],
                 confidence_score=0.85,
-                source_record_layout=layout['layout_name']
+                source_record_layout=layout.get('layout_name', 'Unknown'),
+                derivation_logic=self._extract_derivation_logic(field_detail)
             )
             
             return mapping

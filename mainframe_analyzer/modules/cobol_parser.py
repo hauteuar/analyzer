@@ -81,7 +81,7 @@ class COBOLParser:
         self.move_pattern = re.compile(r'MOVE\s+([A-Z0-9\-\(\)]+)\s+TO\s+([A-Z0-9\-\(\)]+)', re.IGNORECASE)
         self.compute_pattern = re.compile(r'COMPUTE\s+([A-Z0-9\-]+)\s*=\s*(.+)', re.IGNORECASE)
         self.section_pattern = re.compile(r'^\s*([A-Z\-]+)\s+SECTION\s*\.', re.IGNORECASE)
-        
+
     def generate_friendly_name(self, cobol_name: str, context: str = "") -> str:
         """Generate friendly names for COBOL components"""
         if not cobol_name:
@@ -338,7 +338,7 @@ class COBOLParser:
         return components
     
     def extract_record_layouts(self, lines: List[str]) -> List[RecordLayout]:
-        """Extract 01 level record layouts from all DATA DIVISION sections"""
+        """Fixed record layout extraction with proper section handling"""
         layouts = []
         current_layout = None
         current_fields = []
@@ -346,13 +346,15 @@ class COBOLParser:
         current_section = None
         
         for i, line in enumerate(lines):
-            line_upper = line.upper().strip()
+            line_stripped = line.strip()
+            line_upper = line_stripped.upper()
             
             # Check for division
-            if self.division_pattern.match(line):
-                division_name = self.division_pattern.match(line).group(1).upper()
+            if self.division_pattern.match(line_stripped):
+                division_name = self.division_pattern.match(line_stripped).group(1).upper()
                 in_data_division = (division_name == 'DATA')
-                current_section = None
+                if in_data_division:
+                    logger.info(f"Entered DATA DIVISION at line {i+1}")
                 continue
             
             if not in_data_division:
@@ -361,36 +363,43 @@ class COBOLParser:
             # Check for section within DATA DIVISION
             if line_upper.endswith(' SECTION.'):
                 current_section = line_upper.replace(' SECTION.', '').strip()
-                logger.debug(f"Entered section: {current_section}")
+                logger.info(f"Entered section: {current_section} at line {i+1}")
+                # Finalize any current layout when entering new section
+                if current_layout and current_fields:
+                    current_layout.line_end = i
+                    current_layout.fields = current_fields
+                    source_lines = lines[current_layout.line_start-1:current_layout.line_end]
+                    current_layout.source_code = '\n'.join(source_lines)
+                    layouts.append(current_layout)
+                    logger.info(f"Finalized layout {current_layout.name} before section change")
+                    current_layout = None
+                    current_fields = []
                 continue
             
-            # Parse data items (01 level and below)
-            data_match = self.data_item_pattern.match(line_upper)
+            # Parse data items
+            data_match = self.data_item_pattern.match(line_stripped)
             if data_match:
                 level = int(data_match.group(1))
                 name = data_match.group(2)
                 rest_of_line = data_match.group(3) or ""
                 
                 if level == 1:
-                    # Finalize previous layout
-                    if current_layout is not None:
+                    # Finalize previous layout before starting new one
+                    if current_layout and current_fields:
                         current_layout.line_end = i
                         current_layout.fields = current_fields
                         source_lines = lines[current_layout.line_start-1:current_layout.line_end]
                         current_layout.source_code = '\n'.join(source_lines)
-                        
-                        # Only add if it has fields
-                        if current_fields:
-                            layouts.append(current_layout)
-                            logger.info(f"Completed layout: {current_layout.name} ({current_layout.section}) with {len(current_fields)} fields")
+                        layouts.append(current_layout)
+                        logger.info(f"Completed layout: {current_layout.name} with {len(current_fields)} fields")
                     
-                    # Skip FILLER 01 levels
+                    # Skip FILLER
                     if name.upper() == 'FILLER':
                         current_layout = None
                         current_fields = []
                         continue
                     
-                    # Create new layout with section info
+                    # Create new layout
                     current_layout = RecordLayout(
                         name=name,
                         level=level,
@@ -400,39 +409,28 @@ class COBOLParser:
                         source_code="",
                         friendly_name=self.generate_friendly_name(name, 'Record Layout')
                     )
-                    
-                    # Add section information to layout
-                    current_layout.section = current_section or 'UNKNOWN-SECTION'
+                    current_layout.section = current_section or 'WORKING-STORAGE'
                     current_fields = []
-                    logger.info(f"Started new 01 layout: {name} in {current_layout.section}")
+                    logger.info(f"Started new layout: {name} in {current_layout.section} at line {i+1}")
                     
                 elif current_layout and level > 1:
-                    # Add field to current layout
                     if name.upper() != 'FILLER':
-                        field = self.parse_cobol_field(line, i + 1, level, name, rest_of_line)
+                        field = self.parse_cobol_field(line_stripped, i + 1, level, name, rest_of_line)
                         current_fields.append(field)
-                        logger.debug(f"Added field: {name} (level {level}) to {current_layout.name}")
+                        logger.debug(f"Added field {name} to {current_layout.name}")
+                
+                # Important: If level > 1 but no current_layout, this field belongs to nothing
+                elif level > 1 and not current_layout:
+                    logger.debug(f"Orphaned field {name} at line {i+1} - no current 01 layout")
         
-        # Process final layout
-        if current_layout is not None and current_fields:
+        # Finalize last layout
+        if current_layout and current_fields:
             current_layout.line_end = len(lines)
             current_layout.fields = current_fields
             source_lines = lines[current_layout.line_start-1:current_layout.line_end]
             current_layout.source_code = '\n'.join(source_lines)
             layouts.append(current_layout)
-            logger.info(f"Completed final layout: {current_layout.name} ({current_layout.section}) with {len(current_fields)} fields")
-        
-        # Log summary by section
-        section_summary = {}
-        for layout in layouts:
-            section = getattr(layout, 'section', 'UNKNOWN')
-            if section not in section_summary:
-                section_summary[section] = []
-            section_summary[section].append(f"{layout.name}({len(layout.fields)} fields)")
-        
-        logger.info("LAYOUT EXTRACTION SUMMARY:")
-        for section, layout_list in section_summary.items():
-            logger.info(f"  {section}: {', '.join(layout_list)}")
+            logger.info(f"Completed final layout: {current_layout.name} with {len(current_fields)} fields")
         
         return layouts
         
