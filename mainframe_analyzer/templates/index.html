@@ -2561,6 +2561,44 @@ function generateFriendlyName(technicalName) {
 
 
         // Load field matrix data
+        // Load field matrix data
+async function loadFieldMatrix() {
+    const recordLayout = document.getElementById('recordLayoutSelect').value;
+    const program = document.getElementById('programSelect').value;
+
+    if (!recordLayout && !program) {
+        return;
+    }
+
+    showLoading('Loading field matrix...');
+
+    try {
+        const params = new URLSearchParams({
+            session_id: currentSessionId
+        });
+        
+        if (recordLayout) params.append('record_layout', recordLayout);
+        if (program) params.append('program_name', program);
+
+        const response = await fetch(`/api/field-matrix?${params}`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                displayFieldMatrix(data.matrix_data);
+            } else {
+                showError(data.error || 'Failed to load field matrix');
+            }
+        } else {
+            throw new Error('Network error');
+        }
+    } catch (error) {
+        console.error('Error loading field matrix:', error);
+        showError('Failed to load field matrix');
+    }
+
+    hideLoading();
+}
         // Fixed loadFieldMatrixSelectors function
 async function loadFieldMatrixSelectors() {
     try {
