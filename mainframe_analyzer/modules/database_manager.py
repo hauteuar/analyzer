@@ -37,49 +37,65 @@ class DatabaseManager:
     
     @contextmanager
     def get_connection(self):
-        """Context manager for database connections with proper locking and WAL mode"""
-        with self._lock:  # Thread-safe access
-            conn = None
+        """Simplified connection manager without threading locks"""
+        conn = None
+        max_retries = 3
+        retry_delay = 1
+        
+        for attempt in range(max_retries):
             try:
-                logger.debug(f"Attempting to connect to database: {self.db_path}")
+                logger.debug(f"Database connection attempt {attempt + 1}")
+                
                 conn = sqlite3.connect(
-                    self.db_path, 
-                    timeout=30.0,  # 30 second timeout for locks
-                    isolation_level=None  # Autocommit mode
+                    self.db_path,
+                    timeout=10.0,  # Reduced timeout
+                    isolation_level=None,
+                    check_same_thread=False  # Allow cross-thread usage
                 )
-                conn.row_factory = sqlite3.Row  # Enable dict-like access
+                conn.row_factory = sqlite3.Row
                 
-                # Configure SQLite for better concurrency
-                conn.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging
-                conn.execute("PRAGMA synchronous=NORMAL")  # Faster writes
-                conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
-                conn.execute("PRAGMA temp_store=MEMORY")  # Temp tables in memory
-                conn.execute("PRAGMA busy_timeout=30000")  # 30 second busy timeout
+                # Simpler SQLite configuration
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL") 
+                conn.execute("PRAGMA busy_timeout=5000")  # 5 seconds
                 
-                logger.debug("Database connection established successfully")
+                logger.debug("Database connection established")
                 yield conn
+                return  # Success, exit retry loop
                 
             except sqlite3.OperationalError as e:
-                if "database is locked" in str(e).lower():
-                    logger.error(f"Database locked error: {str(e)}")
-                    # Try to resolve lock by waiting and retrying
-                    self._handle_database_lock(conn)
-                    raise
+                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                    logger.warning(f"Database locked on attempt {attempt + 1}, retrying in {retry_delay}s...")
+                    if conn:
+                        try:
+                            conn.close()
+                        except:
+                            pass
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    continue
                 else:
-                    logger.error(f"Database operational error: {str(e)}")
+                    logger.error(f"Database connection failed: {str(e)}")
                     raise
+                    
             except Exception as e:
-                logger.error(f"Database error: {str(e)}")
+                logger.error(f"Unexpected database error: {str(e)}")
                 if conn:
-                    conn.rollback()
+                    try:
+                        conn.close()
+                    except:
+                        pass
                 raise
+                
             finally:
                 if conn:
                     try:
                         conn.close()
                         logger.debug("Database connection closed")
                     except:
-                        pass  # Ignore close errors
+                        pass
+        
+        raise sqlite3.OperationalError("Failed to establish database connection after retries")
     
     def _handle_database_lock(self, conn):
         """Handle database lock situations"""
