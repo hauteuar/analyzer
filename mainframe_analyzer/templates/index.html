@@ -1890,28 +1890,31 @@
                             updateAnalysisStep(2, 'completed', `Extracted ${data.components.length} components`);
                             updateAnalysisStep(3, 'completed', `Generated business summaries`);
                             updateAnalysisStep(4, 'completed', `Stored in database`);
+                            console.log('Upload response:', data);
+                            console.log('Components received:', data.components);
+
+                            // Check if components have LLM summaries
+                            data.components.forEach(component => {
+                                console.log('Component:', component.name);
+                                console.log('Business purpose:', component.business_purpose);
+                                console.log('LLM summary:', component.llm_summary);
+                            });
+                            setTimeout(() => {
+                            hideLoading();
+                            refreshUI();  // Make sure this is called
+                            loadComponentsList();  // Explicitly call this too
+                            loadDashboardSummaries();  // And this
+                        }, 1500);
                             
+
                         } else {
                             console.error(`❌ Error analyzing ${file.name}:`, data.error);
                             showErrorInStep(file.name, data.error);
                         }
                     }
-                    console.log('Upload response:', data);
-                    console.log('Components received:', data.components);
-
-                    // Check if components have LLM summaries
-                    data.components.forEach(component => {
-                        console.log('Component:', component.name);
-                        console.log('Business purpose:', component.business_purpose);
-                        console.log('LLM summary:', component.llm_summary);
-                    });
+                    
                     // In handleFileUpload, after successful processing:
-                    setTimeout(() => {
-                        hideLoading();
-                        refreshUI();  // Make sure this is called
-                        loadComponentsList();  // Explicitly call this too
-                        loadDashboardSummaries();  // And this
-                    }, 1500);
+                    
                 } catch (error) {
                     console.error(`💥 Error processing ${file.name}:`, error);
                     showErrorInStep(file.name, error.message);
