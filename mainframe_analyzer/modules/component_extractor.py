@@ -48,50 +48,53 @@ class ComponentExtractor:
             
             # In extract_components method, wrap the storage in better error handling:
 
+            # In component_extractor.py, in the extract_components method:
+
             for component in components:
                 try:
-                    # Validate component data before storing
-                    if not component.get('name'):
-                        logger.warning("Skipping component without name")
-                        continue
-                        
-                    # Ensure required fields exist
+                    # Create the analysis result with ALL the data
                     component_data = {
-                        'name': str(component.get('name', 'UNKNOWN')),
-                        'friendly_name': str(component.get('friendly_name', component.get('name', 'UNKNOWN'))),
-                        'type': str(component.get('type', 'UNKNOWN')),
-                        'file_path': str(file_name),
-                        'content': str(file_content),
-                        'total_lines': int(component.get('total_lines', 0)),
-                        'executable_lines': int(component.get('executable_lines', 0)),
-                        'comment_lines': int(component.get('comment_lines', 0)),
+                        'name': component.get('name', 'UNKNOWN'),
+                        'friendly_name': component.get('friendly_name', component.get('name', 'UNKNOWN')),
+                        'type': component.get('type', 'UNKNOWN'),
+                        'file_path': file_name,
+                        'content': file_content,  # Store original content
+                        'total_lines': component.get('total_lines', 0),
+                        'executable_lines': component.get('executable_lines', 0),
+                        'comment_lines': component.get('comment_lines', 0),
                         'total_fields': len(component.get('fields', [])),
-                        'business_purpose': str(component.get('business_purpose', ''))[:500],
-                        'complexity_score': float(component.get('complexity_score', 0.5)),
+                        
+                        # CRITICAL: Preserve these fields
+                        'business_purpose': component.get('business_purpose', ''),
+                        'complexity_score': component.get('complexity_score', 0.5),
                         'llm_summary': component.get('llm_summary', {}),
+                        'derived_components': component.get('derived_components', []),  # This is being lost!
+                        'record_layouts': component.get('record_layouts', []),
+                        'fields': component.get('fields', []),
+                        
+                        # Other data
                         'divisions': component.get('divisions', []),
                         'file_operations': component.get('file_operations', []),
                         'program_calls': component.get('program_calls', []),
                         'copybooks': component.get('copybooks', []),
                         'cics_operations': component.get('cics_operations', []),
-                        'record_layouts': component.get('record_layouts', []),
-                        'fields': component.get('fields', []),
                     }
+                    
+                    # Debug log before storing
+                    logger.info(f"🔄 About to store {component_data['name']}: derived_components={len(component_data['derived_components'])}")
                     
                     self.db_manager.store_component_analysis(
                         session_id, 
                         component_data['name'], 
                         component_data['type'], 
                         file_name, 
-                        component_data
+                        component_data  # Pass the complete component_data
                     )
                     
-                    logger.info(f"Successfully stored component: {component_data['name']} ({component_data['type']})")
+                    logger.info(f"✅ Stored component: {component_data['name']} with {len(component_data['derived_components'])} derived components")
                     
                 except Exception as e:
-                    logger.error(f"Error storing component {component.get('name', 'UNKNOWN')}: {str(e)}")
-                    logger.error(f"Component data: {component}")
-                    # Continue with other components even if one fails
+                    logger.error(f"❌ Failed to store component {component.get('name', 'UNKNOWN')}: {str(e)}")
                     continue
             # Log component summary
             if components:

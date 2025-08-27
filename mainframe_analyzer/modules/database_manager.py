@@ -471,6 +471,11 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
+                # Debug logging
+                logger.info(f"📥 Storing component: {component_name}")
+                logger.info(f"🔍 Analysis result keys: {list(analysis_result.keys())}")
+                logger.info(f"📊 Derived components count: {len(analysis_result.get('derived_components', []))}")
+                
                 # Check if component already exists
                 cursor.execute('''
                     SELECT COUNT(*) FROM component_analysis 
@@ -479,18 +484,27 @@ class DatabaseManager:
                 
                 exists = cursor.fetchone()[0] > 0
                 
-                # Safely extract values with defaults
-                total_lines = analysis_result.get('total_lines', 0)
+                # Prepare data with proper handling
+                total_lines = int(analysis_result.get('total_lines', 0))
                 total_fields = len(analysis_result.get('fields', []))
-                business_purpose = str(analysis_result.get('business_purpose', ''))[:500]  # Limit length
-                complexity_score = float(analysis_result.get('complexity_score', 0.5))
-                source_content = str(analysis_result.get('content', ''))
-                analysis_json = json.dumps(analysis_result)
                 
-                logger.info(f"Storing component: {component_name}, Lines: {total_lines}, Fields: {total_fields}")
+                # IMPORTANT: Preserve business_purpose from analysis_result
+                business_purpose = analysis_result.get('business_purpose', '')
+                if not business_purpose and analysis_result.get('llm_summary'):
+                    business_purpose = analysis_result['llm_summary'].get('business_purpose', '')
+                
+                complexity_score = float(analysis_result.get('complexity_score', 0.5))
+                if analysis_result.get('llm_summary'):
+                    complexity_score = float(analysis_result['llm_summary'].get('complexity_score', complexity_score))
+                
+                # Store the COMPLETE analysis_result as JSON
+                analysis_json = json.dumps(analysis_result, default=str, ensure_ascii=False)
+                source_content = str(analysis_result.get('content', ''))
+                
+                logger.info(f"💾 Storing: business_purpose='{business_purpose[:50]}...', complexity={complexity_score}")
+                logger.info(f"📝 JSON length: {len(analysis_json)} characters")
                 
                 if exists:
-                    logger.info(f"Component {component_name} already exists, updating...")
                     cursor.execute('''
                         UPDATE component_analysis 
                         SET total_lines = ?, total_fields = ?, business_purpose = ?, 
@@ -498,7 +512,7 @@ class DatabaseManager:
                             source_content = ?
                         WHERE session_id = ? AND component_name = ? AND component_type = ?
                     ''', (
-                        total_lines, total_fields, business_purpose, complexity_score, 
+                        total_lines, total_fields, business_purpose[:500], complexity_score, 
                         analysis_json, source_content,
                         session_id, component_name, component_type
                     ))
@@ -511,16 +525,28 @@ class DatabaseManager:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         session_id, component_name, component_type, file_path,
-                        total_lines, total_fields, business_purpose, complexity_score,
+                        total_lines, total_fields, business_purpose[:500], complexity_score,
                         source_content, analysis_json
                     ))
                 
-                logger.info(f"Successfully stored/updated component: {component_name}")
+                # Verify what was actually stored
+                cursor.execute('''
+                    SELECT business_purpose, complexity_score, LENGTH(analysis_result_json) as json_length
+                    FROM component_analysis 
+                    WHERE session_id = ? AND component_name = ? AND component_type = ?
+                ''', (session_id, component_name, component_type))
+                
+                stored_data = cursor.fetchone()
+                if stored_data:
+                    logger.info(f"✅ Verified storage: business_purpose='{stored_data[0][:50]}...', complexity={stored_data[1]}, json_length={stored_data[2]}")
+                
+                logger.info(f"✅ Successfully stored component: {component_name}")
                 
         except Exception as e:
-            logger.error(f"Error storing component {component_name}: {str(e)}")
-            logger.error(f"Analysis result keys: {list(analysis_result.keys()) if analysis_result else 'None'}")
-            # Don't re-raise the exception to prevent stopping the entire process
+            logger.error(f"❌ Error storing component {component_name}: {str(e)}")
+            logger.error(f"📋 Analysis result sample: {str(analysis_result)[:200]}...")
+            raise  # Re-raise to see the full error
+                # Don't re-raise the exception to prevent stopping the entire process
     
     def store_record_layout(self, session_id: str, layout_data: Dict, program_name: str):
         """Simplified record layout storage"""

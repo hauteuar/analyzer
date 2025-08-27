@@ -367,6 +367,38 @@ def reset_database():
             'error': str(e)
         })
 
+# Add to main.py
+@app.route('/api/debug-storage/<session_id>')
+def debug_storage(session_id):
+    """Debug what's actually stored in the database"""
+    try:
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT component_name, business_purpose, complexity_score, 
+                       LENGTH(analysis_result_json) as json_length,
+                       SUBSTR(analysis_result_json, 1, 200) as json_preview
+                FROM component_analysis 
+                WHERE session_id = ?
+            ''', (session_id,))
+            
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    'name': row[0],
+                    'business_purpose': row[1],
+                    'complexity_score': row[2],
+                    'json_length': row[3],
+                    'json_preview': row[4]
+                })
+            
+            return jsonify({
+                'success': True,
+                'stored_components': results
+            })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+    
 @app.route('/api/debug-components/<session_id>')
 def debug_components(session_id):
     """Debug endpoint to see raw component data"""

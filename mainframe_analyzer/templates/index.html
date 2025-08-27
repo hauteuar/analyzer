@@ -3258,108 +3258,103 @@ function displayComponentsHierarchy(components) {
 
         // Display component summaries on dashboard
         function displayComponentSummaries(components) {
-    const container = document.getElementById('componentSummaries');
-    container.innerHTML = '';
+            const container = document.getElementById('componentSummaries');
+            container.innerHTML = '';
 
-    const programs = components.filter(c => c.component_type === 'PROGRAM');
-    
-    if (programs.length === 0) {
-        container.innerHTML = '<p class="text-muted">Upload COBOL files to see AI-generated business summaries</p>';
-        return;
-    }
+            const programs = components.filter(c => c.component_type === 'PROGRAM');
+            
+            if (programs.length === 0) {
+                container.innerHTML = '<p class="text-muted">Upload COBOL files to see AI-generated business summaries</p>';
+                return;
+            }
 
-    programs.forEach(program => {
-        let businessPurpose = 'Analysis in progress...';
-        let complexityScore = 0;
-        let derivedCount = 0;
-        
-        console.log('Processing program for display:', program.component_name);
-        console.log('Direct business_purpose:', program.business_purpose);
-        console.log('Analysis result JSON:', program.analysis_result_json);
-        
-        // Try to get business purpose from multiple sources
-        if (program.business_purpose && program.business_purpose !== 'Analysis in progress...') {
-            businessPurpose = program.business_purpose;
-        }
-        
-        // Try to parse analysis_result_json for additional info
-        try {
-            if (program.analysis_result_json) {
-                const analysisResult = JSON.parse(program.analysis_result_json);
-                console.log('Parsed analysis result:', analysisResult);
+            programs.forEach(program => {
+                console.log('🔍 Processing program:', program.component_name);
+                console.log('📊 Direct business_purpose:', program.business_purpose);
+                console.log('📋 Analysis JSON length:', program.analysis_result_json ? program.analysis_result_json.length : 'null');
                 
-                // Check multiple possible locations for business purpose
-                if (analysisResult.business_purpose && !program.business_purpose) {
-                    businessPurpose = analysisResult.business_purpose;
+                let businessPurpose = 'Analysis in progress...';
+                let complexityScore = 0;
+                let derivedCount = 0;
+                
+                // First try direct fields
+                if (program.business_purpose && program.business_purpose !== '' && program.business_purpose !== 'Analysis in progress...') {
+                    businessPurpose = program.business_purpose;
                 }
                 
-                if (analysisResult.llm_summary) {
-                    console.log('Found LLM summary:', analysisResult.llm_summary);
-                    businessPurpose = analysisResult.llm_summary.business_purpose || businessPurpose;
-                    complexityScore = analysisResult.llm_summary.complexity_score || 0;
-                } else {
-                    console.log('No LLM summary found in analysis result');
+                // Then try parsing JSON
+                try {
+                    if (program.analysis_result_json && program.analysis_result_json !== '{}' && program.analysis_result_json.length > 10) {
+                        const analysisResult = JSON.parse(program.analysis_result_json);
+                        console.log('📈 Parsed analysis keys:', Object.keys(analysisResult));
+                        
+                        // Extract business purpose
+                        if (!businessPurpose || businessPurpose === 'Analysis in progress...') {
+                            businessPurpose = analysisResult.business_purpose || businessPurpose;
+                        }
+                        
+                        // Extract from LLM summary
+                        if (analysisResult.llm_summary) {
+                            console.log('🤖 Found LLM summary:', analysisResult.llm_summary);
+                            businessPurpose = analysisResult.llm_summary.business_purpose || businessPurpose;
+                            complexityScore = analysisResult.llm_summary.complexity_score || 0;
+                        }
+                        
+                        // Extract derived components count
+                        if (analysisResult.derived_components) {
+                            derivedCount = analysisResult.derived_components.length;
+                            console.log('🔗 Found', derivedCount, 'derived components');
+                        } else if (analysisResult.record_layouts) {
+                            derivedCount = analysisResult.record_layouts.length;
+                            console.log('📋 Found', derivedCount, 'record layouts');
+                        }
+                    } else {
+                        console.log('⚠️ Empty or invalid analysis_result_json');
+                    }
+                } catch (e) {
+                    console.error('❌ JSON parsing failed for', program.component_name, ':', e);
                 }
                 
-                derivedCount = analysisResult.derived_components ? analysisResult.derived_components.length : 0;
-                if (analysisResult.record_layouts) {
-                    derivedCount = Math.max(derivedCount, analysisResult.record_layouts.length);
-                }
-            } else {
-                console.log('No analysis_result_json found');
-            }
-        } catch (e) {
-            console.error('JSON parsing failed for', program.component_name, 'Error:', e);
+                console.log(`📊 Final values: purpose="${businessPurpose.substring(0,50)}...", complexity=${complexityScore}, derived=${derivedCount}`);
+                
+                // Rest of the card creation code...
+                const card = document.createElement('div');
+                card.className = 'component-summary-card';
+                
+                card.innerHTML = `
+                    <div class="component-header">
+                        <div>
+                            <div class="component-title">${program.component_name}</div>
+                            <div class="text-muted" style="font-size: 0.8rem;">${program.friendly_name || ''}</div>
+                        </div>
+                        <span class="component-type badge badge-primary">PROGRAM</span>
+                    </div>
+                    
+                    <div class="business-purpose">${businessPurpose}</div>
+                    
+                    <div class="component-metrics">
+                        <div class="metric">
+                            <span class="metric-value">${program.total_lines || 0}</span>
+                            <span class="metric-label">Lines</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value">${(complexityScore * 100).toFixed(0)}%</span>
+                            <span class="metric-label">Complexity</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-value">${derivedCount}</span>
+                            <span class="metric-label">Derived</span>
+                        </div>
+                    </div>
+                    
+                    <div class="complexity-bar">
+                        <div class="complexity-fill" style="width: ${complexityScore * 100}%"></div>
+                    </div>
+                `;
+                
+                container.appendChild(card);
+            });
         }
-        
-        // If still pending, check if this is a recent upload
-        if (businessPurpose === 'Analysis in progress...' && program.created_at) {
-            const createdTime = new Date(program.created_at);
-            const now = new Date();
-            const minutesAgo = (now - createdTime) / (1000 * 60);
-            
-            if (minutesAgo > 5) {
-                businessPurpose = 'Analysis may have failed - check LLM server connection';
-            }
-        }
-        
-        const card = document.createElement('div');
-        card.className = 'component-summary-card';
-        
-        card.innerHTML = `
-            <div class="component-header">
-                <div>
-                    <div class="component-title">${program.component_name}</div>
-                    <div class="text-muted" style="font-size: 0.8rem;">${program.friendly_name || ''}</div>
-                </div>
-                <span class="component-type badge badge-primary">PROGRAM</span>
-            </div>
-            
-            <div class="business-purpose">${businessPurpose}</div>
-            
-            <div class="component-metrics">
-                <div class="metric">
-                    <span class="metric-value">${program.total_lines || 0}</span>
-                    <span class="metric-label">Lines</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-value">${(complexityScore * 100).toFixed(0)}%</span>
-                    <span class="metric-label">Complexity</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-value">${derivedCount}</span>
-                    <span class="metric-label">Derived</span>
-                </div>
-            </div>
-            
-            <div class="complexity-bar">
-                <div class="complexity-fill" style="width: ${complexityScore * 100}%"></div>
-            </div>
-        `;
-        
-        container.appendChild(card);
-    });
-}
 
         // Display domain analysis
         function displayDomainAnalysis(components) {
