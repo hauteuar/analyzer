@@ -841,7 +841,8 @@ class COBOLParser:
             if line_upper.endswith(' SECTION.'):
                 current_section = line_upper.replace(' SECTION.', '').strip()
                 # Finalize any current layout when entering new section
-                if current_layout and current_fields:
+                if current_layout:
+                    # Always finalize the current layout (even if it has no fields)
                     current_layout.line_end = i
                     current_layout.fields = current_fields
                     source_lines = lines[current_layout.line_start-1:current_layout.line_end]
@@ -860,7 +861,10 @@ class COBOLParser:
                 
                 if level == 1:
                     # Finalize previous layout before starting new one
-                    if current_layout and current_fields:
+                    if current_layout:
+                        # Always finalize existing 01-level layout. Previous implementation only
+                        # finalized when fields existed which caused earlier 01 groups to be
+                        # overwritten and multiple layouts to be consolidated into one.
                         current_layout.line_end = i
                         current_layout.fields = current_fields
                         source_lines = lines[current_layout.line_start-1:current_layout.line_end]
@@ -883,6 +887,7 @@ class COBOLParser:
                         source_code="",
                         friendly_name=self.generate_friendly_name(name, 'Record Layout')
                     )
+                    # Preserve the section name if one was detected, otherwise keep unknown
                     current_layout.section = current_section or 'WORKING-STORAGE'
                     current_fields = []
                     
@@ -891,8 +896,8 @@ class COBOLParser:
                         field = self.parse_cobol_field(line_stripped, i + 1, level, name, rest_of_line)
                         current_fields.append(field)
         
-        # Finalize last layout
-        if current_layout and current_fields:
+        # Finalize last layout (if any)
+        if current_layout:
             current_layout.line_end = len(lines)
             current_layout.fields = current_fields
             source_lines = lines[current_layout.line_start-1:current_layout.line_end]
