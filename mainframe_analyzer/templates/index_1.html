@@ -1963,6 +1963,83 @@
             event.target.value = '';
         }
 
+
+
+        function updateFieldMappingHTML() {
+    return `
+    <!-- Field Mapping Analysis Tab -->
+    <div id="fieldMapping" class="tab-pane">
+        <h2>Field Mapping Analysis</h2>
+        
+        <!-- Enhanced Controls -->
+        <div class="field-mapping-controls">
+            <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="targetFileInput" placeholder="Enter target file name (e.g., CUSTOMER-FILE)" style="flex: 1; min-width: 200px;">
+                <select id="recordLayoutSelector" onchange="updateTargetFileFromLayout()" style="min-width: 200px;">
+                    <option value="">Or select a record layout</option>
+                </select>
+                <button class="btn btn-primary" onclick="analyzeFieldMapping()">Analyze Field Mapping</button>
+                <button class="btn btn-secondary" onclick="exportFieldMappings()">Export to CSV</button>
+            </div>
+        </div>
+
+        <!-- Layout Summary Section -->
+        <div id="layoutSummarySection" style="display: none; margin: 1rem 0; padding: 1rem; background: #f8f9fa; border-radius: 8px;">
+            <h4>Layout Summary</h4>
+            <div id="layoutSummaryContent"></div>
+        </div>
+
+        <!-- Field Mapping Results -->
+        <div id="fieldMappingResults">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Field Name</th>
+                        <th>Mainframe Type & Length</th>
+                        <th>Oracle Type & Length</th>
+                        <th>Population Source</th>
+                        <th>Business Logic</th>
+                        <th>Programs Involved</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="fieldMappingTableBody">
+                    <tr>
+                        <td colspan="7" class="text-center text-muted">Enter a target file name or select a layout and click Analyze</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Field Details Modal -->
+    <div id="fieldDetailsModal" class="modal">
+        <div class="modal-content" style="width: 80%; max-width: 900px;">
+            <div class="modal-header">
+                <h3 class="modal-title" id="fieldModalTitle">Field Details</h3>
+                <button class="close" onclick="closeFieldDetailsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="fieldDetailsContent">
+                    <!-- Will be populated with field details -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeFieldDetailsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    `;
+}
+
+function updateTargetFileFromLayout() {
+    const selector = document.getElementById('recordLayoutSelector');
+    const targetInput = document.getElementById('targetFileInput');
+    
+    if (selector.value) {
+        targetInput.value = selector.value;
+    }
+}
         // Helper function to update processing status
         function updateProcessingStatus(currentFile, totalFiles, fileName, status, componentsFound = 0, error = null) {
             const container = document.getElementById('processingStatus');
@@ -2063,6 +2140,28 @@
             }
         }
 
+        async function loadRecordLayoutSelector() {
+    try {
+        const response = await fetch(`/api/record-layouts/${currentSessionId}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                const selector = document.getElementById('recordLayoutSelector');
+                selector.innerHTML = '<option value="">Or select a record layout</option>';
+                
+                data.layouts.forEach(layout => {
+                    const option = document.createElement('option');
+                    option.value = layout.layout_name;
+                    option.textContent = `${layout.layout_name} (${layout.fields_count || 0} fields) - ${layout.program_name}`;
+                    selector.appendChild(option);
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Error loading record layouts:', error);
+    }
+}
+
         // Enhanced Dashboard Summaries with Raw Response Handling
         async function loadDashboardSummaries() {
             try {
@@ -2093,149 +2192,170 @@
                 }
             }
         }
+function escapeForTemplate(str) {
+    if (!str) return '';
+    return str
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t');
+}
+
+
+
 
         function displayComponentSummariesWithDerived(components) {
-            const container = document.getElementById('componentSummaries');
-            container.innerHTML = '';
+    const container = document.getElementById('componentSummaries');
+    container.innerHTML = '';
 
-            const programs = components.filter(c => c.component_type === 'PROGRAM');
-            
-            if (programs.length === 0) {
-                container.innerHTML = '<p class="text-muted">Upload COBOL files to see AI-generated business summaries</p>';
-                return;
+    const programs = components.filter(c => c.component_type === 'PROGRAM');
+    
+    if (programs.length === 0) {
+        container.innerHTML = '<p class="text-muted">Upload COBOL files to see AI-generated business summaries</p>';
+        return;
+    }
+
+    programs.forEach(program => {
+        console.log('Processing program:', program.component_name);
+        console.log('LLM Summary:', program.llm_summary);
+        console.log('Business Purpose:', program.business_purpose);
+        
+        // Enhanced business purpose extraction
+        let businessPurpose = 'Analysis pending...';
+        let complexityScore = 0.5;
+        let isRawResponse = false;
+        let rawResponse = '';
+        
+        // Priority chain for business purpose
+        if (program.business_purpose && program.business_purpose !== 'undefined' && program.business_purpose.trim() !== '') {
+            businessPurpose = program.business_purpose;
+        } else if (program.llm_summary) {
+            if (program.llm_summary.business_purpose && program.llm_summary.business_purpose !== 'undefined') {
+                businessPurpose = program.llm_summary.business_purpose;
+                complexityScore = program.llm_summary.complexity_score || 0.5;
+            } else if (program.llm_summary.raw && program.llm_summary.raw.trim() !== '') {
+                rawResponse = program.llm_summary.raw;
+                businessPurpose = rawResponse.substring(0, 200) + (rawResponse.length > 200 ? '...' : '');
+                isRawResponse = true;
+            } else if (program.llm_summary.is_raw && program.llm_summary.raw_response) {
+                rawResponse = program.llm_summary.raw_response;
+                businessPurpose = rawResponse.substring(0, 200) + (rawResponse.length > 200 ? '...' : '');
+                isRawResponse = true;
             }
-
-            programs.forEach(program => {
-                console.log('Processing program:', program.component_name);
-                console.log('Derived count from database:', program.derived_count);
-                
-                let businessPurpose = (program.llm_summary && program.llm_summary.business_purpose) || program.business_purpose || 'Analysis in progress...';
-                let complexityScore = (program.llm_summary && program.llm_summary.complexity_score) || program.complexity_score || 0;
-                let derivedCount = program.derived_count || 0;
-                let isRawResponse = false;
-                let rawResponse = '';
-                
-                // Check for raw responses
-                if (program.llm_summary && program.llm_summary.is_raw) {
-                    businessPurpose = program.llm_summary.business_purpose || 'Raw AI analysis available';
-                    rawResponse = program.llm_summary.raw_response || program.llm_summary.raw || '';
-                    isRawResponse = true;
-                }
-                
-                // Try to get additional data from analysis_result_json if needed
-                if (program.analysis_result_json) {
-                    try {
-                        const analysisResult = JSON.parse(program.analysis_result_json);
-                        if (analysisResult.llm_summary) {
-                            if (analysisResult.llm_summary.is_raw) {
-                                businessPurpose = analysisResult.llm_summary.business_purpose || 'Raw AI analysis available';
-                                rawResponse = analysisResult.llm_summary.raw_response || analysisResult.llm_summary.raw || '';
-                                isRawResponse = true;
-                            } else {
-                                businessPurpose = analysisResult.llm_summary.business_purpose || businessPurpose;
-                                complexityScore = analysisResult.llm_summary.complexity_score || complexityScore;
-                            }
-                        }
-                    } catch (e) {
-                        console.warn('Could not parse analysis result for', program.component_name);
-                    }
-                }
-                
-                const card = document.createElement('div');
-                card.className = 'component-summary-card';
-                
-                // Different display for raw responses
-                if (isRawResponse && rawResponse) {
-                    card.innerHTML = `
-                        <div class="component-header">
-                            <div>
-                                <div class="component-title">${program.component_name}</div>
-                                <div class="text-muted" style="font-size: 0.8rem;">${program.friendly_name || ''}</div>
-                            </div>
-                            <span class="component-type badge badge-warning">RAW AI RESPONSE</span>
-                        </div>
-                        
-                        <div class="business-purpose raw-analysis">
-                            <strong>AI Analysis:</strong><br>
-                            <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; border-left: 4px solid #ffc107; font-size: 0.9rem; line-height: 1.4; max-height: 150px; overflow-y: auto;">
-                                ${rawResponse.replace(/\n/g, '<br>')}
-                            </div>
-                        </div>
-                        
-                        <div class="component-metrics">
-                            <div class="metric">
-                                <span class="metric-value">${program.total_lines || 0}</span>
-                                <span class="metric-label">Lines</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-value">RAW</span>
-                                <span class="metric-label">Analysis</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-value">${derivedCount}</span>
-                                <span class="metric-label">Derived</span>
-                            </div>
-                        </div>
-                        
-                        <div class="derived-components">
-                            <button class="derived-toggle" onclick="toggleDerivedComponents('${program.component_name}', this)">
-                                View ${derivedCount} Components
-                            </button>
-                            <div class="derived-list" id="derived-${program.component_name}">
-                                <!-- Will be populated when expanded -->
-                            </div>
-                        </div>
-                        
-                        <button class="btn btn-secondary" style="width: 100%; margin-top: 1rem;" onclick="showRawAnalysisModal('${program.component_name}', '${rawResponse.replace(/'/g, "&apos;")}')">
-                            View Full AI Analysis
-                        </button>
-                    `;
-                } else {
-                    // Standard structured display
-                    card.innerHTML = `
-                        <div class="component-header">
-                            <div>
-                                <div class="component-title">${program.component_name}</div>
-                                <div class="text-muted" style="font-size: 0.8rem;">${program.friendly_name || ''}</div>
-                            </div>
-                            <span class="component-type badge badge-primary">PROGRAM</span>
-                        </div>
-                        
-                        <div class="business-purpose">${businessPurpose}</div>
-                        
-                        <div class="component-metrics">
-                            <div class="metric">
-                                <span class="metric-value">${program.total_lines || 0}</span>
-                                <span class="metric-label">Lines</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-value">${(complexityScore * 100).toFixed(0)}%</span>
-                                <span class="metric-label">Complexity</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-value">${derivedCount}</span>
-                                <span class="metric-label">Derived</span>
-                            </div>
-                        </div>
-                        
-                        <div class="complexity-bar">
-                            <div class="complexity-fill" style="width: ${complexityScore * 100}%"></div>
-                        </div>
-                        
-                        <div class="derived-components">
-                            <button class="derived-toggle" onclick="toggleDerivedComponents('${program.component_name}', this)">
-                                View ${derivedCount} Components
-                            </button>
-                            <div class="derived-list" id="derived-${program.component_name}">
-                                <!-- Will be populated when expanded -->
-                            </div>
-                        </div>
-                    `;
-                }
-                
-                container.appendChild(card);
-            });
         }
+        
+        // Set complexity score
+        if (program.complexity_score && program.complexity_score > 0) {
+            complexityScore = program.complexity_score;
+        } else if (program.llm_summary && program.llm_summary.complexity_score) {
+            complexityScore = program.llm_summary.complexity_score;
+        }
+        
+        const derivedCount = program.derived_count || 0;
+        
+        const card = document.createElement('div');
+        card.className = 'component-summary-card';
+        // Then use it:
+        
+        if (isRawResponse) {
+            // Special handling for raw responses
+            const safeRawResponse = escapeForTemplate(rawResponse);
+            card.innerHTML = ```
+                <div class="component-header">
+                    <div>
+                        <div class="component-title">${program.component_name}</div>
+                        <div class="text-muted" style="font-size: 0.8rem;">${program.friendly_name || ''}</div>
+                    </div>
+                    <span class="component-type badge badge-warning">RAW AI ANALYSIS</span>
+                </div>
+                
+                <div class="business-purpose raw-analysis">
+                    <strong>AI Analysis (Raw Response):</strong><br>
+                    <div style="background: #fff3cd; padding: 1rem; border-radius: 6px; border-left: 4px solid #ffc107; font-size: 0.9rem; line-height: 1.4; max-height: 150px; overflow-y: auto;">
+                        ${businessPurpose}
+                        ${rawResponse.length > 200 ? `<br><small><em>Click "View Full Analysis" to see complete response</em></small>` : ''}
+                    </div>
+                </div>
+                
+                <div class="component-metrics">
+                    <div class="metric">
+                        <span class="metric-value">${program.total_lines || 0}</span>
+                        <span class="metric-label">Lines</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-value">RAW</span>
+                        <span class="metric-label">Analysis</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-value">${derivedCount}</span>
+                        <span class="metric-label">Components</span>
+                    </div>
+                </div>
+                
+                <div class="derived-components">
+                    <button class="derived-toggle" onclick="toggleDerivedComponents('${program.component_name}', this)">
+                        View ${derivedCount} Components
+                    </button>
+                    <div class="derived-list" id="derived-${program.component_name}">
+                        <!-- Will be populated when expanded -->
+                    </div>
+                </div>
+                
+                // And in your template:
+                ${rawResponse.length > 200 ? 
+                    `<button class="btn btn-secondary" style="width: 100%; margin-top: 1rem;" onclick="showRawAnalysisModal('${program.component_name}', '${safeRawResponse}')">
+                        View Full AI Analysis
+                    </button>` 
+                    : ''}
+            `;
+        } else {
+            // Standard structured display
+            card.innerHTML = `
+                <div class="component-header">
+                    <div>
+                        <div class="component-title">${program.component_name}</div>
+                        <div class="text-muted" style="font-size: 0.8rem;">${program.friendly_name || ''}</div>
+                    </div>
+                    <span class="component-type badge badge-primary">PROGRAM</span>
+                </div>
+                
+                <div class="business-purpose">${businessPurpose}</div>
+                
+                <div class="component-metrics">
+                    <div class="metric">
+                        <span class="metric-value">${program.total_lines || 0}</span>
+                        <span class="metric-label">Lines</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-value">${Math.round(complexityScore * 100)}%</span>
+                        <span class="metric-label">Complexity</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-value">${derivedCount}</span>
+                        <span class="metric-label">Components</span>
+                    </div>
+                </div>
+                
+                <div class="complexity-bar">
+                    <div class="complexity-fill" style="width: ${complexityScore * 100}%"></div>
+                </div>
+                
+                <div class="derived-components">
+                    <button class="derived-toggle" onclick="toggleDerivedComponents('${program.component_name}', this)">
+                        View ${derivedCount} Components
+                    </button>
+                    <div class="derived-list" id="derived-${program.component_name}">
+                        <!-- Will be populated when expanded -->
+                    </div>
+                </div>
+            `;
+        }
+        
+        container.appendChild(card);
+    });
+}
 
         // Toggle derived components
         async function toggleDerivedComponents(programName, button) {
@@ -2357,31 +2477,36 @@
         }
 
         function displayEnhancedDependencyFlow(dependencies, selectedComponent) {
-            console.log('Displaying enhanced dependency flow with', dependencies.length, 'dependencies');
-            
-            const flowContainer = document.getElementById('dependencyFlowContent');
-            flowContainer.innerHTML = '';
-            
-            // Filter dependencies if a specific component is selected
-            let filteredDeps = dependencies;
-            if (selectedComponent) {
-                filteredDeps = dependencies.filter(dep => 
-                    dep.source_component === selectedComponent || dep.target_component === selectedComponent
-                );
-            }
-            
-            if (filteredDeps.length === 0) {
-                flowContainer.innerHTML = `<p class="text-muted">No dependencies found for ${selectedComponent || 'the system'}</p>`;
-                return;
-            }
-            
-            const categorizedDeps = categorizeDependenciesForFlow(filteredDeps, selectedComponent);
-            console.log('Categorized dependencies:', categorizedDeps);
-            
-            // Create hierarchical flow
-            const flowHtml = createDependencyFlowHTML(categorizedDeps, selectedComponent);
-            flowContainer.innerHTML = flowHtml;
-        }
+    console.log('Displaying enhanced dependency flow with', dependencies.length, 'dependencies');
+    
+    const flowContainer = document.getElementById('dependencyFlowContent');
+    flowContainer.innerHTML = '';
+    
+    // Filter dependencies if a specific component is selected
+    let filteredDeps = dependencies;
+    if (selectedComponent) {
+        filteredDeps = dependencies.filter(dep => 
+            dep.source_component === selectedComponent || dep.target_component === selectedComponent
+        );
+    }
+    
+    if (filteredDeps.length === 0) {
+        flowContainer.innerHTML = `<p class="text-muted">No dependencies found for ${selectedComponent || 'the system'}</p>`;
+        return;
+    }
+    
+    const categorizedDeps = categorizeDependenciesForFlow(filteredDeps, selectedComponent);
+    console.log('Categorized dependencies:', categorizedDeps);
+    
+    // Create hierarchical flow
+    const flowHtml = createDependencyFlowHTML(categorizedDeps, selectedComponent);
+    flowContainer.innerHTML = flowHtml;
+}
+    function initializeFieldMapping() {
+    loadRecordLayoutSelector();
+}
+
+
 
         function categorizeDependenciesForFlow(dependencies, focusComponent = null) {
             const categorized = {
@@ -2572,29 +2697,31 @@
 
         // Tab Management
         function showTab(tabName) {
-            // Update tab buttons
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            event.target.classList.add('active');
+    // Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    event.target.classList.add('active');
 
-            // Update tab panes
-            document.querySelectorAll('.tab-pane').forEach(pane => {
-                pane.classList.remove('active');
-            });
-            document.getElementById(tabName).classList.add('active');
+    // Update tab panes
+    document.querySelectorAll('.tab-pane').forEach(pane => {
+        pane.classList.remove('active');
+    });
+    document.getElementById(tabName).classList.add('active');
 
-            // Load data if needed
-            if (tabName === 'components') {
-                loadComponentsLibrary();
-            } else if (tabName === 'fieldMatrix') {
-                loadFieldMatrixSelectors();
-            } else if (tabName === 'dashboard') {
-                loadDashboardSummaries();
-            } else if (tabName === 'dependencies') {
-                loadDependencyFlow();
-            }
-        }
+    // Load data if needed
+    if (tabName === 'components') {
+        loadComponentsLibrary();
+    } else if (tabName === 'fieldMatrix') {
+        loadFieldMatrixSelectors();
+    } else if (tabName === 'dashboard') {
+        loadDashboardSummaries();
+    } else if (tabName === 'dependencies') {
+        loadDependencyFlow();
+    } else if (tabName === 'fieldMapping') {
+        initializeFieldMapping();
+    }
+}
 
         // Enhanced Components Library
         async function loadComponentsLibrary() {
@@ -3210,41 +3337,303 @@
 
         // Field Mapping functionality
         async function analyzeFieldMapping() {
-            const targetFile = document.getElementById('targetFileInput').value.trim();
-            if (!targetFile) {
-                showError('Please enter a target file name');
-                return;
+    const targetFile = document.getElementById('targetFileInput').value.trim();
+    if (!targetFile) {
+        showError('Please enter a target file name or select a record layout');
+        return;
+    }
+
+    showLoading('Analyzing field mappings...');
+
+    try {
+        const response = await fetch('/api/field-mapping', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: currentSessionId,
+                target_file: targetFile
+            })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                displayFieldMappingsWithSummary(data.field_mappings, data.summary);
+                await displayLayoutSummary(targetFile);
+            } else {
+                showError(data.error || 'Failed to analyze field mappings');
             }
-
-            showLoading('Analyzing field mappings...');
-
-            try {
-                const response = await fetch('/api/field-mapping', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        session_id: currentSessionId,
-                        target_file: targetFile
-                    })
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success) {
-                        displayFieldMappings(data.field_mappings);
-                    } else {
-                        showError(data.error || 'Failed to analyze field mappings');
-                    }
-                } else {
-                    throw new Error('Network error');
-                }
-            } catch (error) {
-                console.error('Error analyzing field mapping:', error);
-                showError('Failed to analyze field mappings');
-            }
-
-            hideLoading();
+        } else {
+            throw new Error('Network error');
         }
+    } catch (error) {
+        console.error('Error analyzing field mapping:', error);
+        showError('Failed to analyze field mappings');
+    }
+
+    hideLoading();
+}
+function displayFieldMappingsWithSummary(mappings, summary) {
+    const tbody = document.getElementById('fieldMappingTableBody');
+    tbody.innerHTML = '';
+
+    if (!mappings || mappings.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No field mappings found</td></tr>';
+        return;
+    }
+
+    // Display summary if available
+    if (summary) {
+        showMappingSummary(summary);
+    }
+
+    mappings.forEach(mapping => {
+        const row = document.createElement('tr');
+        
+        // Format field name with friendly name
+        const fieldNameHtml = `
+            <div>
+                <strong>${mapping.field_name}</strong>
+                ${mapping.friendly_name && mapping.friendly_name !== mapping.field_name ? 
+                    `<br><small class="text-muted">${mapping.friendly_name}</small>` : ''}
+            </div>
+        `;
+
+        // Format mainframe type and length
+        const mainframeTypeHtml = `
+            <div>
+                <code>${mapping.mainframe_data_type || 'UNKNOWN'}</code>
+                <br><small>Length: ${mapping.mainframe_length || 0}</small>
+            </div>
+        `;
+
+        // Format oracle type and length  
+        const oracleTypeHtml = `
+            <div>
+                <code>${mapping.oracle_data_type || 'VARCHAR2(50)'}</code>
+                <br><small>Length: ${mapping.oracle_length || 50}</small>
+            </div>
+        `;
+
+        row.innerHTML = `
+            <td>${fieldNameHtml}</td>
+            <td>${mainframeTypeHtml}</td>
+            <td>${oracleTypeHtml}</td>
+            <td>
+                <strong>${mapping.population_source || 'Program logic'}</strong>
+                ${mapping.source_record_layout ? `<br><small>From: ${mapping.source_record_layout}</small>` : ''}
+            </td>
+            <td>
+                <span class="badge ${getBadgeClass(mapping.business_logic_type)}">${mapping.business_logic_type}</span>
+                <br><small>${mapping.business_logic_description || ''}</small>
+            </td>
+            <td>${Array.isArray(mapping.programs_involved) ? mapping.programs_involved.join(', ') : mapping.programs_involved || 'Unknown'}</td>
+            <td>
+                <button class="btn btn-secondary" onclick="showFieldDetails('${mapping.field_name}')" style="padding: 0.25rem 0.5rem; font-size: 0.8rem;">
+                    View Details
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+function showMappingSummary(summary) {
+    const summaryHtml = `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; margin-top: 1rem;">
+            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px; border: 1px solid #dee2e6;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #667eea;">${summary.total_fields || 0}</div>
+                <div style="font-size: 0.8rem; color: #6c757d;">Total Fields</div>
+            </div>
+            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px; border: 1px solid #dee2e6;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #28a745;">${summary.input_fields || 0}</div>
+                <div style="font-size: 0.8rem; color: #6c757d;">Input Fields</div>
+            </div>
+            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px; border: 1px solid #dee2e6;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #17a2b8;">${summary.output_fields || 0}</div>
+                <div style="font-size: 0.8rem; color: #6c757d;">Output Fields</div>
+            </div>
+            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px; border: 1px solid #dee2e6;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #6c757d;">${summary.static_fields || 0}</div>
+                <div style="font-size: 0.8rem; color: #6c757d;">Static Fields</div>
+            </div>
+            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px; border: 1px solid #dee2e6;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #dc3545;">${summary.unused_fields || 0}</div>
+                <div style="font-size: 0.8rem; color: #6c757d;">Unused Fields</div>
+            </div>
+            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px; border: 1px solid #dee2e6;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #ffc107;">${summary.calculated_fields || 0}</div>
+                <div style="font-size: 0.8rem; color: #6c757d;">Calculated Fields</div>
+            </div>
+        </div>
+    `;
+    
+    // Show in a notification or summary area
+    const summaryDiv = document.createElement('div');
+    summaryDiv.innerHTML = `
+        <div style="background: #e8f4f8; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border-left: 4px solid #17a2b8;">
+            <h5 style="margin: 0 0 0.5rem 0; color: #0c5460;">Field Mapping Summary</h5>
+            ${summaryHtml}
+        </div>
+    `;
+    
+    const resultsDiv = document.getElementById('fieldMappingResults');
+    resultsDiv.insertBefore(summaryDiv, resultsDiv.firstChild);
+}
+
+async function displayLayoutSummary(layoutName) {
+    try {
+        const response = await fetch(`/api/layout-summary/${currentSessionId}/${layoutName}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                const summary = data.summary;
+                const summarySection = document.getElementById('layoutSummarySection');
+                const summaryContent = document.getElementById('layoutSummaryContent');
+                
+                summaryContent.innerHTML = `
+                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 2rem;">
+                        <div>
+                            <h5>${summary.layout_name}</h5>
+                            <p style="margin: 0.5rem 0; font-size: 0.9rem; color: #666;">${summary.friendly_name}</p>
+                            <p style="font-size: 0.85rem; line-height: 1.4;">${summary.business_purpose}</p>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px;">
+                                <div style="font-size: 1.2rem; font-weight: bold; color: #667eea;">${summary.total_fields}</div>
+                                <div style="font-size: 0.7rem; color: #6c757d;">Total</div>
+                            </div>
+                            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px;">
+                                <div style="font-size: 1.2rem; font-weight: bold; color: #28a745;">${summary.input_fields}</div>
+                                <div style="font-size: 0.7rem; color: #6c757d;">Input</div>
+                            </div>
+                            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px;">
+                                <div style="font-size: 1.2rem; font-weight: bold; color: #17a2b8;">${summary.output_fields}</div>
+                                <div style="font-size: 0.7rem; color: #6c757d;">Output</div>
+                            </div>
+                            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px;">
+                                <div style="font-size: 1.2rem; font-weight: bold; color: #6c757d;">${summary.static_fields}</div>
+                                <div style="font-size: 0.7rem; color: #6c757d;">Static</div>
+                            </div>
+                            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px;">
+                                <div style="font-size: 1.2rem; font-weight: bold; color: #dc3545;">${summary.unused_fields}</div>
+                                <div style="font-size: 0.7rem; color: #6c757d;">Unused</div>
+                            </div>
+                            <div style="text-align: center; padding: 0.75rem; background: white; border-radius: 6px;">
+                                <div style="font-size: 1.2rem; font-weight: bold; color: #ffc107;">${summary.derived_fields}</div>
+                                <div style="font-size: 0.7rem; color: #6c757d;">Derived</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                summarySection.style.display = 'block';
+            }
+        }
+    } catch (error) {
+        console.error('Error loading layout summary:', error);
+    }
+}
+
+async function showFieldDetails(fieldName) {
+    try {
+        const response = await fetch(`/api/field-details/${currentSessionId}/${fieldName}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                displayFieldDetailsModal(data.field_details);
+            } else {
+                showError(`Could not load details for field ${fieldName}`);
+            }
+        }
+    } catch (error) {
+        console.error('Error loading field details:', error);
+        showError('Error loading field details');
+    }
+}
+
+function displayFieldDetailsModal(fieldDetails) {
+    document.getElementById('fieldModalTitle').textContent = `${fieldDetails.field_name} - Field Details`;
+    
+    const operationsSummary = fieldDetails.operations.map(op => 
+        `${op.program_name}: ${op.usage_type} (${op.move_source_count + op.move_target_count + op.arithmetic_count + op.conditional_count} operations)`
+    ).join('<br>');
+
+    const referencesHtml = fieldDetails.references.map(ref => `
+        <div style="padding: 0.5rem; margin-bottom: 0.5rem; background: #f8f9fa; border-left: 3px solid #667eea; border-radius: 4px;">
+            <strong>Line ${ref.line_number}:</strong> ${ref.operation_type}<br>
+            <code style="font-size: 0.8rem;">${ref.line_content}</code>
+        </div>
+    `).join('');
+
+    const content = `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+            <div>
+                <h5>Field Information</h5>
+                <table style="width: 100%; font-size: 0.9rem;">
+                    <tr><td><strong>Name:</strong></td><td>${fieldDetails.field_name}</td></tr>
+                    <tr><td><strong>Friendly Name:</strong></td><td>${fieldDetails.friendly_name}</td></tr>
+                    <tr><td><strong>Usage Type:</strong></td><td><span class="badge ${getBadgeClass(fieldDetails.usage_type)}">${fieldDetails.usage_type}</span></td></tr>
+                    <tr><td><strong>Source Field:</strong></td><td>${fieldDetails.source_field || 'N/A'}</td></tr>
+                    <tr><td><strong>Target Field:</strong></td><td>${fieldDetails.target_field || 'N/A'}</td></tr>
+                </table>
+            </div>
+            <div>
+                <h5>Data Types & Lengths</h5>
+                <table style="width: 100%; font-size: 0.9rem;">
+                    <tr><td><strong>Mainframe Type:</strong></td><td><code>${fieldDetails.mainframe_data_type}</code></td></tr>
+                    <tr><td><strong>Mainframe Length:</strong></td><td>${fieldDetails.mainframe_length}</td></tr>
+                    <tr><td><strong>Oracle Type:</strong></td><td><code>${fieldDetails.oracle_data_type}</code></td></tr>
+                    <tr><td><strong>Oracle Length:</strong></td><td>${fieldDetails.oracle_length}</td></tr>
+                    <tr><td><strong>Total References:</strong></td><td>${fieldDetails.total_references}</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 2rem;">
+            <h5>Business Purpose</h5>
+            <div style="padding: 1rem; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #667eea;">
+                ${fieldDetails.business_purpose}
+            </div>
+        </div>
+
+        <div style="margin-bottom: 2rem;">
+            <h5>Field Definition</h5>
+            <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; font-family: monospace; font-size: 0.9rem;">
+                ${fieldDetails.definition_code || 'Definition not available'}
+            </div>
+        </div>
+
+        <div style="margin-bottom: 2rem;">
+            <h5>Program Operations</h5>
+            <div style="font-size: 0.9rem;">
+                ${operationsSummary || 'No operations found'}
+            </div>
+        </div>
+
+        <div style="margin-bottom: 2rem;">
+            <h5>Field References (First 10)</h5>
+            <div style="max-height: 300px; overflow-y: auto;">
+                ${referencesHtml || 'No references found'}
+            </div>
+        </div>
+
+        <div>
+            <h5>Source Code Context</h5>
+            <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; max-height: 200px; overflow-y: auto;">
+                <pre style="margin: 0; font-size: 0.8rem; white-space: pre-wrap;">${fieldDetails.source_code_snippet}</pre>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('fieldDetailsContent').innerHTML = content;
+    document.getElementById('fieldDetailsModal').style.display = 'block';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeFieldDetailsModal() {
+    document.getElementById('fieldDetailsModal').style.display = 'none';
+    document.body.style.overflow = 'auto';
+}
 
         function displayFieldMappings(mappings) {
             const tbody = document.getElementById('fieldMappingTableBody');

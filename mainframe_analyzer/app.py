@@ -511,7 +511,7 @@ def upload_file():
 
 @app.route('/api/field-mapping', methods=['POST'])
 def analyze_field_mapping():
-    """Fixed field mapping analysis"""
+    """Fixed field mapping analysis with proper field lengths and types"""
     data = request.json
     session_id = data.get('session_id')
     target_file = data.get('target_file')
@@ -519,110 +519,92 @@ def analyze_field_mapping():
     logger.info(f"Field mapping request - Session: {session_id[:8]}, Target: {target_file}")
     
     try:
-        # First check if we have any components
-        components = analyzer.db_manager.get_session_components(session_id)
-        if not components:
+        # Get field details from field_analysis_details table
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT fad.field_name, fad.friendly_name, fad.mainframe_data_type, 
+                       fad.oracle_data_type, fad.mainframe_length, fad.oracle_length,
+                       fad.source_field, fad.business_purpose, fad.usage_type,
+                       fad.program_name, rl.layout_name,
+                       fad.field_references_json, fad.definition_code
+                FROM field_analysis_details fad
+                LEFT JOIN record_layouts rl ON fad.field_id = rl.id
+                WHERE fad.session_id = ?
+                AND (UPPER(rl.layout_name) LIKE UPPER(?) 
+                     OR UPPER(fad.program_name) LIKE UPPER(?)
+                     OR UPPER(fad.field_name) LIKE UPPER(?))
+                ORDER BY rl.layout_name, fad.field_name
+            ''', (session_id, f'%{target_file}%', f'%{target_file}%', f'%{target_file}%'))
+            
+            field_results = cursor.fetchall()
+        
+        if not field_results:
             return jsonify({
                 'success': True,
                 'field_mappings': [],
-                'message': 'No components found in session. Please upload and analyze files first.'
+                'message': f'No fields found matching "{target_file}". Please check the target file name.'
             })
         
-        # Get record layouts for the session
-        record_layouts = analyzer.db_manager.get_record_layouts(session_id)
-        if not record_layouts:
-            return jsonify({
-                'success': True,
-                'field_mappings': [],
-                'message': f'No record layouts found in session. The target file "{target_file}" was not found in any analyzed programs.'
-            })
-        
-        logger.info(f"Found {len(record_layouts)} record layouts to analyze")
-        
-        # Look for layouts that might match the target file
-        matching_layouts = []
-        target_upper = target_file.upper().replace('-', '').replace('_', '')
-        
-        for layout in record_layouts:
-            layout_name = layout['layout_name'].upper().replace('-', '').replace('_', '')
-            if target_upper in layout_name or layout_name in target_upper:
-                matching_layouts.append(layout)
-        
-        if not matching_layouts:
-            # Try fuzzy matching
-            for layout in record_layouts:
-                layout_words = layout['layout_name'].upper().split('-')
-                target_words = target_file.upper().split('-')
-                
-                # Check for word overlap
-                overlap = set(layout_words) & set(target_words)
-                if overlap:
-                    matching_layouts.append(layout)
-        
-        if not matching_layouts:
-            available_layouts = [layout['layout_name'] for layout in record_layouts[:10]]  # Show first 10
-            return jsonify({
-                'success': True,
-                'field_mappings': [],
-                'message': f'No record layouts found matching "{target_file}". Available layouts include: {", ".join(available_layouts)}{"..." if len(record_layouts) > 10 else ""}'
-            })
-        
-        logger.info(f"Found {len(matching_layouts)} matching layouts: {[l['layout_name'] for l in matching_layouts]}")
-        
-        # Analyze each matching layout
-        all_field_mappings = []
-        
-        for layout in matching_layouts:
+        # Transform to field mappings
+        field_mappings = []
+        for row in field_results:
+            field_references = []
             try:
-                # Get field matrix data for this layout
-                field_data = analyzer.db_manager.get_field_matrix(session_id, layout['layout_name'])
-                
-                logger.info(f"Processing layout {layout['layout_name']} with {len(field_data)} field entries")
-                
-                for field_entry in field_data:
-                    # Create field mapping entry
-                    field_mapping = {
-                        'field_name': field_entry['field_name'],
-                        'friendly_name': f"Field from {layout['layout_name']}",
-                        'mainframe_data_type': 'COBOL-PIC',  # Default, could be enhanced
-                        'oracle_data_type': 'VARCHAR2',       # Default mapping
-                        'mainframe_length': 0,                # Could be extracted from picture clause
-                        'oracle_length': 255,                 # Default
-                        'population_source': field_entry.get('source_field', 'Program logic'),
-                        'source_record_layout': layout['layout_name'],
-                        'business_logic_type': field_entry.get('usage_type', 'UNKNOWN'),
-                        'business_logic_description': field_entry.get('business_purpose', ''),
-                        'derivation_logic': f"Derived from {field_entry.get('source_field', 'program logic')}",
-                        'programs_involved': [field_entry.get('program_name', 'Unknown')],
-                        'confidence_score': 0.8
-                    }
-                    
-                    all_field_mappings.append(field_mapping)
-                
-            except Exception as layout_error:
-                logger.error(f"Error processing layout {layout['layout_name']}: {str(layout_error)}")
-                continue
+                if row[11]:  # field_references_json
+                    field_references = json.loads(row[11])
+            except:
+                pass
+            
+            # Determine business logic type from usage patterns
+            business_logic_type = row[8] or 'UNKNOWN'  # usage_type
+            if business_logic_type == 'INPUT':
+                business_logic_type = 'DIRECT_MOVE'
+            elif business_logic_type == 'DERIVED':
+                business_logic_type = 'CALCULATED'
+            elif business_logic_type == 'STATIC':
+                business_logic_type = 'CONSTANT'
+            
+            field_mapping = {
+                'field_name': row[0],
+                'friendly_name': row[1] or row[0].replace('-', ' ').title(),
+                'mainframe_data_type': row[2] or 'UNKNOWN',
+                'oracle_data_type': row[3] or 'VARCHAR2(50)',
+                'mainframe_length': row[4] or 0,
+                'oracle_length': row[5] or 50,
+                'population_source': row[6] or 'Program logic',
+                'source_record_layout': row[10] or 'Unknown',
+                'business_logic_type': business_logic_type,
+                'business_logic_description': row[7] or f'Field {row[0]} processing',
+                'derivation_logic': f"Populated from {row[6] or 'program logic'}",
+                'programs_involved': [row[9]] if row[9] else [],
+                'confidence_score': 0.9,
+                'field_references': field_references,
+                'definition_code': row[12] or ''
+            }
+            
+            field_mappings.append(field_mapping)
         
-        # Store field mappings in database
-        if all_field_mappings:
-            analyzer.db_manager.store_field_mappings(session_id, target_file, all_field_mappings)
-        
-        logger.info(f"Generated {len(all_field_mappings)} field mappings for {target_file}")
+        logger.info(f"Generated {len(field_mappings)} field mappings for {target_file}")
         
         return jsonify({
             'success': True,
-            'field_mappings': all_field_mappings,
-            'message': f'Successfully analyzed {len(all_field_mappings)} field mappings for "{target_file}" from {len(matching_layouts)} matching record layouts.',
-            'layouts_analyzed': [layout['layout_name'] for layout in matching_layouts]
+            'field_mappings': field_mappings,
+            'message': f'Successfully analyzed {len(field_mappings)} field mappings for "{target_file}".',
+            'summary': {
+                'total_fields': len(field_mappings),
+                'input_fields': len([f for f in field_mappings if 'INPUT' in f['business_logic_type']]),
+                'output_fields': len([f for f in field_mappings if 'OUTPUT' in f['business_logic_type']]),
+                'static_fields': len([f for f in field_mappings if 'STATIC' in f['business_logic_type']]),
+                'calculated_fields': len([f for f in field_mappings if 'CALCULATED' in f['business_logic_type']])
+            }
         })
         
     except Exception as e:
         logger.error(f"Error in field mapping analysis: {str(e)}")
-        logger.error(f"Stack trace: {traceback.format_exc()}")
         return jsonify({
             'success': False,
-            'error': str(e),
-            'target_file': target_file
+            'error': str(e)
         })
     
 @app.route('/api/field-matrix', methods=['GET'])
@@ -718,62 +700,68 @@ def get_field_source_code(session_id, field_name):
         })
 @app.route('/api/components/<session_id>')
 def get_components(session_id):
-    """Debug version to see what's happening"""
+    """Fixed component retrieval with proper LLM summary handling"""
     try:
-        # Get raw components
         raw_components = analyzer.db_manager.get_session_components(session_id)
         logger.info(f"Retrieved {len(raw_components)} raw components for session {session_id}")
         
-        # Log each component
-        for comp in raw_components:
-            logger.info(f"Component: {comp['component_name']} ({comp['component_type']})")
-        
-        # Transform for UI: parse analysis_result_json to extract LLM summaries and include derived component info
         transformed_components = []
         for component in raw_components:
-            analysis_json = component.get('analysis_result_json') or '{}'
-            parsed = {}
-            try:
-                parsed = json.loads(analysis_json) if analysis_json else {}
-            except Exception:
-                logger.debug(f"Failed to parse analysis_result_json for {component.get('component_name')}")
-
-            # Prefer explicit business_purpose column, fall back to parsed JSON or LLM summary
-            business_purpose = component.get('business_purpose')
-            if not business_purpose:
-                business_purpose = parsed.get('business_purpose') or parsed.get('llm_summary', {}).get('business_purpose', '')
-
-            # Extract llm_summary if present in parsed JSON
-            llm_summary = parsed.get('llm_summary') or parsed.get('llm_summary', {}) or {}
-
-            # Get derived components count and a small sample for UI
+            # Parse analysis_result_json safely
+            parsed_analysis = {}
+            if component.get('analysis_result_json'):
+                try:
+                    parsed_analysis = json.loads(component['analysis_result_json'])
+                except Exception as e:
+                    logger.warning(f"Failed to parse analysis JSON for {component.get('component_name')}: {e}")
+            
+            # Extract business purpose with proper fallback chain
+            business_purpose = None
+            llm_summary = {}
+            
+            # Priority order: explicit business_purpose column -> parsed llm_summary -> parsed business_purpose -> raw response
+            if component.get('business_purpose') and component['business_purpose'] != 'undefined':
+                business_purpose = component['business_purpose']
+            
+            if parsed_analysis.get('llm_summary'):
+                llm_summary = parsed_analysis['llm_summary']
+                if llm_summary.get('business_purpose') and not business_purpose:
+                    business_purpose = llm_summary['business_purpose']
+                elif llm_summary.get('raw') and not business_purpose:
+                    business_purpose = llm_summary['raw'][:200] + '...' if len(llm_summary['raw']) > 200 else llm_summary['raw']
+                    llm_summary['is_raw'] = True
+            
+            if not business_purpose and parsed_analysis.get('business_purpose'):
+                business_purpose = parsed_analysis['business_purpose']
+            
+            # Final fallback
+            if not business_purpose or business_purpose == 'undefined':
+                business_purpose = f"Analysis pending for {component.get('component_name', 'component')}"
+            
+            # Get derived components count
             try:
                 derived_count = analyzer.db_manager.get_derived_components_count(session_id, component['component_name'])
-                derived_sample = analyzer.db_manager.get_derived_components(session_id, component['component_name'])[:5]
-            except Exception as e:
-                logger.debug(f"Error fetching derived components for {component.get('component_name')}: {e}")
+            except Exception:
                 derived_count = 0
-                derived_sample = []
-
+            
             transformed = {
                 'component_name': component['component_name'],
                 'component_type': component['component_type'],
+                'friendly_name': component.get('friendly_name') or component['component_name'],
                 'total_lines': component.get('total_lines', 0),
                 'total_fields': component.get('total_fields', 0),
-                'business_purpose': business_purpose or 'Analysis pending',
+                'business_purpose': business_purpose,
                 'llm_summary': llm_summary,
-                'analysis_result_json': analysis_json,
+                'complexity_score': component.get('complexity_score', 0.5),
                 'derived_count': derived_count,
-                'derived_sample': derived_sample
+                'file_path': component.get('file_path', ''),
+                'created_at': component.get('created_at', '')
             }
             transformed_components.append(transformed)
 
-        logger.info(f"Returning {len(transformed_components)} transformed components with llm_summary and derived counts")
-
         return jsonify({
             'success': True,
-            'components': transformed_components,
-            'debug_info': f"Found {len(raw_components)} raw components"
+            'components': transformed_components
         })
         
     except Exception as e:
@@ -853,6 +841,152 @@ def get_session_metrics(session_id):
         return jsonify({'success': True, 'metrics': metrics})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/layout-summary/<session_id>/<layout_name>')
+def get_layout_summary(session_id, layout_name):
+    """Get summary statistics for a record layout"""
+    try:
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get layout info and field counts by usage type
+            cursor.execute('''
+                SELECT rl.layout_name, rl.friendly_name, rl.business_purpose,
+                       COUNT(fad.id) as total_fields,
+                       SUM(CASE WHEN fad.usage_type = 'INPUT' THEN 1 ELSE 0 END) as input_fields,
+                       SUM(CASE WHEN fad.usage_type = 'OUTPUT' THEN 1 ELSE 0 END) as output_fields,
+                       SUM(CASE WHEN fad.usage_type = 'STATIC' THEN 1 ELSE 0 END) as static_fields,
+                       SUM(CASE WHEN fad.usage_type = 'UNUSED' OR fad.total_program_references = 0 THEN 1 ELSE 0 END) as unused_fields,
+                       SUM(CASE WHEN fad.usage_type = 'DERIVED' THEN 1 ELSE 0 END) as derived_fields
+                FROM record_layouts rl
+                LEFT JOIN field_analysis_details fad ON rl.id = fad.field_id
+                WHERE rl.session_id = ? AND rl.layout_name = ?
+                GROUP BY rl.id, rl.layout_name, rl.friendly_name, rl.business_purpose
+            ''', (session_id, layout_name))
+            
+            result = cursor.fetchone()
+            
+            if not result:
+                return jsonify({
+                    'success': False,
+                    'error': f'Layout {layout_name} not found'
+                })
+            
+            summary = {
+                'layout_name': result[0],
+                'friendly_name': result[1] or result[0],
+                'business_purpose': result[2] or 'No description available',
+                'total_fields': result[3],
+                'input_fields': result[4],
+                'output_fields': result[5], 
+                'static_fields': result[6],
+                'unused_fields': result[7],
+                'derived_fields': result[8]
+            }
+            
+            return jsonify({
+                'success': True,
+                'summary': summary
+            })
+            
+    except Exception as e:
+        logger.error(f"Error getting layout summary: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+# ====================
+# 6. ADD FIELD DETAILS API FOR MODAL
+# ====================
+
+@app.route('/api/field-details/<session_id>/<field_name>')
+def get_field_details(session_id, field_name):
+    """Get complete field details including operations and source code"""
+    try:
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get field details with all operations
+            cursor.execute('''
+                SELECT fad.field_name, fad.friendly_name, fad.business_purpose,
+                       fad.usage_type, fad.source_field, fad.target_field,
+                       fad.mainframe_data_type, fad.oracle_data_type,
+                       fad.mainframe_length, fad.oracle_length,
+                       fad.definition_code, fad.program_source_content,
+                       fad.field_references_json, fad.total_program_references,
+                       fad.move_source_count, fad.move_target_count,
+                       fad.arithmetic_count, fad.conditional_count,
+                       rl.layout_name, fad.program_name
+                FROM field_analysis_details fad
+                LEFT JOIN record_layouts rl ON fad.field_id = rl.id
+                WHERE fad.session_id = ? AND UPPER(fad.field_name) = UPPER(?)
+                ORDER BY fad.program_name, fad.line_number
+            ''', (session_id, field_name))
+            
+            results = cursor.fetchall()
+            
+            if not results:
+                return jsonify({
+                    'success': False,
+                    'error': f'Field {field_name} not found'
+                })
+            
+            # Process field references and operations
+            field_operations = []
+            all_references = []
+            
+            for row in results:
+                # Parse field references
+                try:
+                    if row[12]:  # field_references_json
+                        references = json.loads(row[12])
+                        all_references.extend(references)
+                except:
+                    pass
+                
+                field_operations.append({
+                    'program_name': row[19],
+                    'layout_name': row[18],
+                    'usage_type': row[3],
+                    'move_source_count': row[15],
+                    'move_target_count': row[16],
+                    'arithmetic_count': row[17],
+                    'conditional_count': row[18]
+                })
+            
+            # Get the primary field info (first result)
+            primary = results[0]
+            
+            field_details = {
+                'field_name': primary[0],
+                'friendly_name': primary[1] or primary[0],
+                'business_purpose': primary[2] or 'No description available',
+                'usage_type': primary[3],
+                'source_field': primary[4],
+                'target_field': primary[5],
+                'mainframe_data_type': primary[6] or 'UNKNOWN',
+                'oracle_data_type': primary[7] or 'VARCHAR2(50)',
+                'mainframe_length': primary[8] or 0,
+                'oracle_length': primary[9] or 50,
+                'definition_code': primary[10] or '',
+                'source_code_snippet': primary[11][:1000] if primary[11] else 'Source not available',
+                'total_references': primary[13] or 0,
+                'operations': field_operations,
+                'references': all_references[:10]  # Limit to first 10 references
+            }
+            
+            return jsonify({
+                'success': True,
+                'field_details': field_details
+            })
+            
+    except Exception as e:
+        logger.error(f"Error getting field details: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 @app.route('/api/db-health', methods=['GET'])
 def check_database_health():

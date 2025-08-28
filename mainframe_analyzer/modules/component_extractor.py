@@ -1095,12 +1095,15 @@ Please provide a JSON response with:
         }
     
     def _field_to_dict_enhanced(self, field, program_content: str, program_name: str = "PROGRAM") -> Dict:
-        """Convert field with complete source code analysis"""
+        """Convert field with complete source code analysis and proper length calculation"""
         try:
             field_name = field.name
             
             # Perform complete source analysis
             source_analysis = self._complete_field_source_analysis(field_name, program_content, program_name)
+            
+            # Calculate field lengths from PIC clause
+            mainframe_length, oracle_length, oracle_type = self._calculate_field_lengths(field.picture, field.usage)
             
             return {
                 'name': field_name,
@@ -1119,6 +1122,12 @@ Please provide a JSON response with:
                 'confidence': 0.95,
                 'source_field': source_analysis.get('primary_source_field', ''),
                 'target_field': field_name if source_analysis.get('receives_data', False) else '',
+                
+                # FIXED: Proper field length calculation
+                'mainframe_length': mainframe_length,
+                'oracle_length': oracle_length,
+                'oracle_data_type': oracle_type,
+                'mainframe_data_type': f"PIC {field.picture}" if field.picture else "UNKNOWN",
                 
                 # Complete source code storage
                 'definition_line_number': source_analysis.get('definition_line', field.line_number),
@@ -1141,9 +1150,93 @@ Please provide a JSON response with:
                 'level': field.level,
                 'picture': getattr(field, 'picture', ''),
                 'line_number': getattr(field, 'line_number', 0),
+                'mainframe_length': 0,
+                'oracle_length': 50,  # Default
                 'error': str(e)
             }
-    
+
+    def _calculate_field_lengths(self, picture: str, usage: str = "") -> Tuple[int, int, str]:
+        """Calculate mainframe and oracle field lengths from PIC clause"""
+        if not picture:
+            return 0, 50, "VARCHAR2(50)"
+        
+        pic_upper = picture.upper().strip()
+        mainframe_length = 0
+        oracle_length = 50
+        oracle_type = "VARCHAR2(50)"
+        
+        try:
+            # Numeric fields
+            if re.search(r'9|S9', pic_upper):
+                # Count total digits
+                digit_match = re.findall(r'9+|\((\d+)\)', pic_upper)
+                total_digits = 0
+                
+                for match in digit_match:
+                    if match.isdigit():  # (n) format
+                        total_digits += int(match)
+                    else:  # 999 format
+                        total_digits += len([c for c in match if c == '9'])
+                
+                # Handle decimals
+                decimal_digits = 0
+                if 'V' in pic_upper:
+                    # Split on V and count digits after
+                    parts = pic_upper.split('V')
+                    if len(parts) > 1:
+                        decimal_part = parts[1]
+                        decimal_match = re.findall(r'9+|\((\d+)\)', decimal_part)
+                        for match in decimal_match:
+                            if match.isdigit():
+                                decimal_digits += int(match)
+                            else:
+                                decimal_digits += len([c for c in match if c == '9'])
+                
+                # Calculate storage
+                if usage.upper() in ['COMP-3', 'PACKED-DECIMAL']:
+                    mainframe_length = (total_digits + 1) // 2 + 1  # Packed decimal
+                else:
+                    mainframe_length = total_digits + (1 if 'S' in pic_upper else 0)  # Display numeric
+                
+                if decimal_digits > 0:
+                    oracle_type = f"NUMBER({total_digits},{decimal_digits})"
+                    oracle_length = total_digits
+                else:
+                    oracle_type = f"NUMBER({total_digits})"
+                    oracle_length = total_digits
+            
+            # Alphanumeric fields
+            elif re.search(r'X|A', pic_upper):
+                # Count X's or extract (n)
+                if '(' in pic_upper:
+                    length_match = re.search(r'\((\d+)\)', pic_upper)
+                    if length_match:
+                        mainframe_length = int(length_match.group(1))
+                else:
+                    mainframe_length = len([c for c in pic_upper if c in 'XA'])
+                
+                oracle_length = mainframe_length
+                if oracle_length <= 4000:
+                    oracle_type = f"VARCHAR2({oracle_length})"
+                else:
+                    oracle_type = "CLOB"
+            
+            # Default case
+            else:
+                mainframe_length = 10
+                oracle_length = 50
+                oracle_type = "VARCHAR2(50)"
+                
+        except Exception as e:
+            logger.warning(f"Error calculating field lengths for PIC {picture}: {str(e)}")
+            mainframe_length = 10
+            oracle_length = 50
+            oracle_type = "VARCHAR2(50)"
+        
+        return mainframe_length, oracle_length, oracle_type
+
+
+
     def _infer_field_business_purpose(self, field_name: str, usage_analysis: Dict) -> str:
         """Infer business purpose from field name and usage analysis"""
         name_upper = field_name.upper()

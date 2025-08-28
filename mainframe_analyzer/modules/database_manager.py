@@ -300,6 +300,12 @@ class DatabaseManager:
                             conditional_count INTEGER DEFAULT 0,
                             cics_count INTEGER DEFAULT 0,
                             
+                            -- FIXED: Add field length and type columns
+                            mainframe_length INTEGER DEFAULT 0,
+                            oracle_length INTEGER DEFAULT 0,
+                            mainframe_data_type TEXT,
+                            oracle_data_type TEXT,
+                            
                             -- Record-level classification context
                             record_classification TEXT DEFAULT 'STATIC',
                             inherited_from_record BOOLEAN DEFAULT 0,
