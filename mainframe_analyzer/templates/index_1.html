@@ -92,8 +92,36 @@
         }
 
         .left-panel.collapsed {
-            width: 60px;
-            padding: 1rem;
+            display: none;
+        }
+
+        .panel-restore {
+            position: fixed;
+            top: 50%;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.75rem;
+            border-radius: 0 6px 6px 0;
+            cursor: pointer;
+            transform: translateY(-50%);
+            z-index: 1001;
+            font-size: 1rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            transition: all 0.3s ease;
+        }
+
+        .panel-restore:hover {
+            background: #5a6fd8;
+            transform: translateY(-50%) scale(1.1);
+        }
+
+        .panel-restore.left {
+            left: 0;
+        }
+
+        .panel-restore.right {
+            right: 0;
         }
 
         .panel-header {
@@ -674,7 +702,242 @@
         }
 
         .right-panel.collapsed {
-            width: 60px;
+            display: none;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 10000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 3% auto;
+            padding: 0;
+            border-radius: 12px;
+            width: 700px;
+            max-width: 90%;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            animation: modalSlideIn 0.3s ease;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-50px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 12px 12px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            margin: 0;
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+
+        .close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s ease;
+        }
+
+        .close:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .modal-body {
+            padding: 2rem;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 1rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-help {
+            font-size: 0.8rem;
+            color: #6c757d;
+            margin-top: 0.25rem;
+        }
+
+        .connection-status {
+            padding: 0.75rem;
+            border-radius: 6px;
+            margin-top: 1rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .connection-status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .connection-status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .connection-status.testing {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .modal-footer {
+            padding: 1.5rem 2rem;
+            border-top: 1px solid #e9ecef;
+            display: flex;
+            gap: 1rem;
+            justify-content: flex-end;
+            background: #f8f9fa;
+            border-radius: 0 0 12px 12px;
+        }
+
+        .server-info {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 6px;
+            margin-top: 1rem;
+        }
+
+        .server-info h5 {
+            margin: 0 0 0.5rem 0;
+            color: #667eea;
+        }
+
+        .server-info-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.25rem;
+        }
+
+        .btn-test {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: transform 0.2s ease;
+        }
+
+        .btn-test:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn-test:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .config-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .test-results {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+            background: #f8f9fa;
+        }
+
+        .test-results h6 {
+            margin: 0 0 0.5rem 0;
+            color: #495057;
+        }
+
+        .test-detail {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.25rem;
+            font-size: 0.9rem;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+        }
+
+        .status-online { background-color: #28a745; }
+        .status-offline { background-color: #dc3545; }
+        .status-testing { background-color: #ffc107; }
+
+        @media (max-width: 768px) {
+            .config-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .modal-content {
+                margin: 2% auto;
+                width: 95%;
+            }
         }
 
         .chat-header {
@@ -801,6 +1064,131 @@
             <div class="header-actions">
                 <button class="btn btn-secondary" onclick="openConfigModal()">LLM Config</button>
             </div>
+
+    <!-- LLM Configuration Modal -->
+    <div id="configModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">VLLM Server Configuration</h3>
+                <button class="close" onclick="closeConfigModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="llmConfigForm">
+                    <div class="form-group">
+                        <label class="form-label" for="llmEndpoint">
+                            VLLM Server Endpoint
+                        </label>
+                        <input type="url" id="llmEndpoint" class="form-input" 
+                               placeholder="http://192.168.1.100:8100/generate"
+                               value="http://localhost:8100/generate">
+                        <div class="form-help">Enter the full URL to your VLLM server's /generate endpoint</div>
+                    </div>
+
+                    <div class="config-grid">
+                        <div class="form-group">
+                            <label class="form-label" for="maxTokens">
+                                Max Tokens per Call
+                            </label>
+                            <input type="number" id="maxTokens" class="form-input" 
+                                   value="6000" min="1000" max="32000" step="500">
+                            <div class="form-help">Maximum tokens for each LLM request</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label" for="temperature">
+                                Temperature
+                            </label>
+                            <input type="number" id="temperature" class="form-input" 
+                                   value="0.1" min="0" max="2" step="0.1">
+                            <div class="form-help">Creativity level (0.0 = deterministic, 2.0 = creative)</div>
+                        </div>
+                    </div>
+
+                    <div class="config-grid">
+                        <div class="form-group">
+                            <label class="form-label" for="timeout">
+                                Request Timeout (seconds)
+                            </label>
+                            <input type="number" id="timeout" class="form-input" 
+                                   value="60" min="10" max="300" step="5">
+                            <div class="form-help">How long to wait for LLM response</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label" for="retries">
+                                Max Retries
+                            </label>
+                            <input type="number" id="retries" class="form-input" 
+                                   value="3" min="1" max="5" step="1">
+                            <div class="form-help">Number of retry attempts on failure</div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <button type="button" class="btn-test" onclick="testLLMConnection()" id="testButton">
+                            Test Connection
+                        </button>
+                    </div>
+
+                    <div id="connectionStatus" class="connection-status" style="display: none;">
+                        <span class="status-indicator" id="statusIndicator"></span>
+                        <span id="statusMessage"></span>
+                    </div>
+
+                    <div id="serverInfo" class="server-info" style="display: none;">
+                        <h5>Server Information</h5>
+                        <div class="server-info-item">
+                            <span>Model:</span>
+                            <span id="modelName">-</span>
+                        </div>
+                        <div class="server-info-item">
+                            <span>Max Context Length:</span>
+                            <span id="contextLength">-</span>
+                        </div>
+                        <div class="server-info-item">
+                            <span>Response Time:</span>
+                            <span id="responseTime">-</span>
+                        </div>
+                        <div class="server-info-item">
+                            <span>Status:</span>
+                            <span id="serverStatus">-</span>
+                        </div>
+                    </div>
+
+                    <div id="testResults" class="test-results" style="display: none;">
+                        <h6>Test Results</h6>
+                        <div class="test-detail">
+                            <span>Endpoint Reachable:</span>
+                            <span id="endpointStatus">-</span>
+                        </div>
+                        <div class="test-detail">
+                            <span>Response Format:</span>
+                            <span id="responseFormat">-</span>
+                        </div>
+                        <div class="test-detail">
+                            <span>Token Generation:</span>
+                            <span id="tokenGeneration">-</span>
+                        </div>
+                        <div class="test-detail">
+                            <span>Model Compatibility:</span>
+                            <span id="modelCompatibility">-</span>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="resetToDefaults()">
+                    Reset to Defaults
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="closeConfigModal()">
+                    Cancel
+                </button>
+                <button type="button" class="btn btn-primary" onclick="saveLLMConfig()">
+                    Save & Apply
+                </button>
+            </div>
+        </div>
+    </div>
             <div class="header-metrics">
                 <div class="metric-item">
                     <span class="metric-value" id="totalComponents">0</span>
@@ -1107,12 +1495,302 @@
         let fieldMatrixData = {};
         let componentsData = [];
         let dependenciesData = [];
+        let llmConfig = {
+            endpoint: 'http://localhost:8100/generate',
+            maxTokens: 6000,
+            temperature: 0.1,
+            timeout: 60,
+            retries: 3
+        };
 
         // Initialize application
         document.addEventListener('DOMContentLoaded', function() {
+            loadLLMConfig();
             initializeSession();
             updateTokenCounters();
         });
+
+        // LLM Configuration Management
+        function loadLLMConfig() {
+            const saved = localStorage.getItem('llmConfig');
+            if (saved) {
+                try {
+                    llmConfig = { ...llmConfig, ...JSON.parse(saved) };
+                    updateConfigForm();
+                } catch (e) {
+                    console.error('Error loading LLM config:', e);
+                }
+            }
+        }
+
+        function openConfigModal() {
+            updateConfigForm();
+            document.getElementById('configModal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeConfigModal() {
+            document.getElementById('configModal').style.display = 'none';
+            document.body.style.overflow = 'auto';
+            
+            // Hide status messages
+            document.getElementById('connectionStatus').style.display = 'none';
+            document.getElementById('serverInfo').style.display = 'none';
+            document.getElementById('testResults').style.display = 'none';
+        }
+
+        function updateConfigForm() {
+            document.getElementById('llmEndpoint').value = llmConfig.endpoint;
+            document.getElementById('maxTokens').value = llmConfig.maxTokens;
+            document.getElementById('temperature').value = llmConfig.temperature;
+            document.getElementById('timeout').value = llmConfig.timeout;
+            document.getElementById('retries').value = llmConfig.retries;
+        }
+
+        async function testLLMConnection() {
+            const endpoint = document.getElementById('llmEndpoint').value.trim();
+            const maxTokens = parseInt(document.getElementById('maxTokens').value);
+            const temperature = parseFloat(document.getElementById('temperature').value);
+            const timeout = parseInt(document.getElementById('timeout').value);
+
+            if (!endpoint) {
+                showConnectionStatus('error', 'Please enter a VLLM endpoint URL first');
+                return;
+            }
+
+            // Show testing status
+            showConnectionStatus('testing', 'Testing connection to VLLM server...');
+            
+            const testButton = document.getElementById('testButton');
+            testButton.disabled = true;
+            testButton.textContent = 'Testing...';
+
+            // Show test results section
+            document.getElementById('testResults').style.display = 'block';
+            resetTestResults();
+
+            try {
+                const startTime = Date.now();
+                
+                // Test connection with comprehensive testing
+                const response = await fetch('/api/test-llm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        endpoint,
+                        maxTokens,
+                        temperature,
+                        timeout
+                    })
+                });
+
+                const responseTime = Date.now() - startTime;
+
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        // Show success status
+                        showConnectionStatus('success', 'Connection successful! VLLM server is responding normally.');
+                        
+                        // Update test results
+                        updateTestResults({
+                            endpointReachable: true,
+                            responseFormat: 'Valid JSON',
+                            tokenGeneration: data.response_tokens > 0 ? 'Working' : 'Limited',
+                            modelCompatibility: data.model_name ? 'Compatible' : 'Unknown'
+                        });
+                        
+                        // Display server information
+                        displayServerInfo({
+                            model: data.model_name || 'Unknown',
+                            contextLength: data.max_context_length || 'Unknown',
+                            responseTime: `${responseTime}ms`,
+                            status: 'Online',
+                            promptTokens: data.prompt_tokens || 0,
+                            responseTokens: data.response_tokens || 0
+                        });
+                    } else {
+                        showConnectionStatus('error', `Connection failed: ${data.error || 'Unknown error'}`);
+                        updateTestResults({
+                            endpointReachable: false,
+                            responseFormat: 'Error',
+                            tokenGeneration: 'Failed',
+                            modelCompatibility: 'Incompatible'
+                        });
+                        hideServerInfo();
+                    }
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+            } catch (error) {
+                console.error('LLM connection test failed:', error);
+                showConnectionStatus('error', `Connection failed: ${error.message}`);
+                updateTestResults({
+                    endpointReachable: false,
+                    responseFormat: 'Network Error',
+                    tokenGeneration: 'Failed',
+                    modelCompatibility: 'Cannot Determine'
+                });
+                hideServerInfo();
+            } finally {
+                testButton.disabled = false;
+                testButton.textContent = 'Test Connection';
+            }
+        }
+
+        function showConnectionStatus(type, message) {
+            const status = document.getElementById('connectionStatus');
+            const indicator = document.getElementById('statusIndicator');
+            const statusMessage = document.getElementById('statusMessage');
+
+            status.className = `connection-status ${type}`;
+            status.style.display = 'flex';
+            
+            // Update indicator
+            indicator.className = `status-indicator status-${type === 'testing' ? 'testing' : type === 'success' ? 'online' : 'offline'}`;
+            
+            statusMessage.textContent = message;
+        }
+
+        function resetTestResults() {
+            document.getElementById('endpointStatus').textContent = 'Testing...';
+            document.getElementById('responseFormat').textContent = 'Testing...';
+            document.getElementById('tokenGeneration').textContent = 'Testing...';
+            document.getElementById('modelCompatibility').textContent = 'Testing...';
+        }
+
+        function updateTestResults(results) {
+            document.getElementById('endpointStatus').textContent = results.endpointReachable ? '✅ Reachable' : '❌ Failed';
+            document.getElementById('responseFormat').textContent = results.responseFormat;
+            document.getElementById('tokenGeneration').textContent = results.tokenGeneration;
+            document.getElementById('modelCompatibility').textContent = results.modelCompatibility;
+        }
+
+        function displayServerInfo(info) {
+            document.getElementById('modelName').textContent = info.model;
+            document.getElementById('contextLength').textContent = info.contextLength;
+            document.getElementById('responseTime').textContent = info.responseTime;
+            document.getElementById('serverStatus').textContent = info.status;
+            document.getElementById('serverInfo').style.display = 'block';
+        }
+
+        function hideServerInfo() {
+            document.getElementById('serverInfo').style.display = 'none';
+        }
+
+        async function saveLLMConfig() {
+            const endpoint = document.getElementById('llmEndpoint').value.trim();
+            const maxTokens = parseInt(document.getElementById('maxTokens').value);
+            const temperature = parseFloat(document.getElementById('temperature').value);
+            const timeout = parseInt(document.getElementById('timeout').value);
+            const retries = parseInt(document.getElementById('retries').value);
+
+            // Validation
+            if (!endpoint) {
+                showError('Please enter a valid VLLM endpoint URL');
+                return;
+            }
+
+            if (maxTokens < 1000 || maxTokens > 32000) {
+                showError('Max tokens must be between 1000 and 32000');
+                return;
+            }
+
+            if (temperature < 0 || temperature > 2) {
+                showError('Temperature must be between 0.0 and 2.0');
+                return;
+            }
+
+            // Update config
+            llmConfig = {
+                endpoint,
+                maxTokens,
+                temperature,
+                timeout,
+                retries
+            };
+
+            // Save to localStorage
+            localStorage.setItem('llmConfig', JSON.stringify(llmConfig));
+
+            // Update backend configuration via API
+            try {
+                await updateBackendConfig();
+                closeConfigModal();
+                showSuccess('LLM configuration saved successfully!');
+            } catch (error) {
+                showError('Failed to update backend configuration');
+            }
+        }
+
+        async function updateBackendConfig() {
+            try {
+                const response = await fetch('/api/llm-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(llmConfig)
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to update backend configuration');
+                }
+            } catch (error) {
+                console.error('Error updating backend config:', error);
+                throw error;
+            }
+        }
+
+        function resetToDefaults() {
+            if (confirm('Are you sure you want to reset all settings to default values?')) {
+                llmConfig = {
+                    endpoint: 'http://localhost:8100/generate',
+                    maxTokens: 6000,
+                    temperature: 0.1,
+                    timeout: 60,
+                    retries: 3
+                };
+                updateConfigForm();
+                localStorage.removeItem('llmConfig');
+                
+                // Hide status sections
+                document.getElementById('connectionStatus').style.display = 'none';
+                document.getElementById('serverInfo').style.display = 'none';
+                document.getElementById('testResults').style.display = 'none';
+            }
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('configModal');
+            if (event.target === modal) {
+                closeConfigModal();
+            }
+        }
+
+        function showSuccess(message) {
+            // Enhanced success notification
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+                color: white;
+                padding: 1rem 1.5rem;
+                border-radius: 6px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                z-index: 10001;
+                animation: slideIn 0.3s ease;
+            `;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.animation = 'fadeOut 0.3s ease';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
 
         // Session Management
         async function initializeSession() {
@@ -2362,15 +3040,17 @@
             alert('Error: ' + message);
         }
 
-        // Panel management
+        // Panel management - Complete collapse/restore
         function togglePanel(side) {
             const panel = document.getElementById(side + 'Panel');
             const isCollapsed = panel.classList.contains('collapsed');
             
             if (isCollapsed) {
+                // Restore panel
                 panel.classList.remove('collapsed');
                 removeRestoreButton(side);
             } else {
+                // Completely collapse panel
                 panel.classList.add('collapsed');
                 addRestoreButton(side);
             }
@@ -2383,23 +3063,9 @@
             const button = document.createElement('button');
             button.id = `restore-${side}`;
             button.className = `panel-restore ${side}`;
-            button.textContent = side === 'left' ? '📁' : '💬';
+            button.innerHTML = side === 'left' ? '📁<br><small>Dashboard</small>' : '💬<br><small>Chat</small>';
             button.title = `Restore ${side} panel`;
             button.onclick = () => togglePanel(side);
-            button.style.cssText = `
-                position: fixed;
-                top: 50%;
-                background: #667eea;
-                color: white;
-                border: none;
-                padding: 0.5rem;
-                border-radius: 0 4px 4px 0;
-                cursor: pointer;
-                transform: translateY(-50%);
-                z-index: 1001;
-                font-size: 0.8rem;
-                ${side}: 0;
-            `;
             
             document.body.appendChild(button);
         }
@@ -2687,8 +3353,24 @@
 
         // Configuration modal functions
         function openConfigModal() {
-            alert('LLM configuration modal coming soon!');
+            updateConfigForm();
+            document.getElementById('configModal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
         }
+
+        // Add CSS animations
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from { opacity: 0; transform: translateX(100%); }
+                to { opacity: 1; transform: translateX(0); }
+            }
+            @keyframes fadeOut {
+                from { opacity: 1; }
+                to { opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
     </script>
 </body>
 </html>
