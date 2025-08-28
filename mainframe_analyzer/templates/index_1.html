@@ -2333,8 +2333,8 @@ function escapeForTemplate(str) {
                 </div>
                 
                 ${rawResponse.length > 200 ? 
-                    '<button class="btn btn-secondary" style="width: 100%; margin-top: 1rem;" onclick="showRawAnalysisModal(\\''+safeProgramName+'\\', \\''+safeRawResponse+'\\')">View Full AI Analysis</button>' 
-                    `: ''}
+                    '<button class="btn btn-secondary" style="width: 100%; margin-top: 1rem;" onclick="showRawAnalysisModal(\\'+safeProgramName+''+safeRawResponse+')">View Full AI Analysis</button>' 
+                    : ''}
             `;
         } else {
             // Standard structured display
