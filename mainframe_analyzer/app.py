@@ -728,23 +728,50 @@ def get_components(session_id):
         for comp in raw_components:
             logger.info(f"Component: {comp['component_name']} ({comp['component_type']})")
         
-        # Transform for UI
+        # Transform for UI: parse analysis_result_json to extract LLM summaries and include derived component info
         transformed_components = []
         for component in raw_components:
+            analysis_json = component.get('analysis_result_json') or '{}'
+            parsed = {}
+            try:
+                parsed = json.loads(analysis_json) if analysis_json else {}
+            except Exception:
+                logger.debug(f"Failed to parse analysis_result_json for {component.get('component_name')}")
+
+            # Prefer explicit business_purpose column, fall back to parsed JSON or LLM summary
+            business_purpose = component.get('business_purpose')
+            if not business_purpose:
+                business_purpose = parsed.get('business_purpose') or parsed.get('llm_summary', {}).get('business_purpose', '')
+
+            # Extract llm_summary if present in parsed JSON
+            llm_summary = parsed.get('llm_summary') or parsed.get('llm_summary', {}) or {}
+
+            # Get derived components count and a small sample for UI
+            try:
+                derived_count = analyzer.db_manager.get_derived_components_count(session_id, component['component_name'])
+                derived_sample = analyzer.db_manager.get_derived_components(session_id, component['component_name'])[:5]
+            except Exception as e:
+                logger.debug(f"Error fetching derived components for {component.get('component_name')}: {e}")
+                derived_count = 0
+                derived_sample = []
+
             transformed = {
                 'component_name': component['component_name'],
                 'component_type': component['component_type'],
                 'total_lines': component.get('total_lines', 0),
                 'total_fields': component.get('total_fields', 0),
-                'business_purpose': component.get('business_purpose', 'Analysis pending'),
-                'analysis_result_json': component.get('analysis_result_json', '{}')
+                'business_purpose': business_purpose or 'Analysis pending',
+                'llm_summary': llm_summary,
+                'analysis_result_json': analysis_json,
+                'derived_count': derived_count,
+                'derived_sample': derived_sample
             }
             transformed_components.append(transformed)
-        
-        logger.info(f"Returning {len(transformed_components)} transformed components")
-        
+
+        logger.info(f"Returning {len(transformed_components)} transformed components with llm_summary and derived counts")
+
         return jsonify({
-            'success': True, 
+            'success': True,
             'components': transformed_components,
             'debug_info': f"Found {len(raw_components)} raw components"
         })

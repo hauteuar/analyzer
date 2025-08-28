@@ -87,6 +87,10 @@ class ComponentExtractor:
                     # Store derived components separately
                     derived_components = component.get('derived_components', [])
                     if derived_components:
+                        derived_components = [
+                            dc if isinstance(dc, dict) else {'name': dc}
+                            for dc in derived_components
+                        ]
                         logger.info(f"Storing {len(derived_components)} derived components for {main_component_data['name']}")
                         self.db_manager.store_derived_components(
                             session_id, 
