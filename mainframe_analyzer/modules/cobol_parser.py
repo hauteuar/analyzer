@@ -28,6 +28,8 @@ class CobolField:
     redefines: str = ""
     value: str = ""
     line_number: int = 0
+    friendly_name: str = ""
+    source_references: List[Dict] = field(default_factory=list)
 
 
 @dataclass
@@ -39,6 +41,9 @@ class RecordLayout:
     line_end: int = 0
     source_code: str = ""
     section: str = "WORKING-STORAGE"
+    friendly_name: str = ""
+    # any derived annotations
+    annotations: Dict = field(default_factory=dict)
 
 
 class COBOLParser:
@@ -367,7 +372,12 @@ class COBOLParser:
 
     def parse_cobol_file(self, content: str, filename: str) -> Dict:
         raw_lines = content.split('\n')
+        # compute a program-friendly name from filename
+        program_base = filename.split('/')[-1].split('\\')[-1]
+        program_base = program_base.rsplit('.', 1)[0] if '.' in program_base else program_base
+
         parsed = {
+            'friendly_name': self.generate_friendly_name(program_base, 'Program'),
             'filename': filename,
             'divisions': self.extract_divisions(raw_lines),
             'components': self.extract_components(raw_lines),
@@ -386,6 +396,40 @@ class COBOLParser:
             'business_comments': [l.strip() for l in raw_lines if len(l)>6 and l[6] in ['*','/','C','c','D','d'] and len(l.strip())>30][:20]
         }
         return parsed
+
+    def generate_friendly_name(self, technical_name: str, context: str = '') -> str:
+        """Create a simple business-friendly name from a technical identifier.
+
+        This is lightweight and deterministic: removes common prefixes like WS-, FD-,
+        replaces hyphens/underscores with spaces and title-cases the result. Used as a
+        fallback when LLM-based naming is not available.
+        """
+        if not technical_name:
+            return context.title() if context else 'Unknown'
+
+        name = str(technical_name).upper().strip()
+
+        # Remove common technical prefixes
+        for prefix in ('WS-', 'LS-', 'WK-', 'FD-', 'FD_', 'TB-', 'TB_', 'SRV-', 'PRG-'):
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+                break
+
+        # Remove file extensions or path-like fragments if present
+        name = name.split('/')[-1].split('\\')[-1]
+
+        # Replace separators and multiple spaces
+        name = re.sub(r'[_\-\.]', ' ', name)
+        name = re.sub(r'\s+', ' ', name).strip()
+
+        # Title case looks nicer for a friendly name
+        friendly = name.title()
+
+        # If empty after cleaning, fall back to context
+        if not friendly:
+            return (context.title() if context else technical_name)
+
+        return friendly
 
 
 class ComponentExtractor:
@@ -914,7 +958,12 @@ class RecordLayout:
     def parse_cobol_file(self, content: str, filename: str) -> Dict:
         raw_lines = content.split('\n')
         # process lines to keep raw formatting for storage but use program area for parsing
+        # derive a simple program base name
+        program_base = filename.split('/')[-1].split('\\')[-1]
+        program_base = program_base.rsplit('.', 1)[0] if '.' in program_base else program_base
+
         parsed = {
+            'friendly_name': self.generate_friendly_name(program_base, 'Program'),
             'filename': filename,
             'divisions': self.extract_divisions(raw_lines),
             'components': self.extract_components(raw_lines),
@@ -932,6 +981,29 @@ class RecordLayout:
             'comment_lines': sum(1 for l in raw_lines if len(l)>6 and l[6] in ['*','/','C','c','D','d'])
         }
         return parsed
+
+    def generate_friendly_name(self, technical_name: str, context: str = '') -> str:
+        """Create a simple business-friendly name from a technical identifier.
+
+        Lightweight fallback for UI/metadata: strips common prefixes and title-cases.
+        """
+        if not technical_name:
+            return context.title() if context else 'Unknown'
+
+        name = str(technical_name).upper().strip()
+
+        for prefix in ('WS-', 'LS-', 'WK-', 'FD-', 'FD_', 'TB-', 'TB_', 'SRV-', 'PRG-'):
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+                break
+
+        name = name.split('/')[-1].split('\\')[-1]
+        name = re.sub(r'[_\-\.]', ' ', name)
+        name = re.sub(r'\s+', ' ', name).strip()
+        friendly = name.title()
+        if not friendly:
+            return (context.title() if context else technical_name)
+        return friendly
 
     def extract_data_movements(self, lines: List[str]) -> List[Dict]:
         """Extract data movement operations (MOVE, COMPUTE, ADD ... TO) from COBOL program area
