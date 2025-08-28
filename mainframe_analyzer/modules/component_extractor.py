@@ -601,15 +601,16 @@ Please provide a JSON response with:
                     if response.content and isinstance(response.content, str) and len(response.content.strip()) > 0:
                         raw_text = response.content.strip()
                         fallback_summary = {
-                            'business_purpose': raw_text.split('\n')[0][:500],
-                            'primary_function': 'UNKNOWN',
-                            'complexity_score': 0,
-                            'key_features': [],
-                            'integration_points': [],
-                            'data_sources': [],
-                            'business_domain': 'GENERAL',
-                            'raw': raw_text
-                        }
+                        'business_purpose': raw_text.split('\n')[0][:500],  # Use first line or truncated
+                        'primary_function': 'UNKNOWN',
+                        'complexity_score': 0.5,
+                        'key_features': [],
+                        'integration_points': [],
+                        'data_sources': [],
+                        'business_domain': 'GENERAL',
+                        'raw_response': raw_text,  # Store complete raw response
+                        'is_raw': True  # Flag to indicate this is raw text
+                    }
                         logger.info('Using raw LLM text as fallback summary (stored under llm_summary.raw)')
                         return fallback_summary
             else:

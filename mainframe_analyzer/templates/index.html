@@ -1849,86 +1849,260 @@
 
         // Enhanced file upload with progress tracking
         async function handleFileUpload(event) {
-            const files = event.target.files;
-            if (files.length === 0) return;
+    const files = event.target.files;
+    if (files.length === 0) return;
 
-            showLoadingWithProgress('Uploading and analyzing files...');
+    // Show loading with initial progress
+    showLoadingWithProgress(`Processing ${files.length} files...`);
+    
+    let processedCount = 0;
+    let successCount = 0;
+    let errorCount = 0;
+    const results = [];
 
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                try {
-                    const content = await readFileContent(file);
-                    const fileType = getFileType(file.name);
-                    
-                    updateLoadingProgress(
-                        `Analyzing ${file.name} (${i + 1}/${files.length})...`,
-                        (i / files.length) * 100,
-                        `Processing ${file.name}`
-                    );
-                    
-                    updateAnalysisStep(1, 'current', `Parsing ${file.name}...`);
-                    
-                    const response = await fetch('/api/upload', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            session_id: currentSessionId,
-                            content: content,
-                            filename: file.name,
-                            file_type: fileType
-                        })
-                    });
+    // Add a processing status container to the loading overlay
+    const loadingContent = document.querySelector('.loading-content');
+    const statusContainer = document.createElement('div');
+    statusContainer.id = 'processingStatus';
+    statusContainer.style.marginTop = '2rem';
+    loadingContent.appendChild(statusContainer);
 
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.success) {
-                            console.log(`✅ Successfully analyzed ${file.name}:`, data.components.length, 'components');
-                            componentsData = componentsData.concat(data.components);
-                            
-                            // Update progress steps
-                            updateAnalysisStep(1, 'completed', `Parsed ${file.name}`);
-                            updateAnalysisStep(2, 'completed', `Extracted ${data.components.length} components`);
-                            updateAnalysisStep(3, 'completed', `Generated business summaries`);
-                            updateAnalysisStep(4, 'completed', `Stored in database`);
-                            console.log('Upload response:', data);
-                            console.log('Components received:', data.components);
+    // Process files sequentially but update UI for each
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileNumber = i + 1;
+        
+        try {
+            // Update progress for this file
+            updateLoadingProgress(
+                `Processing ${file.name} (${fileNumber}/${files.length})...`,
+                (i / files.length) * 90, // Reserve 10% for final steps
+                `Analyzing ${file.name}`
+            );
+            
+            // Update status container
+            updateProcessingStatus(fileNumber, files.length, file.name, 'processing');
+            
+            // Update analysis steps
+            updateAnalysisStep(1, 'current', `Parsing ${file.name}...`);
+            updateAnalysisStep(2, 'current', 'Extracting components...');
+            updateAnalysisStep(3, 'current', 'Generating AI analysis...');
+            updateAnalysisStep(4, 'current', 'Storing results...');
 
-                            // Check if components have LLM summaries
-                            data.components.forEach(component => {
-                                console.log('Component:', component.name);
-                                console.log('Business purpose:', component.business_purpose);
-                                console.log('LLM summary:', component.llm_summary);
-                            });
-                            setTimeout(() => {
-                            hideLoading();
-                            refreshUI();  // Make sure this is called
-                            loadComponentsList();  // Explicitly call this too
-                            loadDashboardSummaries();  // And this
-                        }, 1500);
-                            
+            const content = await readFileContent(file);
+            const fileType = getFileType(file.name);
+            
+            const response = await fetch('/api/upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: currentSessionId,
+                    content: content,
+                    filename: file.name,
+                    file_type: fileType
+                })
+            });
 
-                        } else {
-                            console.error(`❌ Error analyzing ${file.name}:`, data.error);
-                            showErrorInStep(file.name, data.error);
-                        }
-                    }
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    successCount++;
+                    results.push({ file: file.name, success: true, data: data });
                     
-                    // In handleFileUpload, after successful processing:
+                    // Update all steps to completed for this file
+                    updateAnalysisStep(1, 'completed', `Parsed ${file.name}`);
+                    updateAnalysisStep(2, 'completed', `Found ${data.components.length} components`);
+                    updateAnalysisStep(3, 'completed', `Generated business summaries`);
+                    updateAnalysisStep(4, 'completed', `Stored in database`);
                     
-                } catch (error) {
-                    console.error(`💥 Error processing ${file.name}:`, error);
-                    showErrorInStep(file.name, error.message);
+                    // Update status
+                    updateProcessingStatus(fileNumber, files.length, file.name, 'success', data.components.length);
+                    
+                    // Add components to global array for immediate display
+                    componentsData = componentsData.concat(data.components);
+                    
+                    console.log(`✅ Successfully processed ${file.name}:`, data.components.length, 'components');
+                } else {
+                    errorCount++;
+                    results.push({ file: file.name, success: false, error: data.error });
+                    updateProcessingStatus(fileNumber, files.length, file.name, 'error', 0, data.error);
+                    showErrorInStep(file.name, data.error);
+                }
+            } else {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+        } catch (error) {
+            errorCount++;
+            results.push({ file: file.name, success: false, error: error.message });
+            console.error(`💥 Error processing ${file.name}:`, error);
+            updateProcessingStatus(fileNumber, files.length, file.name, 'error', 0, error.message);
+            showErrorInStep(file.name, error.message);
+        }
+        
+        processedCount++;
+        
+        // Update overall progress
+        const overallProgress = (processedCount / files.length) * 90;
+        updateLoadingProgress(
+            `Processed ${processedCount}/${files.length} files (${successCount} successful, ${errorCount} failed)`,
+            overallProgress,
+            `${processedCount} of ${files.length} complete`
+        );
+    }
+
+    // Final completion step
+    updateLoadingProgress(
+        `Analysis complete! Processed ${processedCount} files`,
+        95,
+        'Updating interface...'
+    );
+
+    // Show final summary
+    const finalSummaryHtml = `
+        <div style="background: #d4edda; padding: 1rem; border-radius: 8px; border: 1px solid #c3e6cb; margin-top: 1rem;">
+            <h4 style="color: #155724; margin: 0 0 0.5rem 0;">Processing Complete!</h4>
+            <div style="color: #155724;">
+                <strong>Total Files:</strong> ${files.length}<br>
+                <strong>Successful:</strong> ${successCount}<br>
+                <strong>Failed:</strong> ${errorCount}<br>
+                <strong>Total Components:</strong> ${results.reduce((sum, r) => sum + (r.data?.components?.length || 0), 0)}
+            </div>
+        </div>
+    `;
+    statusContainer.insertAdjacentHTML('beforeend', finalSummaryHtml);
+
+    // Complete progress
+    updateLoadingProgress('All files processed successfully!', 100, 'Ready!');
+    
+    // Wait a moment to show completion, then refresh UI
+    setTimeout(async () => {
+        hideLoading();
+        
+        // Refresh all UI components
+        await refreshUI();
+        await loadDashboardSummaries();
+        
+        // Show completion notification
+        showCompletionNotification(successCount, errorCount, files.length);
+        
+    }, 2000);
+    
+    // Reset file input
+    event.target.value = '';
+}
+
+function updateProcessingStatus(currentFile, totalFiles, fileName, status, componentsFound = 0, error = null) {
+    const container = document.getElementById('processingStatus');
+    if (!container) return;
+
+    let statusItem = document.getElementById(`status-${currentFile}`);
+    if (!statusItem) {
+        statusItem = document.createElement('div');
+        statusItem.id = `status-${currentFile}`;
+        statusItem.style.cssText = `
+            display: flex;
+            align-items: center;
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        `;
+        container.appendChild(statusItem);
+    }
+
+    let statusIcon, statusColor, statusText, backgroundColor;
+    
+    switch (status) {
+        case 'processing':
+            statusIcon = '🔄';
+            statusColor = '#0c5460';
+            backgroundColor = '#d1ecf1';
+            statusText = `Processing ${fileName}...`;
+            break;
+        case 'success':
+            statusIcon = '✅';
+            statusColor = '#155724';
+            backgroundColor = '#d4edda';
+            statusText = `${fileName} - ${componentsFound} components found`;
+            break;
+        case 'error':
+            statusIcon = '❌';
+            statusColor = '#721c24';
+            backgroundColor = '#f8d7da';
+            statusText = `${fileName} - Error: ${error?.substring(0, 50) || 'Unknown error'}`;
+            break;
+    }
+
+    statusItem.style.color = statusColor;
+    statusItem.style.backgroundColor = backgroundColor;
+    statusItem.innerHTML = `
+        <span style="margin-right: 0.5rem; font-size: 1rem;">${statusIcon}</span>
+        <span><strong>File ${currentFile}/${totalFiles}:</strong> ${statusText}</span>
+    `;
+}
+
+function showCompletionNotification(successCount, errorCount, totalFiles) {
+    const notificationHtml = `
+        <div id="completionNotification" style="
+            position: fixed;
+            top: 100px;
+            right: 20px;
+            background: ${errorCount > 0 ? 'linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%)' : 'linear-gradient(135deg, #28a745 0%, #20c997 100%)'};
+            color: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            z-index: 10000;
+            min-width: 300px;
+            animation: slideIn 0.3s ease;
+        ">
+            <h4 style="margin: 0 0 0.5rem 0;">${errorCount > 0 ? '⚠️' : '🎉'} Processing Complete!</h4>
+            <div>
+                <strong>Files Processed:</strong> ${successCount}/${totalFiles}<br>
+                ${errorCount > 0 ? `<strong>Errors:</strong> ${errorCount}<br>` : ''}
+                <strong>Total Components:</strong> ${componentsData.length}
+            </div>
+            <button onclick="closeCompletionNotification()" style="
+                background: rgba(255,255,255,0.2);
+                border: none;
+                color: white;
+                padding: 0.25rem 0.5rem;
+                border-radius: 4px;
+                margin-top: 0.5rem;
+                cursor: pointer;
+            ">Close</button>
+        </div>
+        
+        <style>
+            @keyframes slideIn {
+                from {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translateX(0);
+                    opacity: 1;
                 }
             }
+        </style>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', notificationHtml);
+    
+    // Auto-close after 10 seconds
+    setTimeout(() => {
+        closeCompletionNotification();
+    }, 10000);
+}
 
-            updateLoadingProgress('Analysis complete!', 100, 'All files processed successfully');
-            setTimeout(() => {
-                hideLoading();
-                refreshUI();
-            }, 1500);
-            
-            event.target.value = ''; // Reset file input
-        }
+function closeCompletionNotification() {
+    const notification = document.getElementById('completionNotification');
+    if (notification) {
+        notification.style.animation = 'slideOut 0.3s ease forwards';
+        setTimeout(() => notification.remove(), 300);
+    }
+}
 
         function showLoadingWithProgress(title) {
             document.getElementById('loadingTitle').textContent = title;
