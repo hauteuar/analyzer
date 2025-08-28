@@ -226,7 +226,15 @@ class ComponentExtractor:
                             'business_purpose': field_analysis['business_purpose'],
                             'total_program_references': len(field_analysis['all_references']),
                             'source_field': field_analysis.get('primary_source_field', ''),
+                             # Enhanced source code information
+                            'source_references': field.source_references if hasattr(field, 'source_references') else [],
+                            'total_references': len(field.source_references) if hasattr(field, 'source_references') else 0,
                             
+                            # Business analysis
+                            'usage_type': self._determine_field_usage_from_references(field),
+                            'business_purpose': self._generate_field_business_purpose(field),
+                            'source_field': self._extract_primary_source_field(field),
+                            'confidence_score': 0.9,
                             # NEW: Record-level context
                             'record_classification': record_classification,
                             'inherited_from_record': self._should_inherit_record_classification(
@@ -273,6 +281,51 @@ class ComponentExtractor:
         except Exception as e:
             logger.error(f"Error in COBOL component extraction: {str(e)}")
             return []
+
+        
+    def _determine_field_usage_from_references(self, field) -> str:
+        """Determine field usage type from comprehensive references"""
+        if not hasattr(field, 'source_references') or not field.source_references:
+            return 'STATIC'
+        
+        reference_types = [ref.get('reference_type', '') for ref in field.source_references]
+        
+        has_move_target = any('MOVE_TARGET' in rt for rt in reference_types)
+        has_move_source = any('MOVE_SOURCE' in rt for rt in reference_types)
+        has_compute = any('COMPUTE' in rt for rt in reference_types)
+        has_condition = any('CONDITION' in rt for rt in reference_types)
+        
+        if has_move_target and has_move_source:
+            return 'INPUT_OUTPUT'
+        elif has_move_target or has_compute:
+            return 'INPUT'
+        elif has_move_source:
+            return 'OUTPUT'
+        elif has_compute:
+            return 'DERIVED'
+        elif has_condition:
+            return 'REFERENCE'
+        else:
+            return 'STATIC'
+
+    def _generate_field_business_purpose(self, field) -> str:
+        """Generate business purpose from field name and references"""
+        if hasattr(field, 'source_references') and field.source_references:
+            contexts = [ref.get('business_context', '') for ref in field.source_references]
+            if contexts and contexts[0]:
+                return contexts[0]
+        
+        # Fallback to name-based inference
+        return self._infer_field_business_purpose(field.name, {})
+
+    def _extract_primary_source_field(self, field) -> str:
+        """Extract primary source field from references"""
+        if hasattr(field, 'source_references') and field.source_references:
+            for ref in field.source_references:
+                if ref.get('reference_type') == 'MOVE_TARGET' and ref.get('source_field'):
+                    return ref['source_field']
+        return ''
+
 
     def store_field_details(self, session_id: str, field_data: Dict, program_name: str, layout_id: int = None):
         """Store complete field details with source code context"""
