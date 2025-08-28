@@ -132,18 +132,18 @@ class ComponentExtractor:
             return []
     
     def _extract_cobol_components(self, session_id: str, content: str, filename: str) -> List[Dict]:
-        """Extract COBOL components with LLM-enhanced layout summaries"""
+        """Extract COBOL components with record-level classification"""
         logger.info(f"Starting COBOL analysis for {filename}")
         
         try:
-            # Parse COBOL structure
             parsed_data = self.cobol_parser.parse_cobol_file(content, filename)
-            logger.info(f"Parsed {len(parsed_data['record_layouts'])} record layouts from {filename}")
+            
+            # Get record-level classifications
+            record_classifications = self._analyze_record_level_operations(content, parsed_data['record_layouts'])
             
             # Generate program summary
             program_summary = self._generate_component_summary(session_id, parsed_data, 'PROGRAM')
             
-            # Create program component
             program_name = filename.replace('.cbl', '').replace('.CBL', '').replace('.cob', '').replace('.COB', '')
             program_component = {
                 'name': program_name,
@@ -169,38 +169,48 @@ class ComponentExtractor:
             
             components = [program_component]
             
-            # Process record layouts with LLM summaries
+            # Process record layouts with classification
             for layout_idx, layout in enumerate(parsed_data['record_layouts'], 1):
                 layout_name = layout.name
-                logger.info(f"Processing layout {layout_idx}: {layout_name} ({len(layout.fields)} fields)")
+                record_classification = record_classifications.get(layout_name, 'STATIC')
                 
-                # THIS IS THE MISSING CALL - Generate LLM summary for layout
+                logger.info(f"Processing layout {layout_idx}: {layout_name} - Classification: {record_classification}")
+                
                 layout_summary = self._generate_layout_summary(session_id, layout, parsed_data)
                 
-                # Update layout with LLM-generated friendly name and business purpose
-                layout.friendly_name = layout_summary.get('friendly_name', layout.friendly_name)
-                layout_business_purpose = layout_summary.get('business_purpose', f"Data structure with {len(layout.fields)} fields")
-                
-                # Store layout in database with enhanced information
+                # Store layout with record classification
                 try:
                     with self.db_manager.get_connection() as conn:
                         cursor = conn.cursor()
                         cursor.execute('''
                             INSERT OR REPLACE INTO record_layouts 
                             (session_id, layout_name, friendly_name, program_name, level_number, 
-                            line_start, line_end, source_code, fields_count, business_purpose)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (session_id, layout_name, layout.friendly_name, program_name,
-                            str(layout.level), layout.line_start, layout.line_end,
-                            layout.source_code, len(layout.fields), layout_business_purpose))
+                            line_start, line_end, source_code, fields_count, business_purpose,
+                            record_classification, record_usage_description, has_whole_record_operations)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            session_id, 
+                            layout_name, 
+                            layout.friendly_name, 
+                            program_name,
+                            str(layout.level), 
+                            layout.line_start, 
+                            layout.line_end,
+                            layout.source_code, 
+                            len(layout.fields), 
+                            layout_summary.get('business_purpose', ''),
+                            record_classification,
+                            self._get_record_usage_description(record_classification),
+                            record_classification != 'STATIC'
+                        ))
                         
                         layout_id = cursor.lastrowid
-                        logger.info(f"Stored layout {layout_name} with friendly name: {layout.friendly_name}")
+                        logger.info(f"Stored layout {layout_name} with record classification: {record_classification}")
                 except Exception as db_error:
                     logger.error(f"Error storing layout {layout_name}: {str(db_error)}")
                     continue
                 
-                # Process fields for this layout
+                # Process fields with record context
                 enhanced_fields = []
                 for field in layout.fields:
                     try:
@@ -215,13 +225,23 @@ class ComponentExtractor:
                             'usage_type': field_analysis['primary_usage'],
                             'business_purpose': field_analysis['business_purpose'],
                             'total_program_references': len(field_analysis['all_references']),
-                            'source_field': field_analysis.get('primary_source_field', ''),  # Add this for population source
+                            'source_field': field_analysis.get('primary_source_field', ''),
+                            
+                            # NEW: Record-level context
+                            'record_classification': record_classification,
+                            'inherited_from_record': self._should_inherit_record_classification(
+                                field_analysis, record_classification
+                            ),
+                            'effective_classification': self._get_effective_field_classification(
+                                field_analysis['primary_usage'], record_classification
+                            )
                         }
                         
                         enhanced_fields.append(enhanced_field)
                         
-                        # Store field in database
+                        # Store field with record context
                         if layout_id:
+                            enhanced_field['record_classification'] = record_classification
                             self.db_manager.store_field_details(session_id, enhanced_field, program_name, layout_id)
                             
                     except Exception as field_error:
@@ -232,8 +252,10 @@ class ComponentExtractor:
                 program_component['derived_components'].append(layout_name)
                 program_component['record_layouts'].append({
                     'name': layout_name,
-                    'friendly_name': layout.friendly_name,  # Use LLM-generated name
-                    'business_purpose': layout_business_purpose,  # Use LLM-generated purpose
+                    'friendly_name': layout.friendly_name,
+                    'business_purpose': layout_summary.get('business_purpose', ''),
+                    'record_classification': record_classification,
+                    'record_usage_description': self._get_record_usage_description(record_classification),
                     'fields': enhanced_fields
                 })
                 program_component['fields'].extend(enhanced_fields)
@@ -251,7 +273,6 @@ class ComponentExtractor:
         except Exception as e:
             logger.error(f"Error in COBOL component extraction: {str(e)}")
             return []
-
 
     def store_field_details(self, session_id: str, field_data: Dict, program_name: str, layout_id: int = None):
         """Store complete field details with source code context"""
@@ -529,7 +550,117 @@ Please provide a JSON response with:
                 'business_domain': 'GENERAL'
             }
     
-    
+    def _analyze_record_level_operations(self, program_content: str, record_layouts: List) -> Dict[str, str]:
+        """
+        Analyze record-level operations and classify 01-level layouts as INPUT, OUTPUT, or INPUT_OUTPUT
+        when whole record operations are detected.
+        """
+        record_classifications = {}
+        
+        lines = program_content.split('\n')
+        
+        for layout in record_layouts:
+            layout_name = layout.name
+            classification = self._classify_record_layout(layout_name, lines)
+            record_classifications[layout_name] = classification
+        
+        return record_classifications
+
+    def _classify_record_layout(self, layout_name: str, program_lines: List[str]) -> str:
+        """
+        Classify a record layout based on whole-record operations
+        """
+        import re
+        
+        receives_data = False
+        provides_data = False
+        
+        # Patterns for whole record operations
+        record_patterns = {
+            'input': [
+                rf'MOVE\s+([A-Z0-9\-]+)\s+TO\s+{re.escape(layout_name)}',
+                rf'READ\s+[A-Z0-9\-]+\s+INTO\s+{re.escape(layout_name)}',
+                rf'EXEC\s+CICS\s+READ[^E]*INTO\s*\(\s*{re.escape(layout_name)}\s*\)',
+                rf'ACCEPT\s+{re.escape(layout_name)}',
+                rf'UNSTRING\s+[^I]*INTO\s+{re.escape(layout_name)}',
+            ],
+            'output': [
+                rf'MOVE\s+{re.escape(layout_name)}\s+TO\s+([A-Z0-9\-]+)',
+                rf'WRITE\s+[A-Z0-9\-]+\s+FROM\s+{re.escape(layout_name)}',
+                rf'EXEC\s+CICS\s+WRITE[^E]*FROM\s*\(\s*{re.escape(layout_name)}\s*\)',
+                rf'DISPLAY\s+{re.escape(layout_name)}',
+                rf'STRING\s+{re.escape(layout_name)}[^I]*INTO',
+            ],
+            'bidirectional': [
+                rf'EXEC\s+CICS\s+REWRITE[^E]*FROM\s*\(\s*{re.escape(layout_name)}\s*\)',
+                rf'REWRITE\s+[A-Z0-9\-]+\s+FROM\s+{re.escape(layout_name)}',
+            ]
+        }
+        
+        for line in program_lines:
+            line_upper = line.strip().upper()
+            
+            # Check for bidirectional operations first
+            for pattern in record_patterns['bidirectional']:
+                if re.search(pattern, line_upper, re.IGNORECASE):
+                    return 'INPUT_OUTPUT'
+            
+            # Check for input operations
+            for pattern in record_patterns['input']:
+                if re.search(pattern, line_upper, re.IGNORECASE):
+                    receives_data = True
+                    break
+                    
+            # Check for output operations  
+            for pattern in record_patterns['output']:
+                if re.search(pattern, line_upper, re.IGNORECASE):
+                    provides_data = True
+                    break
+        
+        # Determine final classification
+        if receives_data and provides_data:
+            return 'INPUT_OUTPUT'
+        elif receives_data:
+            return 'INPUT'
+        elif provides_data:
+            return 'OUTPUT'
+        else:
+            return 'STATIC'
+
+    def _get_record_usage_description(self, classification: str) -> str:
+        """Get description for record-level usage"""
+        descriptions = {
+            'INPUT': 'Record receives data as a complete unit (READ INTO, MOVE TO record)',
+            'OUTPUT': 'Record provides data as a complete unit (WRITE FROM, MOVE record TO)',
+            'INPUT_OUTPUT': 'Record used in bidirectional operations (REWRITE, read-modify-write patterns)',
+            'STATIC': 'Record defined but no whole-record operations detected'
+        }
+        return descriptions.get(classification, 'Unknown record usage pattern')
+
+    def _should_inherit_record_classification(self, field_analysis: Dict, record_classification: str) -> bool:
+        """
+        Determine if a field should inherit the record-level classification
+        """
+        total_field_operations = (
+            field_analysis['counts']['move_source'] +
+            field_analysis['counts']['move_target'] +
+            field_analysis['counts']['arithmetic'] +
+            field_analysis['counts']['conditional']
+        )
+        
+        return (total_field_operations <= 1 and record_classification != 'STATIC')
+
+    def _get_effective_field_classification(self, field_classification: str, record_classification: str) -> str:
+        """
+        Get the effective classification considering both field-level and record-level analysis
+        """
+        if field_classification in ['INPUT_OUTPUT', 'DERIVED']:
+            return field_classification
+        
+        if record_classification != 'STATIC' and field_classification in ['STATIC', 'REFERENCE']:
+            return f"{record_classification}_INHERITED"
+        
+        return field_classification
     def _generate_layout_summary(self, session_id: str, layout, parsed_data: Dict) -> Dict:
         """Generate LLM summary for record layout with friendly name"""
         try:

@@ -138,8 +138,12 @@ class DatabaseManager:
                 except OSError as e:
                     logger.error(f"Cannot remove lock file {lock_file}: {e}")
     
+    # Replace the entire initialize_database method in database_manager.py with this version:
+
+# Replace the entire initialize_database method in database_manager.py with this version:
+
     def initialize_database(self):
-        """Initialize database schema with complete field context support"""
+        """Initialize database schema with record-level classification support"""
         if self.init_executed:
             logger.debug("Database already initialized, skipping")
             return
@@ -195,7 +199,7 @@ class DatabaseManager:
                         )
                     ''')
                     
-                    # Component analysis with complete source storage
+                    # Component analysis
                     cursor.execute('''
                         CREATE TABLE component_analysis (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,7 +223,7 @@ class DatabaseManager:
                         )
                     ''')
                     
-                    # Derived components table (NEW)
+                    # Derived components
                     cursor.execute('''
                         CREATE TABLE derived_components (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,7 +243,7 @@ class DatabaseManager:
                         )
                     ''')
                     
-                    # Record layouts with enhanced source tracking
+                    # Record layouts with record-level classification
                     cursor.execute('''
                         CREATE TABLE record_layouts (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -253,12 +257,18 @@ class DatabaseManager:
                             source_code TEXT,
                             fields_count INTEGER DEFAULT 0,
                             business_purpose TEXT,
+                            
+                            -- NEW: Record-level classification columns
+                            record_classification TEXT DEFAULT 'STATIC',
+                            record_usage_description TEXT,
+                            has_whole_record_operations BOOLEAN DEFAULT 0,
+                            
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
                         )
                     ''')
                     
-                    # Enhanced field analysis with complete source code context
+                    # Field analysis with record classification context
                     cursor.execute('''
                         CREATE TABLE field_analysis_details (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -290,13 +300,18 @@ class DatabaseManager:
                             conditional_count INTEGER DEFAULT 0,
                             cics_count INTEGER DEFAULT 0,
                             
+                            -- NEW: Record-level classification context
+                            record_classification TEXT DEFAULT 'STATIC',
+                            inherited_from_record BOOLEAN DEFAULT 0,
+                            effective_classification TEXT DEFAULT 'UNKNOWN',
+                            
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id),
                             FOREIGN KEY (field_id) REFERENCES record_layouts(id)
                         )
                     ''')
                     
-                    # Enhanced field mappings
+                    # Field mappings (unchanged)
                     cursor.execute('''
                         CREATE TABLE field_mappings (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -315,18 +330,15 @@ class DatabaseManager:
                             derivation_logic TEXT,
                             programs_involved_json TEXT,
                             confidence_score REAL DEFAULT 0.0,
-                            
-                            -- Source code evidence
                             source_code_evidence_json TEXT,
                             actual_cobol_definition TEXT,
                             usage_patterns_json TEXT,
-                            
                             analysis_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
                         )
                     ''')
                     
-                    # Dependency relationships
+                    # Dependency relationships (unchanged)
                     cursor.execute('''
                         CREATE TABLE dependency_relationships (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -343,7 +355,7 @@ class DatabaseManager:
                         )
                     ''')
                     
-                    # Chat conversations
+                    # Chat conversations (unchanged)
                     cursor.execute('''
                         CREATE TABLE chat_conversations (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -370,7 +382,12 @@ class DatabaseManager:
                         'CREATE INDEX idx_chat_session_conv ON chat_conversations(session_id, conversation_id)',
                         'CREATE INDEX idx_component_session ON component_analysis(session_id, component_type)',
                         'CREATE INDEX idx_record_layouts_session ON record_layouts(session_id, program_name)',
-                        'CREATE INDEX idx_record_layouts_name ON record_layouts(layout_name, session_id)'
+                        'CREATE INDEX idx_record_layouts_name ON record_layouts(layout_name, session_id)',
+                        
+                        # NEW: Indexes for record classification
+                        'CREATE INDEX idx_record_layouts_classification ON record_layouts(record_classification, session_id)',
+                        'CREATE INDEX idx_field_record_classification ON field_analysis_details(record_classification, session_id)',
+                        'CREATE INDEX idx_field_effective_classification ON field_analysis_details(effective_classification, session_id)'
                     ]
 
                     for index_sql in indexes:
@@ -379,7 +396,7 @@ class DatabaseManager:
                         except Exception as idx_error:
                             logger.warning(f"Failed to create index: {index_sql[:50]}... Error: {idx_error}")
                     
-                    logger.info("Fresh database schema created successfully with enhanced field context support")
+                    logger.info("Database schema created successfully with record-level classification support")
                     self.init_executed = True
                     return
                     
@@ -767,41 +784,65 @@ class DatabaseManager:
             raise
 
     def _store_field_details_internal(self, session_id: str, field_data: Dict, 
-                                    program_name: str, layout_id: int, cursor):
-        """Internal method to store field details using existing cursor - SIMPLIFIED VERSION"""
+                                program_name: str, layout_id: int, cursor):
+        """Internal method to store field details with record classification context"""
         field_name = field_data.get('name', 'UNNAMED_FIELD')
         logger.debug(f"Storing field details: {field_name}")
         
         try:
-            # Validate and limit data lengths to prevent database issues
+            # Validate and limit data lengths
             insert_data = (
                 session_id, 
                 layout_id, 
-                field_name[:100],  # Limit field name length
+                field_name[:100],
+                field_data.get('friendly_name', field_name)[:100],
                 program_name[:100], 
+                field_data.get('layout_name', '')[:100],
                 field_data.get('operation_type', 'DEFINITION')[:50],
                 field_data.get('line_number', 0), 
-                str(field_data.get('code_snippet', ''))[:1000],  # Limit code snippet
+                str(field_data.get('code_snippet', ''))[:1000],
                 field_data.get('usage_type', 'UNKNOWN')[:50], 
                 field_data.get('source_field', '')[:100],
                 field_data.get('target_field', '')[:100], 
                 field_data.get('business_purpose', f"Field definition for {field_name}")[:500],
-                float(field_data.get('confidence', 0.8))
+                float(field_data.get('confidence', 0.8)),
+                
+                # Enhanced field data
+                field_data.get('definition_line_number', 0),
+                field_data.get('definition_code', '')[:500],
+                field_data.get('program_source_content', '')[:10000],  # Limit size
+                field_data.get('field_references_json', '[]')[:2000],
+                field_data.get('usage_summary_json', '{}')[:1000],
+                field_data.get('total_program_references', 0),
+                field_data.get('move_source_count', 0),
+                field_data.get('move_target_count', 0),
+                field_data.get('arithmetic_count', 0),
+                field_data.get('conditional_count', 0),
+                field_data.get('cics_count', 0),
+                
+                # NEW: Record-level classification fields
+                field_data.get('record_classification', 'STATIC')[:50],
+                field_data.get('inherited_from_record', False),
+                field_data.get('effective_classification', field_data.get('usage_type', 'UNKNOWN'))[:50]
             )
             
             cursor.execute('''
                 INSERT INTO field_analysis_details 
-                (session_id, field_id, field_name, program_name, operation_type,
-                line_number, code_snippet, usage_type, source_field, target_field,
-                business_purpose, analysis_confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (session_id, field_id, field_name, friendly_name, program_name, layout_name,
+                operation_type, line_number, code_snippet, usage_type, source_field, target_field,
+                business_purpose, analysis_confidence,
+                definition_line_number, definition_code, program_source_content,
+                field_references_json, usage_summary_json, total_program_references,
+                move_source_count, move_target_count, arithmetic_count, conditional_count, cics_count,
+                record_classification, inherited_from_record, effective_classification)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', insert_data)
             
             logger.debug(f"Successfully stored field details for: {field_name}")
             
         except Exception as e:
             logger.error(f"Error in _store_field_details_internal for field {field_name}: {str(e)}")
-            logger.error(f"Insert data: {insert_data}")
+            logger.error(f"Insert data length: {len(insert_data)}")
             raise
             
     def _generate_field_code_snippet(self, field_data: Dict) -> str:
