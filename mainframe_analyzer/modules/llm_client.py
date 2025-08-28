@@ -10,6 +10,7 @@ import logging
 from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import backoff
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +274,7 @@ class LLMClient:
             logger.warning(f"Error in JSON extraction fallback: {str(e)}")
         
         logger.warning(f"Could not extract JSON from LLM response. Content preview: {cleaned_content[:200]}...")
-        return None
+        return cleaned_content  # Return raw content if all else fails
     
     def call_with_structured_output(self, prompt: str, expected_structure: str = "json") -> Tuple[bool, Dict]:
         """
