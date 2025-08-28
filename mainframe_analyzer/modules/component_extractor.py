@@ -235,9 +235,9 @@ class ComponentExtractor:
                             'total_references': len(field.source_references) if hasattr(field, 'source_references') else 0,
                             
                             # Business analysis
-                            'usage_type': self._determine_field_usage_from_references(field),
+                            #'usage_type': self._determine_field_usage_from_references(field),
                             'business_purpose': self._generate_field_business_purpose(field),
-                            'source_field': self._extract_primary_source_field(field),
+                            #'source_field': self._extract_primary_source_field(field),
                             'confidence_score': 0.9,
                             # NEW: Record-level context
                             'record_classification': record_classification,
