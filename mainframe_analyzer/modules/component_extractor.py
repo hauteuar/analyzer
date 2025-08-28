@@ -1406,18 +1406,55 @@ File Content ({filename}):
             
             dependencies = []
             program_name = main_program['name']
+
+            # Helper: decide if a discovered target is valid as a dependency
+            def _is_valid_target(target_name: Optional[str], source_program: str) -> bool:
+                if not target_name:
+                    return False
+                t = str(target_name).strip()
+                if not t:
+                    return False
+
+                # Normalize for checks
+                t_up = t.upper()
+
+                # Ignore exact same-as-source targets
+                if t_up == str(source_program).upper():
+                    return False
+
+                # Ignore short or noisy tokens
+                if len(t_up) < 3:
+                    return False
+
+                # Ignore tokens made of punctuation/numbers only
+                if re.match(r'^[0-9\W_]+$', t_up):
+                    return False
+
+                # Common COBOL keywords and tokens that should not be treated as files/programs
+                IGNORE_KEYWORDS = {
+                    'VALUE', 'PIC', 'FUNCTION', 'SECTION', 'PARAGRAPH', 'MODE', 'USAGE', 'REDEFINES',
+                    'COPY', 'END', 'IF', 'ELSE', 'THEN', 'MOVE', 'READ', 'WRITE', 'OPEN', 'CLOSE'
+                }
+
+                # If the token is exactly a keyword or contains a keyword-only suffix like ' VALUE', ignore
+                tokens = re.split(r'\s+|[,;:\(\)]+', t_up)
+                # If any token is a sole-keyword that indicates a COBOL construct, ignore
+                if any(tok in IGNORE_KEYWORDS for tok in tokens if tok):
+                    return False
+
+                return True
             
             # Extract FILE dependencies (FD files)
             file_operations = main_program.get('file_operations', [])
             for file_op in file_operations:
                 file_name = file_op.get('file_name')
                 operation = file_op.get('operation', 'UNKNOWN')
-
-                if file_name:
+                if file_name and _is_valid_target(file_name, program_name):
                     # Determine relationship type based on operation
-                    if operation in ['READ', 'OPEN'] or 'INPUT' in file_name.upper():
+                    fn_up = str(file_name).upper()
+                    if operation in ['READ', 'OPEN'] or 'INPUT' in fn_up:
                         relationship_type = 'INPUT_FILE'
-                    elif operation in ['WRITE', 'REWRITE'] or 'OUTPUT' in file_name.upper():
+                    elif operation in ['WRITE', 'REWRITE'] or 'OUTPUT' in fn_up:
                         relationship_type = 'OUTPUT_FILE'
                     else:
                         relationship_type = 'FILE_ACCESS'
@@ -1438,7 +1475,7 @@ File Content ({filename}):
             # Extract CICS dependencies
             cics_operations = main_program.get('cics_operations', [])
             for cics_op in cics_operations:
-                if 'file_name' in cics_op:
+                if 'file_name' in cics_op and _is_valid_target(cics_op['file_name'], program_name):
                     dependencies.append({
                         'source_component': program_name,
                         'target_component': cics_op['file_name'],
@@ -1454,25 +1491,28 @@ File Content ({filename}):
             # Extract PROGRAM CALL dependencies
             program_calls = main_program.get('program_calls', [])
             for call in program_calls:
-                dependencies.append({
-                    'source_component': program_name,
-                    'target_component': call.get('program_name', 'Unknown'),
-                    'relationship_type': 'PROGRAM_CALL',
-                    'interface_type': 'COBOL',
-                    'confidence_score': 0.95,
-                    'analysis_details_json': json.dumps({
-                        'line_number': call.get('line_number', 0)
+                target_prog = call.get('program_name', 'Unknown')
+                if _is_valid_target(target_prog, program_name):
+                    dependencies.append({
+                        'source_component': program_name,
+                        'target_component': target_prog,
+                        'relationship_type': 'PROGRAM_CALL',
+                        'interface_type': 'COBOL',
+                        'confidence_score': 0.95,
+                        'analysis_details_json': json.dumps({
+                            'line_number': call.get('line_number', 0)
+                        })
                     })
-                })
             
             # Deduplicate dependencies by (source, target, relationship_type, interface_type)
             unique_deps = {}
             for dep in dependencies:
+                # Use normalized (case-insensitive) keys to prevent duplicates that differ only by case
                 key = (
-                    dep.get('source_component'),
-                    dep.get('target_component'),
-                    dep.get('relationship_type'),
-                    dep.get('interface_type', '')
+                    str(dep.get('source_component')).upper(),
+                    str(dep.get('target_component')).upper(),
+                    str(dep.get('relationship_type')).upper(),
+                    str(dep.get('interface_type', '')).upper()
                 )
                 # Keep the entry with highest confidence_score or merge analysis details
                 if key in unique_deps:
