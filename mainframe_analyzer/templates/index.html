@@ -3239,23 +3239,175 @@ function displayComponentsHierarchy(components) {
             document.body.insertAdjacentHTML('beforeend', modalContent);
         }
 
-        // Enhanced dashboard with component summaries
         async function loadDashboardSummaries() {
-            try {
-                const response = await fetch(`/api/components/${currentSessionId}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success) {
-                        displayComponentSummaries(data.components);
-                        displayDomainAnalysis(data.components);
-                        updateDashboardMetrics(data.components);
-                    }
-                }
-            } catch (error) {
-                console.error('Error loading dashboard summaries:', error);
+    try {
+        // Use the new endpoint that includes derived counts
+        const response = await fetch(`/api/components-with-derived/${currentSessionId}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                // Use the new function for component summaries with derived counts
+                displayComponentSummariesWithDerived(data.components);
+                // Keep your existing functions
+                displayDomainAnalysis(data.components);
+                updateDashboardMetrics(data.components);
             }
         }
+    } catch (error) {
+        console.error('Error loading dashboard summaries:', error);
+        
+        // Fallback to original endpoint if new one fails
+        try {
+            const fallbackResponse = await fetch(`/api/components/${currentSessionId}`);
+            if (fallbackResponse.ok) {
+                const fallbackData = await fallbackResponse.json();
+                if (fallbackData.success) {
+                    displayComponentSummaries(fallbackData.components);
+                    displayDomainAnalysis(fallbackData.components);
+                    updateDashboardMetrics(fallbackData.components);
+                }
+            }
+        } catch (fallbackError) {
+            console.error('Fallback also failed:', fallbackError);
+        }
+    }
+}
 
+function displayComponentSummariesWithDerived(components) {
+    const container = document.getElementById('componentSummaries');
+    container.innerHTML = '';
+
+    const programs = components.filter(c => c.component_type === 'PROGRAM');
+    
+    if (programs.length === 0) {
+        container.innerHTML = '<p class="text-muted">Upload COBOL files to see AI-generated business summaries</p>';
+        return;
+    }
+
+    programs.forEach(program => {
+        console.log('Processing program:', program.component_name);
+        console.log('Derived count from database:', program.derived_count);
+        
+        let businessPurpose = program.business_purpose || 'Analysis in progress...';
+        let complexityScore = program.complexity_score || 0;
+        let derivedCount = program.derived_count || 0; // Use the count from separate table
+        
+        // Try to get additional data from analysis_result_json if needed
+        if (program.analysis_result_json) {
+            try {
+                const analysisResult = JSON.parse(program.analysis_result_json);
+                if (analysisResult.llm_summary) {
+                    businessPurpose = analysisResult.llm_summary.business_purpose || businessPurpose;
+                    complexityScore = analysisResult.llm_summary.complexity_score || complexityScore;
+                }
+            } catch (e) {
+                console.warn('Could not parse analysis result for', program.component_name);
+            }
+        }
+        
+        const card = document.createElement('div');
+        card.className = 'component-summary-card';
+        
+        card.innerHTML = `
+            <div class="component-header">
+                <div>
+                    <div class="component-title">${program.component_name}</div>
+                    <div class="text-muted" style="font-size: 0.8rem;">${program.friendly_name || ''}</div>
+                </div>
+                <span class="component-type badge badge-primary">PROGRAM</span>
+            </div>
+            
+            <div class="business-purpose">${businessPurpose}</div>
+            
+            <div class="component-metrics">
+                <div class="metric">
+                    <span class="metric-value">${program.total_lines || 0}</span>
+                    <span class="metric-label">Lines</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-value">${(complexityScore * 100).toFixed(0)}%</span>
+                    <span class="metric-label">Complexity</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-value">${derivedCount}</span>
+                    <span class="metric-label">Derived</span>
+                </div>
+            </div>
+            
+            <div class="complexity-bar">
+                <div class="complexity-fill" style="width: ${complexityScore * 100}%"></div>
+            </div>
+            
+            ${derivedCount > 0 ? `<button class="btn btn-secondary btn-sm" onclick="showDerivedComponents('${program.component_name}')">View ${derivedCount} Derived Components</button>` : ''}
+        `;
+        
+        container.appendChild(card);
+    });
+}
+
+async function showDerivedComponents(parentComponent) {
+    try {
+        const response = await fetch(`/api/derived-components/${currentSessionId}?parent_component=${parentComponent}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                displayDerivedComponentsModal(parentComponent, data.derived_components);
+            }
+        }
+    } catch (error) {
+        console.error('Error loading derived components:', error);
+    }
+}
+
+function displayDerivedComponentsModal(parentComponent, derivedComponents) {
+    let html = `
+        <div class="modal" style="display: block;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>${parentComponent} - Derived Components (${derivedComponents.length})</h3>
+                    <button class="close" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Purpose</th>
+                                <th>Fields</th>
+                                <th>Lines</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+    `;
+    
+    derivedComponents.forEach(component => {
+        html += `
+            <tr>
+                <td><strong>${component.component_name}</strong><br><small>${component.friendly_name || ''}</small></td>
+                <td><span class="badge badge-primary">${component.component_type}</span></td>
+                <td>${component.business_purpose || 'N/A'}</td>
+                <td>${component.fields_count || 0}</td>
+                <td>${component.line_start}-${component.line_end}</td>
+            </tr>
+        `;
+    });
+    
+    html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeModal() {
+    const modals = document.querySelectorAll('.modal');
+    modals.forEach(modal => modal.remove());
+}
         // Display component summaries on dashboard
         function displayComponentSummaries(components) {
             const container = document.getElementById('componentSummaries');

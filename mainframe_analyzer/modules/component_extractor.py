@@ -52,63 +52,77 @@ class ComponentExtractor:
 
             for component in components:
                 try:
-                    # Create the analysis result with ALL the data
-                    component_data = {
+                    # Store main component (without derived_components in JSON)
+                    main_component_data = {
                         'name': component.get('name', 'UNKNOWN'),
                         'friendly_name': component.get('friendly_name', component.get('name', 'UNKNOWN')),
                         'type': component.get('type', 'UNKNOWN'),
                         'file_path': file_name,
-                        'content': file_content,  # Store original content
+                        'content': file_content,
                         'total_lines': component.get('total_lines', 0),
                         'executable_lines': component.get('executable_lines', 0),
                         'comment_lines': component.get('comment_lines', 0),
                         'total_fields': len(component.get('fields', [])),
-                        
-                        # CRITICAL: Preserve these fields
                         'business_purpose': component.get('business_purpose', ''),
                         'complexity_score': component.get('complexity_score', 0.5),
                         'llm_summary': component.get('llm_summary', {}),
-                        'derived_components': component.get('derived_components', []),  # This is being lost!
-                        'record_layouts': component.get('record_layouts', []),
-                        'fields': component.get('fields', []),
-                        
-                        # Other data
+                        # Don't include derived_components in main JSON
                         'divisions': component.get('divisions', []),
                         'file_operations': component.get('file_operations', []),
                         'program_calls': component.get('program_calls', []),
                         'copybooks': component.get('copybooks', []),
                         'cics_operations': component.get('cics_operations', []),
+                        'fields': component.get('fields', []),
                     }
                     
-                    # Debug log before storing
-                    logger.info(f"🔄 About to store {component_data['name']}: derived_components={len(component_data['derived_components'])}")
-                    
+                    # Store main component
                     self.db_manager.store_component_analysis(
                         session_id, 
-                        component_data['name'], 
-                        component_data['type'], 
+                        main_component_data['name'], 
+                        main_component_data['type'], 
                         file_name, 
-                        component_data  # Pass the complete component_data
+                        main_component_data
                     )
                     
-                    logger.info(f"✅ Stored component: {component_data['name']} with {len(component_data['derived_components'])} derived components")
+                    # Store derived components separately
+                    derived_components = component.get('derived_components', [])
+                    if derived_components:
+                        logger.info(f"Storing {len(derived_components)} derived components for {main_component_data['name']}")
+                        self.db_manager.store_derived_components(
+                            session_id, 
+                            main_component_data['name'], 
+                            derived_components
+                        )
+                    
+                    # Also store record layouts as derived components
+                    record_layouts = component.get('record_layouts', [])
+                    if record_layouts:
+                        layout_components = []
+                        for layout in record_layouts:
+                            layout_component = {
+                                'name': layout.get('name', 'UNKNOWN_LAYOUT'),
+                                'type': 'RECORD_LAYOUT',
+                                'friendly_name': layout.get('friendly_name', ''),
+                                'business_purpose': layout.get('business_purpose', ''),
+                                'line_start': layout.get('line_start', 0),
+                                'line_end': layout.get('line_end', 0),
+                                'source_code': layout.get('source_code', ''),
+                                'fields': layout.get('fields', [])
+                            }
+                            layout_components.append(layout_component)
+                        
+                        logger.info(f"Storing {len(layout_components)} record layouts for {main_component_data['name']}")
+                        self.db_manager.store_derived_components(
+                            session_id, 
+                            main_component_data['name'], 
+                            layout_components
+                        )
+                    
+                    logger.info(f"Successfully stored component: {main_component_data['name']}")
                     
                 except Exception as e:
-                    logger.error(f"❌ Failed to store component {component.get('name', 'UNKNOWN')}: {str(e)}")
+                    logger.error(f"Error storing component {component.get('name', 'UNKNOWN')}: {str(e)}")
                     continue
-            # Log component summary
-            if components:
-                main_components = [c for c in components if c.get('type') in ['PROGRAM', 'JCL', 'COPYBOOK']]
-                derived_components = [c for c in components if c.get('type') not in ['PROGRAM', 'JCL', 'COPYBOOK']]
-                
-                logger.info(f"📈 Component summary:")
-                logger.info(f"   • Main components: {len(main_components)}")
-                logger.info(f"   • Derived components: {len(derived_components)}")
-                
-                
-                for component in main_components:
-                    derived_count = len(component.get('derived_components', []))
-                    logger.info(f"   📦 {component['name']} → {derived_count} derived components")
             
             return components
             

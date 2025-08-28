@@ -335,7 +335,31 @@ class DatabaseManager:
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
                         )
                     ''')
+                    cursor.execute('''
+                        CREATE TABLE derived_components (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            parent_component TEXT NOT NULL,
+                            component_name TEXT NOT NULL,
+                            component_type TEXT NOT NULL,
+                            friendly_name TEXT,
+                            business_purpose TEXT,
+                            line_start INTEGER,
+                            line_end INTEGER,
+                            fields_count INTEGER DEFAULT 0,
+                            source_code TEXT,
+                            metadata_json TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
+                        )
+                    ''')
                     
+                    # Add index for performance
+                    cursor.execute('''
+                        CREATE INDEX idx_derived_components_parent 
+                        ON derived_components(session_id, parent_component)
+                    ''')
+
                     # Create performance indexes
                     indexes = [
                         'CREATE INDEX idx_field_mappings_target_file ON field_mappings(target_file_name, session_id)',
@@ -349,6 +373,8 @@ class DatabaseManager:
                         'CREATE INDEX idx_record_layouts_name ON record_layouts(layout_name, session_id)'
                     ]
                     
+
+
                     for index_sql in indexes:
                         cursor.execute(index_sql)
                     
@@ -361,6 +387,102 @@ class DatabaseManager:
                 raise
         
         raise sqlite3.OperationalError("Failed to initialize database after multiple attempts")
+
+
+    def store_derived_components(self, session_id: str, parent_component: str, derived_components: List[Dict]):
+        """Store derived components in separate table"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Clear existing derived components for this parent
+                cursor.execute('''
+                    DELETE FROM derived_components 
+                    WHERE session_id = ? AND parent_component = ?
+                ''', (session_id, parent_component))
+                
+                logger.info(f"Storing {len(derived_components)} derived components for {parent_component}")
+                
+                # Insert new derived components
+                for component in derived_components:
+                    cursor.execute('''
+                        INSERT INTO derived_components 
+                        (session_id, parent_component, component_name, component_type, 
+                        friendly_name, business_purpose, line_start, line_end, 
+                        fields_count, source_code, metadata_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        session_id, 
+                        parent_component, 
+                        component.get('name', ''),
+                        component.get('type', ''),
+                        component.get('friendly_name', ''),
+                        component.get('business_purpose', ''),
+                        component.get('line_start', 0),
+                        component.get('line_end', 0),
+                        len(component.get('fields', [])),
+                        component.get('source_code', ''),
+                        json.dumps(component, default=str)
+                    ))
+                
+                logger.info(f"Successfully stored {len(derived_components)} derived components for {parent_component}")
+                
+        except Exception as e:
+            logger.error(f"Error storing derived components for {parent_component}: {str(e)}")
+            raise
+
+    def get_derived_components(self, session_id: str, parent_component: str = None) -> List[Dict]:
+        """Get derived components from separate table"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if parent_component:
+                    cursor.execute('''
+                        SELECT * FROM derived_components 
+                        WHERE session_id = ? AND parent_component = ?
+                        ORDER BY component_type, component_name
+                    ''', (session_id, parent_component))
+                else:
+                    cursor.execute('''
+                        SELECT * FROM derived_components 
+                        WHERE session_id = ?
+                        ORDER BY parent_component, component_type, component_name
+                    ''', (session_id,))
+                
+                components = []
+                for row in cursor.fetchall():
+                    row_dict = dict(row)
+                    # Parse metadata if available
+                    if row_dict['metadata_json']:
+                        try:
+                            metadata = json.loads(row_dict['metadata_json'])
+                            row_dict['metadata'] = metadata
+                        except:
+                            pass
+                    components.append(row_dict)
+                
+                return components
+                
+        except Exception as e:
+            logger.error(f"Error getting derived components: {str(e)}")
+            return []
+
+    def get_derived_components_count(self, session_id: str, parent_component: str) -> int:
+        """Get count of derived components for a parent"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT COUNT(*) FROM derived_components 
+                    WHERE session_id = ? AND parent_component = ?
+                ''', (session_id, parent_component))
+                
+                return cursor.fetchone()[0]
+        except Exception as e:
+            logger.error(f"Error getting derived components count: {str(e)}")
+            return 0
+
 
     def _analyze_field_in_program_source(self, field_name: str, program_source: str, program_name: str) -> Dict:
         """Live analysis of field usage in program source code"""

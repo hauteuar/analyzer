@@ -398,7 +398,49 @@ def debug_storage(session_id):
             })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/derived-components/<session_id>')
+def get_derived_components_api(session_id):
+    """Get derived components for session"""
+    parent_component = request.args.get('parent_component')
     
+    try:
+        derived_components = analyzer.db_manager.get_derived_components(session_id, parent_component)
+        return jsonify({
+            'success': True,
+            'derived_components': derived_components,
+            'count': len(derived_components)
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/components-with-derived/<session_id>')
+def get_components_with_derived_counts(session_id):
+    """Get components with derived component counts"""
+    try:
+        # Get main components
+        components = analyzer.db_manager.get_session_components(session_id)
+        
+        # Add derived counts to each component
+        for component in components:
+            derived_count = analyzer.db_manager.get_derived_components_count(
+                session_id, component['component_name']
+            )
+            component['derived_count'] = derived_count
+        
+        return jsonify({
+            'success': True,
+            'components': components
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
 @app.route('/api/debug-components/<session_id>')
 def debug_components(session_id):
     """Debug endpoint to see raw component data"""
