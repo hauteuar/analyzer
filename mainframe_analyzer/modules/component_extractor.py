@@ -1412,7 +1412,7 @@ File Content ({filename}):
             for file_op in file_operations:
                 file_name = file_op.get('file_name')
                 operation = file_op.get('operation', 'UNKNOWN')
-                
+
                 if file_name:
                     # Determine relationship type based on operation
                     if operation in ['READ', 'OPEN'] or 'INPUT' in file_name.upper():
@@ -1421,7 +1421,7 @@ File Content ({filename}):
                         relationship_type = 'OUTPUT_FILE'
                     else:
                         relationship_type = 'FILE_ACCESS'
-                    
+
                     dependencies.append({
                         'source_component': program_name,
                         'target_component': file_name,
@@ -1465,23 +1465,66 @@ File Content ({filename}):
                     })
                 })
             
-            # Store dependencies
-            if dependencies:
+            # Deduplicate dependencies by (source, target, relationship_type, interface_type)
+            unique_deps = {}
+            for dep in dependencies:
+                key = (
+                    dep.get('source_component'),
+                    dep.get('target_component'),
+                    dep.get('relationship_type'),
+                    dep.get('interface_type', '')
+                )
+                # Keep the entry with highest confidence_score or merge analysis details
+                if key in unique_deps:
+                    existing = unique_deps[key]
+                    # Prefer higher confidence and merge analysis JSONs conservatively
+                    if dep.get('confidence_score', 0) > existing.get('confidence_score', 0):
+                        existing['confidence_score'] = dep.get('confidence_score')
+                    # Merge analysis details by appending if different
+                    if dep.get('analysis_details_json') and dep.get('analysis_details_json') != existing.get('analysis_details_json'):
+                        merged = existing.get('analysis_details_json', '') + '\n' + dep.get('analysis_details_json')
+                        existing['analysis_details_json'] = merged
+                else:
+                    unique_deps[key] = dict(dep)
+
+            # Store unique dependencies, updating existing DB rows if present to avoid duplicates
+            if unique_deps:
                 with self.db_manager.get_connection() as conn:
                     cursor = conn.cursor()
-                    for dep in dependencies:
-                        cursor.execute('''
-                            INSERT OR REPLACE INTO dependency_relationships 
-                            (session_id, source_component, target_component, relationship_type,
-                            interface_type, confidence_score, analysis_details_json)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        ''', (
-                            session_id, dep['source_component'], dep['target_component'],
-                            dep['relationship_type'], dep['interface_type'],
-                            dep['confidence_score'], dep['analysis_details_json']
-                        ))
-                
-                logger.info(f"Stored {len(dependencies)} dependencies for {program_name}")
+                    stored_count = 0
+                    for dep in unique_deps.values():
+                        try:
+                            cursor.execute('''
+                                SELECT id, confidence_score FROM dependency_relationships
+                                WHERE session_id = ? AND source_component = ? AND target_component = ? AND relationship_type = ?
+                            ''', (session_id, dep['source_component'], dep['target_component'], dep['relationship_type']))
+                            row = cursor.fetchone()
+                            if row:
+                                # Update existing row: keep the higher confidence and update analysis details
+                                existing_id = row[0]
+                                existing_conf = row[1] or 0
+                                new_conf = max(existing_conf, dep.get('confidence_score', 0))
+                                cursor.execute('''
+                                    UPDATE dependency_relationships
+                                    SET confidence_score = ?, analysis_details_json = ?, source_code_evidence = ?, created_at = CURRENT_TIMESTAMP
+                                    WHERE id = ?
+                                ''', (new_conf, dep.get('analysis_details_json'), dep.get('source_code_evidence', ''), existing_id))
+                            else:
+                                cursor.execute('''
+                                    INSERT INTO dependency_relationships 
+                                    (session_id, source_component, target_component, relationship_type,
+                                    interface_type, confidence_score, analysis_details_json, source_code_evidence)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (
+                                    session_id, dep['source_component'], dep['target_component'], dep['relationship_type'],
+                                    dep.get('interface_type'), dep.get('confidence_score', 0.0), dep.get('analysis_details_json'), dep.get('source_code_evidence', '')
+                                ))
+                            stored_count += 1
+                        except Exception as ins_e:
+                            logger.error(f"Error storing dependency {dep}: {ins_e}")
+                            continue
+
+                logger.info(f"Stored/updated {stored_count} unique dependencies for {program_name}")
             
         except Exception as e:
             logger.error(f"Error extracting dependencies: {str(e)}")
