@@ -162,48 +162,343 @@ class COBOLParser:
         
         return friendly.strip()
 
-    def _is_valid_filename(self, name: str) -> bool:
-        """Check if a name is a valid filename (not a COBOL keyword)"""
+    def _is_valid_cobol_filename(self, name: str) -> bool:
+        """Enhanced validation for COBOL file names"""
         if not name or len(name) < 3:
             return False
-            
-        name_upper = name.upper()
         
-        # Check against invalid patterns
-        if name_upper in self.invalid_file_patterns:
-            return False
-            
-        # Check for obvious non-filenames
-        if re.match(r'^[X9SV\(\),\.]+$', name_upper):  # PIC clause patterns
-            return False
-            
-        if re.match(r'^\d+$', name):  # Pure numbers
-            return False
-            
+        name_upper = name.upper().strip()
+        
         # Must start with letter
         if not re.match(r'^[A-Z]', name_upper):
             return False
-            
+        
+        # Must be reasonable length (3-30 characters)
+        if len(name_upper) < 3 or len(name_upper) > 30:
+            return False
+        
+        # Must contain only valid COBOL identifier characters
+        if not re.match(r'^[A-Z0-9\-]+$', name_upper):
+            return False
+        
+        # Cannot start or end with hyphen
+        if name_upper.startswith('-') or name_upper.endswith('-'):
+            return False
+        
+        # Cannot be all numbers
+        if re.match(r'^\d+$', name_upper):
+            return False
+        
+        # Exclude obvious COBOL keywords and constructs
+        invalid_patterns = {
+            'PIC', 'PICTURE', 'VALUE', 'USAGE', 'OCCURS', 'REDEFINES',
+            'COMP', 'COMP-3', 'COMP-1', 'COMP-2', 'BINARY', 'DISPLAY', 'PACKED-DECIMAL',
+            'IF', 'ELSE', 'END-IF', 'MOVE', 'COMPUTE', 'PERFORM', 'UNTIL', 'VARYING',
+            'THRU', 'THROUGH', 'TIMES', 'GIVING', 'TO', 'FROM', 'INTO', 'BY',
+            'WHEN', 'EVALUATE', 'END-EVALUATE', 'STRING', 'UNSTRING', 'END-STRING',
+            'ACCEPT', 'DISPLAY', 'STOP', 'RUN', 'GOBACK', 'EXIT',
+            # Common PIC patterns
+            'X', 'XX', 'XXX', 'XXXX', '9', '99', '999', '9999', 'S9', 'V9',
+            # Common prefixes that are usually not files
+            'WS-', 'LS-', 'FD-', 'WK-', 'TMP-', 'CTR-', 'IDX-', 'FLG-', 'SW-'
+        }
+        
+        # Check against invalid patterns
+        if name_upper in invalid_patterns:
+            return False
+        
+        # Check for PIC clause patterns
+        if re.match(r'^[X9SV\(\),\.]+$', name_upper):
+            return False
+        
+        # Check for common non-file patterns
+        if re.match(r'^(WS|LS|FD|WK|TMP|CTR|IDX|FLG|SW)-', name_upper):
+            return False
+        
         return True
 
-    def extract_file_operations(self, lines: List[str]) -> List[Dict]:
-        """Extract file operations with deduplication and proper filtering"""
+    def _classify_file_io_direction(self, file_operations: List[Dict]) -> Dict[str, str]:
+        """Classify files as INPUT, OUTPUT, or INPUT_OUTPUT based on all operations"""
+        file_classifications = {}
+        
+        for op in file_operations:
+            file_name = op.get('file_name')
+            io_direction = op.get('io_direction', 'UNKNOWN')
+            
+            if not file_name or io_direction in ['DECLARATION', 'NEUTRAL']:
+                continue
+            
+            if file_name not in file_classifications:
+                file_classifications[file_name] = set()
+            
+            file_classifications[file_name].add(io_direction)
+        
+        # Determine final classification
+        final_classifications = {}
+        for file_name, directions in file_classifications.items():
+            if 'INPUT' in directions and 'OUTPUT' in directions:
+                final_classifications[file_name] = 'INPUT_OUTPUT'
+            elif 'INPUT' in directions:
+                final_classifications[file_name] = 'INPUT'
+            elif 'OUTPUT' in directions:
+                final_classifications[file_name] = 'OUTPUT'
+            else:
+                final_classifications[file_name] = 'UNKNOWN'
+        
+        return final_classifications
+
+    def extract_enhanced_program_calls(self, lines: List[str]) -> List[Dict]:
+        """Extract all types of program calls including DB2 and dynamic calls"""
         operations = []
-        seen_operations = set()  # For deduplication
+        seen_operations = set()
+        
+        for i, line in enumerate(lines):
+            program_area = self._extract_program_area(line)
+            if not program_area or program_area.startswith('*'):
+                continue
+            
+            program_upper = program_area.upper().strip()
+            
+            # Static CALL statements
+            call_matches = re.findall(r'CALL\s+[\'"]([A-Z0-9\-]{3,})[\'"]', program_upper)
+            for program_name in call_matches:
+                if self._is_valid_cobol_filename(program_name):
+                    op_key = f"CALL_{program_name}"
+                    if op_key not in seen_operations:
+                        seen_operations.add(op_key)
+                        operations.append({
+                            'operation': 'CALL',
+                            'program_name': program_name,
+                            'call_type': 'STATIC',
+                            'friendly_name': f"Call to {self.generate_friendly_name(program_name, 'Program')}",
+                            'line_number': i + 1,
+                            'line_content': program_area.strip(),
+                            'relationship_type': 'PROGRAM_CALL'
+                        })
+            
+            # Dynamic CALL statements
+            dynamic_calls = re.findall(r'CALL\s+([A-Z0-9\-]{3,})\s+(?:USING|$)', program_upper)
+            for variable_name in dynamic_calls:
+                if self._is_valid_cobol_filename(variable_name) and variable_name not in call_matches:
+                    op_key = f"CALL_DYNAMIC_{variable_name}"
+                    if op_key not in seen_operations:
+                        seen_operations.add(op_key)
+                        operations.append({
+                            'operation': 'CALL',
+                            'program_name': variable_name,
+                            'call_type': 'DYNAMIC',
+                            'friendly_name': f"Dynamic call via {variable_name}",
+                            'line_number': i + 1,
+                            'line_content': program_area.strip(),
+                            'relationship_type': 'DYNAMIC_PROGRAM_CALL'
+                        })
+            
+            # CICS program control operations
+            cics_program_ops = [
+                (r'EXEC\s+CICS\s+LINK\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS_LINK'),
+                (r'EXEC\s+CICS\s+XCTL\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS_XCTL'),
+                (r'EXEC\s+CICS\s+START\s+.*TRANSID\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS_START_TRANSACTION')
+            ]
+            
+            for pattern, op_type in cics_program_ops:
+                matches = re.findall(pattern, program_upper)
+                for program_name in matches:
+                    if self._is_valid_cobol_filename(program_name):
+                        op_key = f"{op_type}_{program_name}"
+                        if op_key not in seen_operations:
+                            seen_operations.add(op_key)
+                            operations.append({
+                                'operation': op_type,
+                                'program_name': program_name,
+                                'call_type': 'CICS',
+                                'friendly_name': f"{op_type.replace('_', ' ')} - {self.generate_friendly_name(program_name, 'Program')}",
+                                'line_number': i + 1,
+                                'line_content': program_area.strip(),
+                                'relationship_type': op_type
+                            })
+            
+            # PERFORM external calls (subroutines)
+            perform_matches = re.findall(r'PERFORM\s+([A-Z0-9\-]{3,})(?:\s+THRU\s+([A-Z0-9\-]{3,}))?', program_upper)
+            for match in perform_matches:
+                routine_name = match[0]
+                thru_routine = match[1] if len(match) > 1 and match[1] else None
+                
+                # Only consider as external if it looks like external routine
+                if self._looks_like_external_routine(routine_name):
+                    op_key = f"PERFORM_{routine_name}"
+                    if op_key not in seen_operations:
+                        seen_operations.add(op_key)
+                        operations.append({
+                            'operation': 'PERFORM',
+                            'program_name': routine_name,
+                            'thru_routine': thru_routine,
+                            'call_type': 'INTERNAL_EXTERNAL',
+                            'friendly_name': f"Perform {self.generate_friendly_name(routine_name, 'Routine')}",
+                            'line_number': i + 1,
+                            'line_content': program_area.strip(),
+                            'relationship_type': 'INTERNAL_CALL'
+                        })
+        
+        return operations
+
+    def extract_db2_operations(self, lines: List[str]) -> List[Dict]:
+        """Extract DB2 SQL operations and table dependencies"""
+        operations = []
+        seen_operations = set()
+        
+        for i, line in enumerate(lines):
+            program_area = self._extract_program_area(line)
+            if not program_area or program_area.startswith('*'):
+                continue
+            
+            program_upper = program_area.upper().strip()
+            
+            # Multi-line EXEC SQL handling
+            if 'EXEC SQL' in program_upper:
+                sql_statement = self._extract_complete_sql_statement(lines, i)
+                if sql_statement:
+                    db2_ops = self._parse_db2_statement(sql_statement, i + 1)
+                    for db2_op in db2_ops:
+                        op_key = f"DB2_{db2_op['operation']}_{db2_op.get('table_name', 'NOTABLE')}_{i}"
+                        if op_key not in seen_operations:
+                            seen_operations.add(op_key)
+                            operations.append(db2_op)
+        
+        return operations
+
+    def _extract_complete_sql_statement(self, lines: List[str], start_line: int) -> str:
+        """Extract complete SQL statement handling multi-line"""
+        sql_statement = ""
+        
+        for i in range(start_line, min(len(lines), start_line + 15)):  # Look ahead max 15 lines
+            program_area = self._extract_program_area(lines[i])
+            if not program_area:
+                continue
+            
+            sql_statement += " " + program_area.strip()
+            
+            # Check if SQL statement is complete
+            if 'END-EXEC' in sql_statement.upper():
+                break
+        
+        return sql_statement.strip()
+
+    def _parse_db2_statement(self, sql_statement: str, line_number: int) -> List[Dict]:
+        """Parse DB2 SQL statement and extract table dependencies"""
+        operations = []
+        sql_upper = sql_statement.upper()
+        
+        # DB2 table operation patterns with I/O classification
+        db2_patterns = [
+            # INPUT operations (read data)
+            (r'EXEC\s+SQL\s+SELECT\s+.*\s+FROM\s+([A-Z0-9_\.]{3,})(?:\s|,|$)', 'DB2 SELECT', 'INPUT'),
+            (r'EXEC\s+SQL\s+FETCH\s+.*\s+FROM\s+([A-Z0-9_\.]{3,})', 'DB2 FETCH', 'INPUT'),
+            
+            # OUTPUT operations (modify data)
+            (r'EXEC\s+SQL\s+INSERT\s+INTO\s+([A-Z0-9_\.]{3,})', 'DB2 INSERT', 'OUTPUT'),
+            (r'EXEC\s+SQL\s+UPDATE\s+([A-Z0-9_\.]{3,})\s+SET', 'DB2 UPDATE', 'OUTPUT'),
+            (r'EXEC\s+SQL\s+DELETE\s+FROM\s+([A-Z0-9_\.]{3,})', 'DB2 DELETE', 'OUTPUT'),
+            
+            # Control operations
+            (r'EXEC\s+SQL\s+DECLARE\s+([A-Z0-9_\.]{3,})\s+CURSOR', 'DB2 DECLARE CURSOR', 'CONTROL'),
+            (r'EXEC\s+SQL\s+OPEN\s+([A-Z0-9_\.]{3,})', 'DB2 OPEN CURSOR', 'CONTROL'),
+            (r'EXEC\s+SQL\s+CLOSE\s+([A-Z0-9_\.]{3,})', 'DB2 CLOSE CURSOR', 'CONTROL'),
+            
+            # DDL operations
+            (r'EXEC\s+SQL\s+CREATE\s+TABLE\s+([A-Z0-9_\.]{3,})', 'DB2 CREATE TABLE', 'DDL'),
+            (r'EXEC\s+SQL\s+DROP\s+TABLE\s+([A-Z0-9_\.]{3,})', 'DB2 DROP TABLE', 'DDL'),
+            (r'EXEC\s+SQL\s+ALTER\s+TABLE\s+([A-Z0-9_\.]{3,})', 'DB2 ALTER TABLE', 'DDL')
+        ]
+        
+        for pattern, operation, io_direction in db2_patterns:
+            matches = re.findall(pattern, sql_upper)
+            for table_name in matches:
+                # Clean up table name (remove schema if present)
+                clean_table = table_name.split('.')[-1]  # Take last part after dot
+                
+                if self._is_valid_db2_table_name(clean_table):
+                    operations.append({
+                        'operation': operation,
+                        'table_name': clean_table,
+                        'full_table_name': table_name,  # Keep original with schema
+                        'friendly_name': f"{operation} - {self.generate_friendly_name(clean_table, 'Table')}",
+                        'line_number': line_number,
+                        'line_content': sql_statement.strip()[:150],  # Truncate for display
+                        'database_type': 'DB2',
+                        'io_direction': io_direction,
+                        'confidence_score': 0.95
+                    })
+        
+        return operations
+
+    def _looks_like_external_routine(self, routine_name: str) -> bool:
+        """Determine if PERFORM target looks like external routine"""
+        name_upper = routine_name.upper()
+        
+        # Patterns that suggest external routines
+        external_patterns = [
+            r'^[A-Z]{3,8}\d{2,4}$',  # Pattern like ABC1234
+            r'^[A-Z]+\-[A-Z]+$',     # Pattern like UTIL-ROUTINE
+            r'ROUTINE$',             # Ends with ROUTINE
+            r'SUBPGM$',              # Ends with SUBPGM
+            r'MODULE$'               # Ends with MODULE
+        ]
+        
+        for pattern in external_patterns:
+            if re.match(pattern, name_upper):
+                return True
+        
+        # Also check if it's not obviously internal
+        internal_indicators = ['MAIN-', 'PROCESS-', 'INIT-', 'END-', 'EXIT-']
+        if any(name_upper.startswith(indicator) for indicator in internal_indicators):
+            return False
+        
+        return len(name_upper) >= 6  # Assume longer names are more likely external
+
+    def _is_valid_db2_table_name(self, table_name: str) -> bool:
+        """Validate DB2 table name"""
+        if not table_name or len(table_name) < 3 or len(table_name) > 30:
+            return False
+        
+        table_upper = table_name.upper()
+        
+        # Must start with letter or @, #, $
+        if not re.match(r'^[A-Z@#$]', table_upper):
+            return False
+        
+        # Valid DB2 identifier characters
+        if not re.match(r'^[A-Z0-9@#$_]+$', table_upper):
+            return False
+        
+        # Exclude obvious non-table patterns
+        excluded_patterns = {
+            'SQLCODE', 'SQLSTATE', 'SQLERRD', 'SQLWARN', 'SQLEXT',
+            'CURSOR', 'STMT', 'SQLDA', 'DECLARE', 'PREPARE'
+        }
+        
+        if table_upper in excluded_patterns:
+            return False
+        
+        return True
+    def extract_file_operations(self, lines: List[str]) -> List[Dict]:
+        """Extract file operations with proper COBOL column handling and deduplication"""
+        operations = []
+        seen_operations = set()
         
         logger.info(f"Extracting file operations from {len(lines)} lines")
         
         for i, line in enumerate(lines):
-            line_upper = line.upper().strip()
-            
-            # Skip comments and empty lines
-            if not line_upper or line_upper.startswith('*'):
+            # Extract only the COBOL program area (columns 8-72)
+            program_area = self._extract_program_area(line)
+            if not program_area or program_area.startswith('*'):
                 continue
             
-            # FD (File Description) entries
-            fd_matches = self.fd_pattern.findall(line_upper)
+            program_upper = program_area.upper().strip()
+            
+            # FD (File Description) entries - only in DATA DIVISION
+            fd_matches = self.fd_pattern.findall(program_upper)
             for file_name in fd_matches:
-                if self._is_valid_filename(file_name):
+                if self._is_valid_cobol_filename(file_name):
                     op_key = f"FD_{file_name}"
                     if op_key not in seen_operations:
                         seen_operations.add(op_key)
@@ -212,14 +507,15 @@ class COBOLParser:
                             'file_name': file_name,
                             'friendly_name': self.generate_friendly_name(file_name, 'File'),
                             'line_number': i + 1,
-                            'line_content': line.strip(),
-                            'file_type': 'FD_FILE'
+                            'line_content': program_area.strip(),
+                            'file_type': 'FD_FILE',
+                            'io_direction': 'DECLARATION'
                         })
             
-            # SELECT statements
-            select_matches = self.select_pattern.findall(line_upper)
+            # SELECT statements - determine I/O direction from OPEN statements
+            select_matches = self.select_pattern.findall(program_upper)
             for logical_name, physical_name in select_matches:
-                if self._is_valid_filename(logical_name):
+                if self._is_valid_cobol_filename(logical_name):
                     op_key = f"SELECT_{logical_name}"
                     if op_key not in seen_operations:
                         seen_operations.add(op_key)
@@ -229,14 +525,15 @@ class COBOLParser:
                             'physical_name': physical_name,
                             'friendly_name': self.generate_friendly_name(logical_name, 'File'),
                             'line_number': i + 1,
-                            'line_content': line.strip(),
-                            'file_type': 'SELECT_FILE'
+                            'line_content': program_area.strip(),
+                            'file_type': 'SELECT_FILE',
+                            'io_direction': 'DECLARATION'
                         })
             
-            # READ/WRITE/OPEN/CLOSE operations
-            file_op_matches = self.file_op_pattern.findall(line_upper)
-            for operation, file_name in file_op_matches:
-                if self._is_valid_filename(file_name):
+            # File operations with I/O direction analysis
+            file_op_matches = self._extract_file_operations_with_direction(program_upper)
+            for operation, file_name, io_direction in file_op_matches:
+                if self._is_valid_cobol_filename(file_name):
                     op_key = f"{operation}_{file_name}"
                     if op_key not in seen_operations:
                         seen_operations.add(op_key)
@@ -245,113 +542,164 @@ class COBOLParser:
                             'file_name': file_name,
                             'friendly_name': self.generate_friendly_name(file_name, 'File'),
                             'line_number': i + 1,
-                            'line_content': line.strip(),
-                            'file_type': 'PROCEDURAL_FILE'
+                            'line_content': program_area.strip(),
+                            'file_type': 'PROCEDURAL_FILE',
+                            'io_direction': io_direction
                         })
         
         logger.info(f"Found {len(operations)} unique file operations")
         return operations
 
     def extract_cics_operations(self, lines: List[str]) -> List[Dict]:
-        """Extract CICS operations with deduplication and proper filtering"""
+        """Extract CICS operations with proper I/O classification"""
         operations = []
         seen_operations = set()
         
-        # Enhanced CICS patterns
-        cics_patterns = {
-            'READ': r'EXEC\s+CICS\s+READ\s+(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)',
-            'WRITE': r'EXEC\s+CICS\s+WRITE\s+(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)',
-            'REWRITE': r'EXEC\s+CICS\s+REWRITE\s+(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)',
-            'DELETE': r'EXEC\s+CICS\s+DELETE\s+(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)',
-            'SEND': r'EXEC\s+CICS\s+SEND\s+(?:MAP|TEXT)',
-            'RECEIVE': r'EXEC\s+CICS\s+RECEIVE\s+(?:MAP|INTO)',
-            'START': r'EXEC\s+CICS\s+START\s+PROGRAM',
-            'LINK': r'EXEC\s+CICS\s+LINK\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)',
-            'XCTL': r'EXEC\s+CICS\s+XCTL\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)',
-            'RETURN': r'EXEC\s+CICS\s+RETURN'
-        }
-        
         for i, line in enumerate(lines):
-            line_upper = line.upper().strip()
-            
-            # Skip comments
-            if not line_upper or line_upper.startswith('*'):
+            # Extract only the COBOL program area (columns 8-72)
+            program_area = self._extract_program_area(line)
+            if not program_area or program_area.startswith('*'):
                 continue
-                
-            for operation, pattern in cics_patterns.items():
-                matches = re.findall(pattern, line_upper)
-                
-                if re.search(pattern, line_upper):
-                    operation_info = {
-                        'operation': f"CICS {operation}",
-                        'line_number': i + 1,
-                        'line_content': line.strip(),
-                        'friendly_name': f"CICS {operation.title()} Operation"
-                    }
-                    
-                    # Extract file/program names for operations with parameters
-                    if matches and operation in ['READ', 'WRITE', 'REWRITE', 'DELETE']:
-                        file_name = matches[0]
-                        if self._is_valid_filename(file_name):
-                            op_key = f"CICS_{operation}_{file_name}"
-                            if op_key not in seen_operations:
-                                seen_operations.add(op_key)
-                                operation_info['file_name'] = file_name
-                                operation_info['friendly_name'] = f"CICS {operation.title()} - {self.generate_friendly_name(file_name, 'File')}"
-                                operation_info['file_type'] = 'CICS_FILE'
-                                
-                                if operation == 'READ':
-                                    operation_info['operation_type'] = 'INPUT'
-                                elif operation in ['WRITE', 'REWRITE']:
-                                    operation_info['operation_type'] = 'OUTPUT'
-                                else:
-                                    operation_info['operation_type'] = 'UPDATE'
-                                
-                                operations.append(operation_info)
-                    
-                    elif matches and operation in ['LINK', 'XCTL']:
-                        program_name = matches[0]
-                        if self._is_valid_filename(program_name):
-                            op_key = f"CICS_{operation}_{program_name}"
-                            if op_key not in seen_operations:
-                                seen_operations.add(op_key)
-                                operation_info['program_name'] = program_name
-                                operation_info['friendly_name'] = f"CICS {operation} - {self.generate_friendly_name(program_name, 'Program')}"
-                                operations.append(operation_info)
-                    
-                    elif operation in ['SEND', 'RECEIVE', 'START', 'RETURN']:
-                        op_key = f"CICS_{operation}_{i}"  # Use line number for uniqueness
+            
+            program_upper = program_area.upper().strip()
+            
+            # Multi-line CICS command handling
+            if 'EXEC CICS' in program_upper:
+                cics_command = self._extract_complete_cics_command(lines, i)
+                if cics_command:
+                    cics_ops = self._parse_cics_command(cics_command, i + 1)
+                    for cics_op in cics_ops:
+                        op_key = f"CICS_{cics_op['operation']}_{cics_op.get('file_name', 'NOFILE')}_{i}"
                         if op_key not in seen_operations:
                             seen_operations.add(op_key)
-                            operations.append(operation_info)
+                            operations.append(cics_op)
         
         logger.info(f"Found {len(operations)} unique CICS operations")
         return operations
 
-    def extract_program_calls(self, lines: List[str]) -> List[Dict]:
-        """Extract program calls with deduplication"""
-        calls = []
-        seen_calls = set()
+    def _extract_program_area(self, line: str) -> str:
+        """Extract COBOL program area (columns 8-72), excluding sequence and identification areas"""
+        if len(line) < 8:
+            return ""
         
-        for i, line in enumerate(lines):
-            # Skip comments
-            if line.strip().startswith('*'):
+        # Extract columns 8-72 (COBOL program area)
+        if len(line) <= 72:
+            program_area = line[7:]  # From column 8 to end
+        else:
+            program_area = line[7:72]  # Columns 8-72 only
+        
+        return program_area
+
+    def _extract_file_operations_with_direction(self, program_line: str) -> List[tuple]:
+        """Extract file operations and determine I/O direction"""
+        operations = []
+        
+        # Enhanced patterns with I/O direction detection
+        patterns = [
+            # OPEN operations with direction
+            (r'OPEN\s+INPUT\s+([A-Z][A-Z0-9\-]{2,})', 'OPEN', 'INPUT'),
+            (r'OPEN\s+OUTPUT\s+([A-Z][A-Z0-9\-]{2,})', 'OPEN', 'OUTPUT'),
+            (r'OPEN\s+I-O\s+([A-Z][A-Z0-9\-]{2,})', 'OPEN', 'INPUT_OUTPUT'),
+            (r'OPEN\s+EXTEND\s+([A-Z][A-Z0-9\-]{2,})', 'OPEN', 'OUTPUT'),
+            
+            # READ operations (always INPUT)
+            (r'READ\s+([A-Z][A-Z0-9\-]{2,})', 'READ', 'INPUT'),
+            
+            # WRITE operations (always OUTPUT)
+            (r'WRITE\s+([A-Z][A-Z0-9\-]{2,})', 'WRITE', 'OUTPUT'),
+            (r'REWRITE\s+([A-Z][A-Z0-9\-]{2,})', 'REWRITE', 'OUTPUT'),
+            
+            # DELETE operations (OUTPUT - modifies file)
+            (r'DELETE\s+([A-Z][A-Z0-9\-]{2,})', 'DELETE', 'OUTPUT'),
+            
+            # CLOSE operations (neutral)
+            (r'CLOSE\s+([A-Z][A-Z0-9\-]{2,})', 'CLOSE', 'NEUTRAL')
+        ]
+        
+        for pattern, operation, direction in patterns:
+            matches = re.findall(pattern, program_line)
+            for file_name in matches:
+                if self._is_valid_cobol_filename(file_name):
+                    operations.append((operation, file_name, direction))
+        
+        return operations
+
+    def _extract_complete_cics_command(self, lines: List[str], start_line: int) -> str:
+        """Extract complete CICS command handling multi-line statements"""
+        cics_command = ""
+        
+        for i in range(start_line, min(len(lines), start_line + 10)):  # Look ahead max 10 lines
+            program_area = self._extract_program_area(lines[i])
+            if not program_area:
                 continue
                 
-            matches = self.call_pattern.findall(line)
-            for program_name in matches:
-                if self._is_valid_filename(program_name):
-                    if program_name not in seen_calls:
-                        seen_calls.add(program_name)
-                        calls.append({
-                            'program_name': program_name,
-                            'friendly_name': self.generate_friendly_name(program_name, 'Program'),
-                            'line_number': i + 1,
-                            'line_content': line.strip()
-                        })
+            cics_command += " " + program_area.strip()
+            
+            # Check if command is complete
+            if 'END-EXEC' in cics_command.upper():
+                break
         
-        logger.info(f"Found {len(calls)} unique program calls")
-        return calls
+        return cics_command.strip()
+
+    def _parse_cics_command(self, cics_command: str, line_number: int) -> List[Dict]:
+        """Parse complete CICS command and extract operations with I/O classification"""
+        operations = []
+        cics_upper = cics_command.upper()
+        
+        # CICS File operations with I/O classification
+        cics_file_patterns = [
+            # INPUT operations
+            (r'EXEC\s+CICS\s+READ\s+.*?(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS READ', 'INPUT'),
+            (r'EXEC\s+CICS\s+RECEIVE\s+.*?(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS RECEIVE', 'INPUT'),
+            (r'EXEC\s+CICS\s+READNEXT\s+.*?(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS READNEXT', 'INPUT'),
+            (r'EXEC\s+CICS\s+READPREV\s+.*?(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS READPREV', 'INPUT'),
+            (r'EXEC\s+CICS\s+STARTBR\s+.*?(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS STARTBR', 'INPUT'),
+            
+            # OUTPUT operations
+            (r'EXEC\s+CICS\s+WRITE\s+.*?(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS WRITE', 'OUTPUT'),
+            (r'EXEC\s+CICS\s+SEND\s+.*?(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS SEND', 'OUTPUT'),
+            (r'EXEC\s+CICS\s+REWRITE\s+.*?(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS REWRITE', 'OUTPUT'),
+            (r'EXEC\s+CICS\s+DELETE\s+.*?(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS DELETE', 'OUTPUT'),
+            
+            # Terminal operations (not file-based)
+            (r'EXEC\s+CICS\s+SEND\s+(?:MAP|TEXT)', 'CICS SEND', 'TERMINAL'),
+            (r'EXEC\s+CICS\s+RECEIVE\s+(?:MAP|INTO)', 'CICS RECEIVE', 'TERMINAL'),
+            
+            # Program control operations
+            (r'EXEC\s+CICS\s+LINK\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS LINK', 'PROGRAM_CALL'),
+            (r'EXEC\s+CICS\s+XCTL\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS XCTL', 'PROGRAM_CALL')
+        ]
+        
+        for pattern, operation, io_direction in cics_file_patterns:
+            matches = re.findall(pattern, cics_upper)
+            for file_name in matches:
+                if self._is_valid_cobol_filename(file_name):
+                    operations.append({
+                        'operation': operation,
+                        'file_name': file_name,
+                        'friendly_name': f"{operation} - {self.generate_friendly_name(file_name, 'File')}",
+                        'line_number': line_number,
+                        'line_content': cics_command.strip()[:100],  # Truncate for display
+                        'file_type': 'CICS_FILE',
+                        'io_direction': io_direction,
+                        'confidence_score': 0.95
+                    })
+            
+            # Handle operations without file names
+            if not matches and re.search(pattern.split('(')[0], cics_upper):
+                operations.append({
+                    'operation': operation,
+                    'file_name': None,
+                    'friendly_name': operation,
+                    'line_number': line_number,
+                    'line_content': cics_command.strip()[:100],
+                    'file_type': 'CICS_OPERATION',
+                    'io_direction': io_direction,
+                    'confidence_score': 0.9
+                })
+        
+        return operations
+   
 
     def extract_copybooks(self, lines: List[str]) -> List[Dict]:
         """Extract copybook includes with deduplication"""
@@ -548,10 +896,116 @@ class COBOLParser:
         result['xml_operations'] = self.extract_xml_operations(lines)
         
         return result
+    
+    def extract_record_layouts(self, lines: List[str]) -> List[RecordLayout]:
+        """Fixed record layout extraction with proper section handling"""
+        layouts = []
+        current_layout = None
+        current_fields = []
+        in_data_division = False
+        current_section = "UNKNOWN"
+        
+        for i, line in enumerate(lines):
+            line_stripped = line.strip()
+            line_upper = line_stripped.upper()
+            
+            # Check for division
+            if self.division_pattern.match(line_stripped):
+                division_name = self.division_pattern.match(line_stripped).group(1).upper()
+                if division_name == 'DATA':
+                    in_data_division = True
+                else:
+                    # Exiting DATA DIVISION - finalize any current layout
+                    if in_data_division and current_layout:
+                        self._finalize_layout(current_layout, current_fields, lines, i)
+                        layouts.append(current_layout)
+                        current_layout = None
+                        current_fields = []
+                    in_data_division = (division_name == 'DATA')
+                continue
+            
+            if not in_data_division:
+                continue
+            
+            # Check for section within DATA DIVISION
+            if line_upper.endswith(' SECTION.'):
+                new_section = line_upper.replace(' SECTION.', '').strip()
+                
+                # Only finalize layout if we're actually changing sections
+                # and not just processing the first section declaration
+                if current_layout and current_section != "UNKNOWN" and new_section != current_section:
+                    self._finalize_layout(current_layout, current_fields, lines, i)
+                    layouts.append(current_layout)
+                    current_layout = None
+                    current_fields = []
+                
+                current_section = new_section
+                continue
+            
+            # Parse data items
+            data_match = self.data_item_pattern.match(line_stripped)
+            if data_match:
+                level = int(data_match.group(1))
+                name = data_match.group(2)
+                rest_of_line = data_match.group(3) or ""
+                
+                if level == 1:
+                    # Finalize previous 01-level layout ONLY if we have one
+                    if current_layout:
+                        self._finalize_layout(current_layout, current_fields, lines, i)
+                        layouts.append(current_layout)
+                    
+                    # Skip FILLER records
+                    if name.upper() == 'FILLER':
+                        current_layout = None
+                        current_fields = []
+                        continue
+                    
+                    # Create new 01-level layout
+                    current_layout = RecordLayout(
+                        name=name,
+                        level=level,
+                        fields=[],
+                        line_start=i + 1,
+                        line_end=len(lines),  # Will be updated when finalized
+                        source_code="",
+                        friendly_name=self.generate_friendly_name(name, 'Record Layout'),
+                        section=current_section
+                    )
+                    current_fields = []  # Reset fields for new layout
+                    
+                elif current_layout and level > 1:
+                    # Only add non-FILLER fields to the current layout
+                    if name.upper() != 'FILLER':
+                        field = self.parse_cobol_field(line_stripped, i + 1, level, name, rest_of_line)
+                        current_fields.append(field)
+        
+        # Finalize the last layout if it exists
+        if current_layout:
+            self._finalize_layout(current_layout, current_fields, lines, len(lines))
+            layouts.append(current_layout)
+        
+        return layouts
+    
+    def _finalize_layout(self, layout: RecordLayout, fields: List, lines: List[str], end_line: int):
+        """Helper method to finalize a layout with its fields and source code"""
+        layout.line_end = end_line
+        layout.fields = fields.copy()  # Make a copy to avoid reference issues
+        
+        # Extract source code for this layout
+        start_idx = max(0, layout.line_start - 1)
+        end_idx = min(len(lines), layout.line_end)
+        source_lines = lines[start_idx:end_idx]
+        layout.source_code = '\n'.join(source_lines)
+        
+        # Log the layout for debugging
+        logger.info(f"Finalized layout: {layout.name} with {len(layout.fields)} fields (lines {layout.line_start}-{layout.line_end})")
+
+
 
     def extract_record_layouts_with_field_references(self, lines: List[str], raw_lines: List[str]) -> List[RecordLayout]:
         """Extract record layouts with comprehensive field reference extraction"""
-        layouts = self.extract_record_layouts(lines)  # Use existing method
+        layouts = self.extract_record_layouts(lines)  # Use the fixed method
         
         # Enhance each field with comprehensive references
         for layout in layouts:

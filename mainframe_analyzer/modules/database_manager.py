@@ -138,9 +138,9 @@ class DatabaseManager:
                 except OSError as e:
                     logger.error(f"Cannot remove lock file {lock_file}: {e}")
     
-    # Replace the entire initialize_database method in database_manager.py with this version:
 
-# Replace the entire initialize_database method in database_manager.py with this version:
+
+
 
     def initialize_database(self):
         """Initialize database schema with record-level classification support"""
@@ -243,7 +243,7 @@ class DatabaseManager:
                         )
                     ''')
                     
-                    # Record layouts with record-level classification
+                    # Record layouts with record-level classification (UPDATED)
                     cursor.execute('''
                         CREATE TABLE record_layouts (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,7 +258,7 @@ class DatabaseManager:
                             fields_count INTEGER DEFAULT 0,
                             business_purpose TEXT,
                             
-                            -- NEW: Record-level classification columns
+                            -- Record-level classification columns
                             record_classification TEXT DEFAULT 'STATIC',
                             record_usage_description TEXT,
                             has_whole_record_operations BOOLEAN DEFAULT 0,
@@ -268,7 +268,7 @@ class DatabaseManager:
                         )
                     ''')
                     
-                    # Field analysis with record classification context
+                    # Field analysis with record classification context (UPDATED)
                     cursor.execute('''
                         CREATE TABLE field_analysis_details (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -300,7 +300,7 @@ class DatabaseManager:
                             conditional_count INTEGER DEFAULT 0,
                             cics_count INTEGER DEFAULT 0,
                             
-                            -- NEW: Record-level classification context
+                            -- Record-level classification context
                             record_classification TEXT DEFAULT 'STATIC',
                             inherited_from_record BOOLEAN DEFAULT 0,
                             effective_classification TEXT DEFAULT 'UNKNOWN',
@@ -371,7 +371,7 @@ class DatabaseManager:
                         )
                     ''')
 
-                    # Create performance indexes
+                    # Create performance indexes (UPDATED with new classification indexes)
                     indexes = [
                         'CREATE INDEX idx_derived_components_parent ON derived_components(session_id, parent_component)',
                         'CREATE INDEX idx_field_mappings_target_file ON field_mappings(target_file_name, session_id)',
@@ -384,7 +384,7 @@ class DatabaseManager:
                         'CREATE INDEX idx_record_layouts_session ON record_layouts(session_id, program_name)',
                         'CREATE INDEX idx_record_layouts_name ON record_layouts(layout_name, session_id)',
                         
-                        # NEW: Indexes for record classification
+                        # New indexes for record classification
                         'CREATE INDEX idx_record_layouts_classification ON record_layouts(record_classification, session_id)',
                         'CREATE INDEX idx_field_record_classification ON field_analysis_details(record_classification, session_id)',
                         'CREATE INDEX idx_field_effective_classification ON field_analysis_details(effective_classification, session_id)'
@@ -405,7 +405,6 @@ class DatabaseManager:
                 raise
         
         raise sqlite3.OperationalError("Failed to initialize database after multiple attempts")
-
     def store_derived_components(self, session_id: str, parent_component: str, derived_components: List[Dict]):
         """Store derived components in separate table"""
         try:

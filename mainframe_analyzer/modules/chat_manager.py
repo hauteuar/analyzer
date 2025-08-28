@@ -513,7 +513,7 @@ class ChatManager:
             
             # Create LLM prompt for field analysis
             prompt = f"""
-    You are a mainframe COBOL expert analyzing field usage. Based on the field analysis data provided, create a comprehensive, conversational response about this field.
+    You are a mainframe COBOL expert with prita bank wealth management domain analyzing field usage. Based on the field analysis data provided, create a comprehensive, conversational response about this field.
 
     User asked: "{original_message}"
 
@@ -1046,7 +1046,7 @@ class ChatManager:
             
             # Create LLM prompt with session context
             prompt = f"""
-    You are a mainframe COBOL analysis expert. The user has asked: "{message}"
+    You are a mainframe COBOL analysis expert in private bank wealth management domain. The user has asked: "{message}"
 
     Current Analysis Context:
     - Programs Analyzed: {session_context.get('total_programs', 0)}

@@ -136,7 +136,7 @@ class ComponentExtractor:
             return []
     
     def _extract_cobol_components(self, session_id: str, content: str, filename: str) -> List[Dict]:
-        """Extract COBOL components with record-level classification"""
+        """Extract COBOL components with proper record layout separation"""
         logger.info(f"Starting COBOL analysis for {filename}")
         
         try:
@@ -149,6 +149,8 @@ class ComponentExtractor:
             program_summary = self._generate_component_summary(session_id, parsed_data, 'PROGRAM')
             
             program_name = filename.replace('.cbl', '').replace('.CBL', '').replace('.cob', '').replace('.COB', '')
+            
+            # Create main program component
             program_component = {
                 'name': program_name,
                 'friendly_name': parsed_data['friendly_name'],
@@ -166,23 +168,104 @@ class ComponentExtractor:
                 'program_calls': parsed_data['program_calls'],
                 'copybooks': parsed_data['copybooks'],
                 'cics_operations': parsed_data['cics_operations'],
-                'derived_components': [],
-                'record_layouts': [],
-                'fields': []
+                'derived_components': [],  # Will contain layout names
+                'record_layouts': [],      # Will contain layout data
+                'fields': []               # All fields from all layouts
             }
             
-            components = [program_component]
+            components = [program_component]  # Start with main program
             
-            # Process record layouts with classification
+            # Process each record layout as a separate derived component
+            layout_components = []
+            
             for layout_idx, layout in enumerate(parsed_data['record_layouts'], 1):
                 layout_name = layout.name
                 record_classification = record_classifications.get(layout_name, 'STATIC')
                 
                 logger.info(f"Processing layout {layout_idx}: {layout_name} - Classification: {record_classification}")
                 
+                # Generate layout-specific summary
                 layout_summary = self._generate_layout_summary(session_id, layout, parsed_data)
                 
-                # Store layout with record classification
+                # Create separate component for this record layout
+                layout_component = {
+                    'name': f"{program_name}_{layout_name}",
+                    'friendly_name': layout.friendly_name or layout_summary.get('friendly_name', layout_name),
+                    'type': 'RECORD_LAYOUT',
+                    'parent_component': program_name,
+                    'file_path': filename,
+                    'content': layout.source_code,  # Only the layout's source code
+                    'total_lines': layout.line_end - layout.line_start + 1,
+                    'line_start': layout.line_start,
+                    'line_end': layout.line_end,
+                    'level': layout.level,
+                    'section': layout.section,
+                    'business_purpose': layout_summary.get('business_purpose', ''),
+                    'record_classification': record_classification,
+                    'record_usage_description': self._get_record_usage_description(record_classification),
+                    'fields': [],  # Will be populated below
+                    'total_fields': len(layout.fields)
+                }
+                
+                # Process fields for this specific layout
+                enhanced_fields = []
+                for field in layout.fields:
+                    try:
+                        field_analysis = self._complete_field_source_analysis(field.name, content, program_name)
+                        
+                        enhanced_field = {
+                            'name': field.name,
+                            'friendly_name': field.friendly_name or field.name.replace('-', ' ').title(),
+                            'level': field.level,
+                            'picture': field.picture,
+                            'usage': field.usage,
+                            'line_number': field.line_number,
+                            'usage_type': field_analysis['primary_usage'],
+                            'business_purpose': field_analysis['business_purpose'],
+                            'total_program_references': len(field_analysis['all_references']),
+                            'source_field': field_analysis.get('primary_source_field', ''),
+                            'source_references': field.source_references if hasattr(field, 'source_references') else [],
+                            'total_references': len(field.source_references) if hasattr(field, 'source_references') else 0,
+                            'confidence_score': 0.9,
+                            # Record-level context
+                            'record_classification': record_classification,
+                            'parent_layout': layout_name,
+                            'inherited_from_record': self._should_inherit_record_classification(
+                                field_analysis, record_classification
+                            ),
+                            'effective_classification': self._get_effective_field_classification(
+                                field_analysis['primary_usage'], record_classification
+                            )
+                        }
+                        
+                        enhanced_fields.append(enhanced_field)
+                        
+                    except Exception as field_error:
+                        logger.error(f"Error analyzing field {field.name}: {str(field_error)}")
+                        continue
+                
+                # Add fields to the layout component
+                layout_component['fields'] = enhanced_fields
+                
+                # Add this layout as a separate component
+                layout_components.append(layout_component)
+                
+                # Update main program component with references
+                program_component['derived_components'].append(layout_name)
+                program_component['record_layouts'].append({
+                    'name': layout_name,
+                    'friendly_name': layout.friendly_name,
+                    'business_purpose': layout_summary.get('business_purpose', ''),
+                    'record_classification': record_classification,
+                    'record_usage_description': self._get_record_usage_description(record_classification),
+                    'total_fields': len(enhanced_fields),
+                    'component_reference': f"{program_name}_{layout_name}"  # Reference to separate component
+                })
+                
+                # Add fields to main program's field list (for aggregate counts)
+                program_component['fields'].extend(enhanced_fields)
+                
+                # Store layout in database
                 try:
                     with self.db_manager.get_connection() as conn:
                         cursor = conn.cursor()
@@ -209,83 +292,36 @@ class ComponentExtractor:
                         ))
                         
                         layout_id = cursor.lastrowid
-                        logger.info(f"Stored layout {layout_name} with record classification: {record_classification}")
+                        
+                        # Store fields for this layout
+                        for field_data in enhanced_fields:
+                            field_data['layout_id'] = layout_id
+                            self.db_manager.store_field_details(session_id, field_data, program_name, layout_id)
+                        
+                        logger.info(f"Stored layout {layout_name} with {len(enhanced_fields)} fields")
+                        
                 except Exception as db_error:
                     logger.error(f"Error storing layout {layout_name}: {str(db_error)}")
                     continue
-                
-                # Process fields with record context
-                enhanced_fields = []
-                for field in layout.fields:
-                    try:
-                        field_analysis = self._complete_field_source_analysis(field.name, content, program_name)
-                        
-                        enhanced_field = {
-                            'name': field.name,
-                            'friendly_name': field.friendly_name or field.name.replace('-', ' ').title(),
-                            'level': field.level,
-                            'picture': field.picture,
-                            'line_number': field.line_number,
-                            'usage_type': field_analysis['primary_usage'],
-                            'business_purpose': field_analysis['business_purpose'],
-                            'total_program_references': len(field_analysis['all_references']),
-                            'source_field': field_analysis.get('primary_source_field', ''),
-                             # Enhanced source code information
-                            'source_references': field.source_references if hasattr(field, 'source_references') else [],
-                            'total_references': len(field.source_references) if hasattr(field, 'source_references') else 0,
-                            
-                            # Business analysis
-                            #'usage_type': self._determine_field_usage_from_references(field),
-                            'business_purpose': self._generate_field_business_purpose(field),
-                            #'source_field': self._extract_primary_source_field(field),
-                            'confidence_score': 0.9,
-                            # NEW: Record-level context
-                            'record_classification': record_classification,
-                            'inherited_from_record': self._should_inherit_record_classification(
-                                field_analysis, record_classification
-                            ),
-                            'effective_classification': self._get_effective_field_classification(
-                                field_analysis['primary_usage'], record_classification
-                            )
-                        }
-                        
-                        enhanced_fields.append(enhanced_field)
-                        
-                        # Store field with record context
-                        if layout_id:
-                            enhanced_field['record_classification'] = record_classification
-                            self.db_manager.store_field_details(session_id, enhanced_field, program_name, layout_id)
-                            
-                    except Exception as field_error:
-                        logger.error(f"Error analyzing field {field.name}: {str(field_error)}")
-                        continue
-                
-                # Add to program component
-                program_component['derived_components'].append(layout_name)
-                program_component['record_layouts'].append({
-                    'name': layout_name,
-                    'friendly_name': layout.friendly_name,
-                    'business_purpose': layout_summary.get('business_purpose', ''),
-                    'record_classification': record_classification,
-                    'record_usage_description': self._get_record_usage_description(record_classification),
-                    'fields': enhanced_fields
-                })
-                program_component['fields'].extend(enhanced_fields)
             
-            # Update counts
+            # Add all layout components to the result
+            components.extend(layout_components)
+            
+            # Update main program totals
             program_component['total_fields'] = len(program_component['fields'])
+            program_component['total_layouts'] = len(parsed_data['record_layouts'])
             
-            # Extract dependencies
+            # Extract and store dependencies
             self._extract_and_store_dependencies(session_id, components, filename)
             
-            logger.info(f"Analysis complete: 1 program, {len(parsed_data['record_layouts'])} layouts, {program_component['total_fields']} fields")
+            logger.info(f"Analysis complete: 1 program + {len(layout_components)} layout components, {program_component['total_fields']} total fields")
             
             return components
             
         except Exception as e:
             logger.error(f"Error in COBOL component extraction: {str(e)}")
+            traceback.print_exc()
             return []
-
         
     def _determine_field_usage_from_references(self, field) -> str:
         """Determine field usage type from comprehensive references"""
@@ -530,7 +566,7 @@ class ComponentExtractor:
             
             # Create summary prompt
             prompt = f"""
-Analyze this COBOL {component_type} and provide a business summary.
+Analyze this COBOL {component_type} and provide a business summary this is part of wealth management system.
 
 Component Analysis:
 - Total Lines: {context_info['total_lines']}
@@ -776,7 +812,7 @@ Please provide a JSON response with:
 
     Provide JSON response:
     {{
-        "friendly_name": "Business-friendly name for this record layout",
+        "friendly_name": "Business-friendly name for this record layout with respect to wealth management",
         "business_purpose": "What this record structure represents in business terms",
         "usage_pattern": "How this record is typically used (INPUT|OUTPUT|WORKING_STORAGE|PARAMETER)",
         "business_domain": "Business area (CUSTOMER|ACCOUNT|TRANSACTION|EMPLOYEE|GENERAL)"
@@ -1207,7 +1243,7 @@ Please provide a JSON response with:
         """Enhance component analysis using LLM for smaller files"""
         try:
             prompt = f"""
-Analyze this COBOL program and provide enhanced component analysis.
+Analyze this COBOL program and provide enhanced component analysis with respect to wealth management.
 Focus on:
 1. Business logic identification
 2. Data flow analysis  
@@ -1320,67 +1356,301 @@ File Content ({filename}):
         
         return components
     
-    def _extract_and_store_field_relationships(self, session_id: str, components: List[Dict], filename: str):
-        """Extract and store field relationships in database"""
+    def _extract_and_store_dependencies(self, session_id: str, components: List[Dict], filename: str):
+        """Enhanced dependency extraction with proper I/O classification"""
         try:
-            # Get program component
-            program_component = None
-            record_layouts = []
-            
+            main_program = None
             for component in components:
-                if component['type'] == 'PROGRAM':
-                    program_component = component
-                elif component['type'] == 'RECORD_LAYOUT':
-                    record_layouts.append(component)
+                if component.get('type') == 'PROGRAM':
+                    main_program = component
+                    break
             
-            if not program_component:
+            if not main_program:
                 return
             
-            # Extract data movements from program content
-            program_content = program_component.get('content', '')
-            data_movements = self.cobol_parser.extract_data_movements(program_content.split('\n'))
+            dependencies = []
+            program_name = main_program['name']
             
-            # Store field relationships
-            for movement in data_movements:
-                if movement['operation'] == 'MOVE':
-                    # Store field details for both source and target
-                    self._store_field_operation(
-                        session_id, movement['source_field'], program_component['name'],
-                        'SOURCE', movement['line_number'], movement['line_content']
-                    )
-                    self._store_field_operation(
-                        session_id, movement['target_field'], program_component['name'],
-                        'TARGET', movement['line_number'], movement['line_content']
-                    )
-                    
-                elif movement['operation'] == 'COMPUTE':
-                    self._store_field_operation(
-                        session_id, movement['target_field'], program_component['name'],
-                        'COMPUTED', movement['line_number'], movement['line_content']
-                    )
+            # Get file operations and classify I/O direction
+            file_operations = main_program.get('file_operations', [])
+            file_classifications = self._classify_file_io_direction(file_operations)
             
-            # Analyze field usage for each field in record layouts
-            for layout in record_layouts:
-                for field_data in layout.get('fields', []):
-                    field_usage = self.cobol_parser.analyze_field_usage(
-                        program_content.split('\n'), field_data['name']
-                    )
+            # Extract FILE dependencies with proper I/O classification
+            processed_files = set()  # Avoid duplicates
+            
+            for file_op in file_operations:
+                file_name = file_op.get('file_name')
+                if not file_name or file_name in processed_files:
+                    continue
+                
+                if self.cobol_parser._is_valid_cobol_filename(file_name):
+                    processed_files.add(file_name)
                     
-                    # Determine usage type
-                    usage_type = self._determine_field_usage_type(field_usage)
+                    # Determine relationship type based on I/O classification
+                    io_direction = file_classifications.get(file_name, file_op.get('io_direction', 'UNKNOWN'))
                     
-                    # Store enhanced field details
-                    self.db_manager.store_field_details(session_id, {
-                        'name': field_data['name'],
-                        'operation_type': 'DEFINITION',
-                        'line_number': field_data.get('line_number', 0),
-                        'code_snippet': f"Level {field_data['level']} {field_data['name']} {field_data.get('picture', '')}",
-                        'usage': usage_type,
-                        'business_purpose': self._infer_business_purpose_from_usage(field_usage, field_data['name'])
-                    }, program_component['name'])
+                    if io_direction == 'INPUT':
+                        relationship_type = 'INPUT_FILE'
+                    elif io_direction == 'OUTPUT':
+                        relationship_type = 'OUTPUT_FILE'
+                    elif io_direction == 'INPUT_OUTPUT':
+                        relationship_type = 'INPUT_OUTPUT_FILE'
+                    else:
+                        relationship_type = 'FILE_ACCESS'
                     
+                    # Determine interface type
+                    if file_op.get('file_type') == 'CICS_FILE':
+                        interface_type = 'CICS'
+                    elif file_op.get('operation') == 'FD':
+                        interface_type = 'FILE_SYSTEM'
+                    else:
+                        interface_type = 'FILE_SYSTEM'
+                    
+                    dependencies.append({
+                        'source_component': program_name,
+                        'target_component': file_name,
+                        'relationship_type': relationship_type,
+                        'interface_type': interface_type,
+                        'confidence_score': 0.95,
+                        'analysis_details_json': json.dumps({
+                            'io_direction': io_direction,
+                            'file_operations': [
+                                {
+                                    'operation': op.get('operation'),
+                                    'line_number': op.get('line_number'),
+                                    'io_direction': op.get('io_direction')
+                                }
+                                for op in file_operations if op.get('file_name') == file_name
+                            ]
+                        }),
+                        'source_code_evidence': '; '.join([
+                            f"Line {op.get('line_number')}: {op.get('operation')} {file_name}"
+                            for op in file_operations if op.get('file_name') == file_name
+                        ][:3])  # First 3 operations as evidence
+                    })
+            
+            # Extract CICS dependencies with enhanced I/O classification
+            cics_operations = main_program.get('cics_operations', [])
+            processed_cics_files = set()
+            
+            for cics_op in cics_operations:
+                file_name = cics_op.get('file_name')
+                if not file_name or file_name in processed_cics_files:
+                    continue
+                
+                if self.cobol_parser._is_valid_cobol_filename(file_name):
+                    processed_cics_files.add(file_name)
+                    
+                    # Classify CICS file based on all operations on this file
+                    cics_file_ops = [op for op in cics_operations if op.get('file_name') == file_name]
+                    io_directions = set(op.get('io_direction', 'UNKNOWN') for op in cics_file_ops)
+                    
+                    if 'INPUT' in io_directions and 'OUTPUT' in io_directions:
+                        relationship_type = 'CICS_INPUT_OUTPUT_FILE'
+                    elif 'INPUT' in io_directions:
+                        relationship_type = 'CICS_INPUT_FILE'
+                    elif 'OUTPUT' in io_directions:
+                        relationship_type = 'CICS_OUTPUT_FILE'
+                    else:
+                        relationship_type = 'CICS_FILE'
+                    
+                    dependencies.append({
+                        'source_component': program_name,
+                        'target_component': file_name,
+                        'relationship_type': relationship_type,
+                        'interface_type': 'CICS',
+                        'confidence_score': 0.95,
+                        'analysis_details_json': json.dumps({
+                            'cics_operations': [
+                                {
+                                    'operation': op.get('operation'),
+                                    'line_number': op.get('line_number'),
+                                    'io_direction': op.get('io_direction')
+                                }
+                                for op in cics_file_ops
+                            ]
+                        }),
+                        'source_code_evidence': '; '.join([
+                            f"Line {op.get('line_number')}: {op.get('operation')} {file_name}"
+                            for op in cics_file_ops
+                        ][:3])
+                    })
+            
+            # Extract PROGRAM CALL dependencies
+            program_calls = main_program.get('program_calls', [])
+            for call in program_calls:
+                target_prog = call.get('program_name')
+                if target_prog and self.cobol_parser._is_valid_cobol_filename(target_prog):
+                    dependencies.append({
+                        'source_component': program_name,
+                        'target_component': target_prog,
+                        'relationship_type': 'PROGRAM_CALL',
+                        'interface_type': 'COBOL',
+                        'confidence_score': 0.98,
+                        'analysis_details_json': json.dumps({
+                            'line_number': call.get('line_number', 0),
+                            'parameters': call.get('parameters', '')
+                        }),
+                        'source_code_evidence': f"Line {call.get('line_number')}: CALL '{target_prog}'"
+                    })
+            
+            # Extract COPYBOOK dependencies
+            copybooks = main_program.get('copybooks', [])
+            for copybook in copybooks:
+                copybook_name = copybook.get('copybook_name')
+                if copybook_name and self.cobol_parser._is_valid_cobol_filename(copybook_name):
+                    dependencies.append({
+                        'source_component': program_name,
+                        'target_component': copybook_name,
+                        'relationship_type': 'COPYBOOK_INCLUDE',
+                        'interface_type': 'COBOL',
+                        'confidence_score': 0.99,
+                        'analysis_details_json': json.dumps({
+                            'line_number': copybook.get('line_number', 0)
+                        }),
+                        'source_code_evidence': f"Line {copybook.get('line_number')}: COPY {copybook_name}"
+                    })
+            
+            # Store dependencies with enhanced deduplication
+            if dependencies:
+                self._store_dependencies_with_deduplication(session_id, dependencies)
+                logger.info(f"Stored {len(dependencies)} unique dependencies for {program_name}")
+        
         except Exception as e:
-            logger.error(f"Error extracting field relationships: {str(e)}")
+            logger.error(f"Error extracting dependencies: {str(e)}")
+            traceback.print_exc()
+
+    def _classify_file_io_direction(self, file_operations: List[Dict]) -> Dict[str, str]:
+        """Classify files as INPUT, OUTPUT, or INPUT_OUTPUT based on all operations"""
+        file_directions = {}
+        
+        for op in file_operations:
+            file_name = op.get('file_name')
+            io_direction = op.get('io_direction')
+            
+            if not file_name or not io_direction or io_direction in ['DECLARATION', 'NEUTRAL', 'UNKNOWN']:
+                continue
+            
+            if file_name not in file_directions:
+                file_directions[file_name] = set()
+            
+            file_directions[file_name].add(io_direction)
+        
+        # Determine final classification
+        classifications = {}
+        for file_name, directions in file_directions.items():
+            if 'INPUT' in directions and 'OUTPUT' in directions:
+                classifications[file_name] = 'INPUT_OUTPUT'
+            elif 'INPUT_OUTPUT' in directions:
+                classifications[file_name] = 'INPUT_OUTPUT'
+            elif 'INPUT' in directions:
+                classifications[file_name] = 'INPUT'
+            elif 'OUTPUT' in directions:
+                classifications[file_name] = 'OUTPUT'
+            else:
+                classifications[file_name] = 'UNKNOWN'
+        
+        return classifications
+
+    def _store_dependencies_with_deduplication(self, session_id: str, dependencies: List[Dict]):
+        """Store dependencies with enhanced deduplication logic"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                for dep in dependencies:
+                    # Check for existing dependency
+                    cursor.execute('''
+                        SELECT id, confidence_score, analysis_details_json 
+                        FROM dependency_relationships
+                        WHERE session_id = ? AND source_component = ? AND target_component = ? AND relationship_type = ?
+                    ''', (
+                        session_id, 
+                        dep['source_component'], 
+                        dep['target_component'], 
+                        dep['relationship_type']
+                    ))
+                    
+                    existing = cursor.fetchone()
+                    
+                    if existing:
+                        # Update existing with better information
+                        existing_id, existing_conf, existing_details = existing
+                        new_conf = max(existing_conf or 0, dep.get('confidence_score', 0))
+                        
+                        # Merge analysis details
+                        merged_details = self._merge_analysis_details(
+                            existing_details, 
+                            dep.get('analysis_details_json', '{}')
+                        )
+                        
+                        cursor.execute('''
+                            UPDATE dependency_relationships
+                            SET confidence_score = ?, analysis_details_json = ?, 
+                                source_code_evidence = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        ''', (
+                            new_conf, 
+                            merged_details, 
+                            dep.get('source_code_evidence', ''), 
+                            existing_id
+                        ))
+                    else:
+                        # Insert new dependency
+                        cursor.execute('''
+                            INSERT INTO dependency_relationships 
+                            (session_id, source_component, target_component, relationship_type,
+                            interface_type, confidence_score, analysis_details_json, source_code_evidence)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            session_id, 
+                            dep['source_component'], 
+                            dep['target_component'], 
+                            dep['relationship_type'],
+                            dep.get('interface_type', ''), 
+                            dep.get('confidence_score', 0.0), 
+                            dep.get('analysis_details_json', '{}'), 
+                            dep.get('source_code_evidence', '')
+                        ))
+                        
+        except Exception as e:
+            logger.error(f"Error storing dependencies: {str(e)}")
+            raise
+
+    def _merge_analysis_details(self, existing_json: str, new_json: str) -> str:
+        """Merge analysis details JSON objects"""
+        try:
+            existing = json.loads(existing_json) if existing_json else {}
+            new = json.loads(new_json) if new_json else {}
+            
+            # Merge file operations or CICS operations lists
+            for key in ['file_operations', 'cics_operations']:
+                if key in new:
+                    if key in existing:
+                        # Combine and deduplicate operations
+                        combined = existing[key] + new[key]
+                        # Deduplicate by line_number
+                        seen_lines = set()
+                        deduplicated = []
+                        for op in combined:
+                            line_num = op.get('line_number', 0)
+                            if line_num not in seen_lines:
+                                seen_lines.add(line_num)
+                                deduplicated.append(op)
+                        existing[key] = deduplicated
+                    else:
+                        existing[key] = new[key]
+            
+            # Merge other fields
+            for key, value in new.items():
+                if key not in ['file_operations', 'cics_operations']:
+                    existing[key] = value
+            
+            return json.dumps(existing)
+            
+        except Exception as e:
+            logger.error(f"Error merging analysis details: {str(e)}")
+            return new_json if new_json else existing_json
     
     def _store_field_operation(self, session_id: str, field_name: str, program_name: str,
                              operation_type: str, line_number: int, code_snippet: str):

@@ -445,7 +445,7 @@ CUSTOM_PATTERNS = {
 DOMAIN_PROMPTS = {
     'banking': "Focus on financial calculations and regulatory compliance...",
     'insurance': "Emphasize policy processing and claims handling...",
-    'retail': "Highlight inventory management and customer data..."
+    'finance': "Focus on  capital markets calcualtions..."
 }
 ```
 
