@@ -575,11 +575,43 @@ Please provide a JSON response with:
             
             if response.success:
                 summary = self.llm_client.extract_json_from_response(response.content)
-                if summary:
+
+                # Defensive: the LLM client should return a dict, but sometimes a cleaned string
+                # is returned by mistake. Normalize here to avoid downstream attribute errors.
+                if isinstance(summary, str):
+                    try:
+                        parsed = json.loads(summary)
+                        if isinstance(parsed, dict):
+                            summary = parsed
+                        else:
+                            logger.warning('LLM returned a string that JSON-parsed to non-dict; ignoring parsed value')
+                            summary = None
+                    except Exception:
+                        logger.warning('LLM returned a non-JSON string; treating as no structured result')
+                        summary = None
+
+                if isinstance(summary, dict):
                     logger.info(f"✅ Successfully extracted LLM summary: {summary.get('business_purpose', 'No purpose')}")
                     return summary
                 else:
                     logger.warning(f"⚠️ Could not extract JSON from LLM response: {response.content[:200]}")
+
+                    # Fallback: if LLM returned plain text, preserve it in a minimal dict so
+                    # callers can safely access 'business_purpose' without attribute errors.
+                    if response.content and isinstance(response.content, str) and len(response.content.strip()) > 0:
+                        raw_text = response.content.strip()
+                        fallback_summary = {
+                            'business_purpose': raw_text.split('\n')[0][:500],
+                            'primary_function': 'UNKNOWN',
+                            'complexity_score': 0,
+                            'key_features': [],
+                            'integration_points': [],
+                            'data_sources': [],
+                            'business_domain': 'GENERAL',
+                            'raw': raw_text
+                        }
+                        logger.info('Using raw LLM text as fallback summary (stored under llm_summary.raw)')
+                        return fallback_summary
             else:
                 logger.error(f"❌ LLM call failed: {response.error_message}")
             
@@ -761,7 +793,21 @@ Please provide a JSON response with:
             
             if response.success:
                 llm_summary = self.llm_client.extract_json_from_response(response.content)
-                if llm_summary:
+                
+                # Defensive handling: normalize string outputs to dict where possible
+                if isinstance(llm_summary, str):
+                    try:
+                        parsed = json.loads(llm_summary)
+                        if isinstance(parsed, dict):
+                            llm_summary = parsed
+                        else:
+                            logger.warning('Layout LLM returned a string that JSON-parsed to non-dict; ignoring parsed value')
+                            llm_summary = None
+                    except Exception:
+                        logger.warning('Layout LLM returned a non-JSON string; treating as no structured result')
+                        llm_summary = None
+
+                if isinstance(llm_summary, dict):
                     return {
                         'friendly_name': llm_summary.get('friendly_name', layout.friendly_name),
                         'business_purpose': llm_summary.get('business_purpose', f"Data structure with {field_count} fields"),
@@ -770,6 +816,20 @@ Please provide a JSON response with:
                         'field_analysis': field_types,
                         'complexity_score': min(0.9, field_count / 50)
                     }
+                else:
+                    # Preserve raw text when structured JSON is not available
+                    if response.content and isinstance(response.content, str) and len(response.content.strip()) > 0:
+                        raw_text = response.content.strip()
+                        logger.info('Using raw LLM text as fallback layout summary (stored under business_purpose)')
+                        return {
+                            'friendly_name': layout.friendly_name,
+                            'business_purpose': raw_text.split('\n')[0][:500],
+                            'usage_pattern': 'WORKING_STORAGE',
+                            'business_domain': 'GENERAL',
+                            'field_analysis': field_types,
+                            'complexity_score': min(0.9, field_count / 50),
+                            'raw': raw_text
+                        }
             
             # Fallback
             return {
