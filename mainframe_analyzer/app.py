@@ -707,7 +707,7 @@ def get_components(session_id):
             cursor.execute('''
                 SELECT component_name, component_type, total_lines, total_fields, 
                        business_purpose, complexity_score, analysis_result_json, 
-                       friendly_name, file_path, created_at
+                        file_path, created_at
                 FROM component_analysis 
                 WHERE session_id = ?
                 ORDER BY component_name
@@ -784,7 +784,7 @@ def get_components(session_id):
         logger.error(f"Error retrieving components: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
-    
+
 @app.route('/api/dependencies/<session_id>')
 def get_dependencies(session_id):
     """Get dependency relationships with enhanced data and debugging"""
