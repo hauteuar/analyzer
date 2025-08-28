@@ -700,59 +700,75 @@ def get_field_source_code(session_id, field_name):
         })
 @app.route('/api/components/<session_id>')
 def get_components(session_id):
-    """Fixed component retrieval with proper LLM summary handling"""
+    """Fixed component retrieval with proper LLM summary extraction"""
     try:
-        raw_components = analyzer.db_manager.get_session_components(session_id)
-        logger.info(f"Retrieved {len(raw_components)} raw components for session {session_id}")
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT component_name, component_type, total_lines, total_fields, 
+                       business_purpose, complexity_score, analysis_result_json, 
+                       friendly_name, file_path, created_at
+                FROM component_analysis 
+                WHERE session_id = ?
+                ORDER BY component_name
+            ''', (session_id,))
+            
+            raw_components = cursor.fetchall()
         
         transformed_components = []
-        for component in raw_components:
-            # Parse analysis_result_json safely
-            parsed_analysis = {}
+        for row in raw_components:
+            component = dict(row)
+            
+            # Enhanced LLM summary extraction
+            business_purpose = 'Analysis pending...'
+            llm_summary = {}
+            complexity_score = 0.5
+            
+            # Parse analysis_result_json
             if component.get('analysis_result_json'):
                 try:
                     parsed_analysis = json.loads(component['analysis_result_json'])
+                    
+                    # Extract LLM summary
+                    if parsed_analysis.get('llm_summary'):
+                        llm_summary = parsed_analysis['llm_summary']
+                        
+                        if llm_summary.get('business_purpose'):
+                            business_purpose = llm_summary['business_purpose']
+                        elif llm_summary.get('raw'):
+                            business_purpose = llm_summary['raw'][:200] + '...' if len(llm_summary['raw']) > 200 else llm_summary['raw']
+                            llm_summary['is_raw'] = True
+                        
+                        if llm_summary.get('complexity_score'):
+                            complexity_score = float(llm_summary['complexity_score'])
+                    
+                    # Fallback to direct business_purpose in parsed data
+                    elif parsed_analysis.get('business_purpose'):
+                        business_purpose = parsed_analysis['business_purpose']
+                        
                 except Exception as e:
-                    logger.warning(f"Failed to parse analysis JSON for {component.get('component_name')}: {e}")
+                    logger.warning(f"Error parsing analysis JSON for {component['component_name']}: {e}")
             
-            # Extract business purpose with proper fallback chain
-            business_purpose = None
-            llm_summary = {}
-            
-            # Priority order: explicit business_purpose column -> parsed llm_summary -> parsed business_purpose -> raw response
-            if component.get('business_purpose') and component['business_purpose'] != 'undefined':
+            # Use explicit business_purpose column if available and valid
+            if component.get('business_purpose') and component['business_purpose'] not in [None, '', 'undefined', 'null']:
                 business_purpose = component['business_purpose']
             
-            if parsed_analysis.get('llm_summary'):
-                llm_summary = parsed_analysis['llm_summary']
-                if llm_summary.get('business_purpose') and not business_purpose:
-                    business_purpose = llm_summary['business_purpose']
-                elif llm_summary.get('raw') and not business_purpose:
-                    business_purpose = llm_summary['raw'][:200] + '...' if len(llm_summary['raw']) > 200 else llm_summary['raw']
-                    llm_summary['is_raw'] = True
-            
-            if not business_purpose and parsed_analysis.get('business_purpose'):
-                business_purpose = parsed_analysis['business_purpose']
-            
-            # Final fallback
-            if not business_purpose or business_purpose == 'undefined':
-                business_purpose = f"Analysis pending for {component.get('component_name', 'component')}"
+            # Use explicit complexity_score if available
+            if component.get('complexity_score') and component['complexity_score'] > 0:
+                complexity_score = float(component['complexity_score'])
             
             # Get derived components count
-            try:
-                derived_count = analyzer.db_manager.get_derived_components_count(session_id, component['component_name'])
-            except Exception:
-                derived_count = 0
+            derived_count = analyzer.db_manager.get_derived_components_count(session_id, component['component_name'])
             
             transformed = {
                 'component_name': component['component_name'],
                 'component_type': component['component_type'],
-                'friendly_name': component.get('friendly_name') or component['component_name'],
+                'friendly_name': component.get('friendly_name') or component['component_name'].replace('-', ' ').title(),
                 'total_lines': component.get('total_lines', 0),
                 'total_fields': component.get('total_fields', 0),
                 'business_purpose': business_purpose,
                 'llm_summary': llm_summary,
-                'complexity_score': component.get('complexity_score', 0.5),
+                'complexity_score': complexity_score,
                 'derived_count': derived_count,
                 'file_path': component.get('file_path', ''),
                 'created_at': component.get('created_at', '')
@@ -766,7 +782,8 @@ def get_components(session_id):
         
     except Exception as e:
         logger.error(f"Error retrieving components: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)})    
+        return jsonify({'success': False, 'error': str(e)})
+
     
 @app.route('/api/dependencies/<session_id>')
 def get_dependencies(session_id):

@@ -2140,25 +2140,33 @@ function updateTargetFileFromLayout() {
             }
         }
 
-        async function loadRecordLayoutSelector() {
+        function loadRecordLayoutSelector() {
+    const selector = document.getElementById('recordLayoutSelector');
+    if (!selector) {
+        console.error('Record layout selector not found');
+        return;
+    }
+    
     try {
-        const response = await fetch(`/api/record-layouts/${currentSessionId}`);
-        if (response.ok) {
-            const data = await response.json();
-            if (data.success) {
-                const selector = document.getElementById('recordLayoutSelector');
-                selector.innerHTML = '<option value="">Or select a record layout</option>';
-                
-                data.layouts.forEach(layout => {
-                    const option = document.createElement('option');
-                    option.value = layout.layout_name;
-                    option.textContent = `${layout.layout_name} (${layout.fields_count || 0} fields) - ${layout.program_name}`;
-                    selector.appendChild(option);
-                });
-            }
-        }
+        fetch(`/api/record-layouts/${currentSessionId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    selector.innerHTML = '<option value="">Or select a record layout</option>';
+                    
+                    data.layouts.forEach(layout => {
+                        const option = document.createElement('option');
+                        option.value = layout.layout_name;
+                        option.textContent = `${layout.layout_name} (${layout.fields_count || 0} fields) - ${layout.program_name}`;
+                        selector.appendChild(option);
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error loading record layouts:', error);
+            });
     } catch (error) {
-        console.error('Error loading record layouts:', error);
+        console.error('Error in loadRecordLayoutSelector:', error);
     }
 }
 
@@ -2219,20 +2227,32 @@ function escapeForTemplate(str) {
 
     programs.forEach(program => {
         console.log('Processing program:', program.component_name);
-        console.log('LLM Summary:', program.llm_summary);
-        console.log('Business Purpose:', program.business_purpose);
         
-        // Enhanced business purpose extraction
+        // ENHANCED business purpose extraction with multiple fallbacks
         let businessPurpose = 'Analysis pending...';
         let complexityScore = 0.5;
         let isRawResponse = false;
         let rawResponse = '';
+        let friendlyName = program.component_name;
         
-        // Priority chain for business purpose
-        if (program.business_purpose && program.business_purpose !== 'undefined' && program.business_purpose.trim() !== '') {
+        // Generate friendly name if not provided
+        if (program.friendly_name && program.friendly_name !== program.component_name) {
+            friendlyName = program.friendly_name;
+        } else {
+            friendlyName = program.component_name.replace(/[_-]/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase());
+        }
+        
+        // Extract business purpose with comprehensive fallback chain
+        if (program.business_purpose && 
+            program.business_purpose !== 'undefined' && 
+            program.business_purpose !== 'null' &&
+            program.business_purpose.trim() !== '' &&
+            program.business_purpose !== 'Analysis pending...') {
             businessPurpose = program.business_purpose;
         } else if (program.llm_summary) {
-            if (program.llm_summary.business_purpose && program.llm_summary.business_purpose !== 'undefined') {
+            if (program.llm_summary.business_purpose && 
+                program.llm_summary.business_purpose !== 'undefined' &&
+                program.llm_summary.business_purpose.trim() !== '') {
                 businessPurpose = program.llm_summary.business_purpose;
                 complexityScore = program.llm_summary.complexity_score || 0.5;
             } else if (program.llm_summary.raw && program.llm_summary.raw.trim() !== '') {
@@ -2246,27 +2266,36 @@ function escapeForTemplate(str) {
             }
         }
         
-        // Set complexity score
+        // Set complexity score with fallbacks
         if (program.complexity_score && program.complexity_score > 0) {
             complexityScore = program.complexity_score;
         } else if (program.llm_summary && program.llm_summary.complexity_score) {
             complexityScore = program.llm_summary.complexity_score;
+        } else {
+            // Calculate basic complexity from metrics
+            const lines = program.total_lines || 0;
+            const fields = program.total_fields || 0;
+            complexityScore = Math.min(0.95, Math.max(0.1, (lines / 1000 + fields / 100) / 2));
         }
         
         const derivedCount = program.derived_count || 0;
         
         const card = document.createElement('div');
         card.className = 'component-summary-card';
-        // Then use it:
+        
+        // Enhanced template with proper escaping
+        const safeBusinessPurpose = businessPurpose.replace(/'/g, '&apos;').replace(/"/g, '&quot;');
+        const safeFriendlyName = friendlyName.replace(/'/g, '&apos;').replace(/"/g, '&quot;');
+        const safeProgramName = program.component_name.replace(/'/g, '&apos;').replace(/"/g, '&quot;');
         
         if (isRawResponse) {
-            // Special handling for raw responses
-            const safeRawResponse = escapeForTemplate(rawResponse);
-            card.innerHTML = ```
+            const safeRawResponse = rawResponse.replace(/'/g, '&apos;').replace(/"/g, '&quot;').replace(/\n/g, '\\n');
+            
+            card.innerHTML = `
                 <div class="component-header">
                     <div>
                         <div class="component-title">${program.component_name}</div>
-                        <div class="text-muted" style="font-size: 0.8rem;">${program.friendly_name || ''}</div>
+                        <div class="text-muted" style="font-size: 0.8rem;">${safeFriendlyName}</div>
                     </div>
                     <span class="component-type badge badge-warning">RAW AI ANALYSIS</span>
                 </div>
@@ -2274,8 +2303,8 @@ function escapeForTemplate(str) {
                 <div class="business-purpose raw-analysis">
                     <strong>AI Analysis (Raw Response):</strong><br>
                     <div style="background: #fff3cd; padding: 1rem; border-radius: 6px; border-left: 4px solid #ffc107; font-size: 0.9rem; line-height: 1.4; max-height: 150px; overflow-y: auto;">
-                        ${businessPurpose}
-                        ${rawResponse.length > 200 ? `<br><small><em>Click "View Full Analysis" to see complete response</em></small>` : ''}
+                        ${safeBusinessPurpose}
+                        ${rawResponse.length > 200 ? '<br><small><em>Click "View Full Analysis" to see complete response</em></small>' : ''}
                     </div>
                 </div>
                 
@@ -2295,7 +2324,7 @@ function escapeForTemplate(str) {
                 </div>
                 
                 <div class="derived-components">
-                    <button class="derived-toggle" onclick="toggleDerivedComponents('${program.component_name}', this)">
+                    <button class="derived-toggle" onclick="toggleDerivedComponents('${safeProgramName}', this)">
                         View ${derivedCount} Components
                     </button>
                     <div class="derived-list" id="derived-${program.component_name}">
@@ -2303,12 +2332,9 @@ function escapeForTemplate(str) {
                     </div>
                 </div>
                 
-                // And in your template:
                 ${rawResponse.length > 200 ? 
-                    `<button class="btn btn-secondary" style="width: 100%; margin-top: 1rem;" onclick="showRawAnalysisModal('${program.component_name}', '${safeRawResponse}')">
-                        View Full AI Analysis
-                    </button>` 
-                    : ''}
+                    '<button class="btn btn-secondary" style="width: 100%; margin-top: 1rem;" onclick="showRawAnalysisModal(\\''+safeProgramName+'\\', \\''+safeRawResponse+'\\')">View Full AI Analysis</button>' 
+                    `: ''}
             `;
         } else {
             // Standard structured display
@@ -2316,12 +2342,12 @@ function escapeForTemplate(str) {
                 <div class="component-header">
                     <div>
                         <div class="component-title">${program.component_name}</div>
-                        <div class="text-muted" style="font-size: 0.8rem;">${program.friendly_name || ''}</div>
+                        <div class="text-muted" style="font-size: 0.8rem;">${safeFriendlyName}</div>
                     </div>
                     <span class="component-type badge badge-primary">PROGRAM</span>
                 </div>
                 
-                <div class="business-purpose">${businessPurpose}</div>
+                <div class="business-purpose">${safeBusinessPurpose}</div>
                 
                 <div class="component-metrics">
                     <div class="metric">
@@ -2343,7 +2369,7 @@ function escapeForTemplate(str) {
                 </div>
                 
                 <div class="derived-components">
-                    <button class="derived-toggle" onclick="toggleDerivedComponents('${program.component_name}', this)">
+                    <button class="derived-toggle" onclick="toggleDerivedComponents('${safeProgramName}', this)">
                         View ${derivedCount} Components
                     </button>
                     <div class="derived-list" id="derived-${program.component_name}">
@@ -2356,7 +2382,6 @@ function escapeForTemplate(str) {
         container.appendChild(card);
     });
 }
-
         // Toggle derived components
         async function toggleDerivedComponents(programName, button) {
             const derivedList = document.getElementById(`derived-${programName}`);
@@ -3382,61 +3407,66 @@ function displayFieldMappingsWithSummary(mappings, summary) {
         return;
     }
 
-    // Display summary if available
-    if (summary) {
-        showMappingSummary(summary);
-    }
-
     mappings.forEach(mapping => {
         const row = document.createElement('tr');
         
-        // Format field name with friendly name
-        const fieldNameHtml = `
-            <div>
-                <strong>${mapping.field_name}</strong>
-                ${mapping.friendly_name && mapping.friendly_name !== mapping.field_name ? 
-                    `<br><small class="text-muted">${mapping.friendly_name}</small>` : ''}
-            </div>
-        `;
-
-        // Format mainframe type and length
-        const mainframeTypeHtml = `
-            <div>
-                <code>${mapping.mainframe_data_type || 'UNKNOWN'}</code>
-                <br><small>Length: ${mapping.mainframe_length || 0}</small>
-            </div>
-        `;
-
-        // Format oracle type and length  
-        const oracleTypeHtml = `
-            <div>
-                <code>${mapping.oracle_data_type || 'VARCHAR2(50)'}</code>
-                <br><small>Length: ${mapping.oracle_length || 50}</small>
-            </div>
-        `;
-
         row.innerHTML = `
-            <td>${fieldNameHtml}</td>
-            <td>${mainframeTypeHtml}</td>
-            <td>${oracleTypeHtml}</td>
             <td>
-                <strong>${mapping.population_source || 'Program logic'}</strong>
-                ${mapping.source_record_layout ? `<br><small>From: ${mapping.source_record_layout}</small>` : ''}
+                <div style="min-width: 150px;">
+                    <strong>${mapping.field_name || 'N/A'}</strong>
+                    ${mapping.friendly_name && mapping.friendly_name !== mapping.field_name ? 
+                        `<br><small class="text-muted">${mapping.friendly_name}</small>` : ''}
+                </div>
             </td>
             <td>
-                <span class="badge ${getBadgeClass(mapping.business_logic_type)}">${mapping.business_logic_type}</span>
-                <br><small>${mapping.business_logic_description || ''}</small>
+                <div style="min-width: 120px;">
+                    <code style="font-size: 0.8rem;">${mapping.mainframe_data_type || 'UNKNOWN'}</code>
+                    <br><small><strong>Length:</strong> ${mapping.mainframe_length || 0}</small>
+                </div>
             </td>
-            <td>${Array.isArray(mapping.programs_involved) ? mapping.programs_involved.join(', ') : mapping.programs_involved || 'Unknown'}</td>
             <td>
-                <button class="btn btn-secondary" onclick="showFieldDetails('${mapping.field_name}')" style="padding: 0.25rem 0.5rem; font-size: 0.8rem;">
-                    View Details
-                </button>
+                <div style="min-width: 120px;">
+                    <code style="font-size: 0.8rem;">${mapping.oracle_data_type || 'VARCHAR2(50)'}</code>
+                    <br><small><strong>Length:</strong> ${mapping.oracle_length || 50}</small>
+                </div>
+            </td>
+            <td>
+                <div style="min-width: 150px;">
+                    <strong>${mapping.population_source || 'Program logic'}</strong>
+                    ${mapping.source_record_layout ? `<br><small>From: ${mapping.source_record_layout}</small>` : ''}
+                </div>
+            </td>
+            <td>
+                <div style="min-width: 120px;">
+                    <span class="badge ${getBadgeClass(mapping.business_logic_type)}">${mapping.business_logic_type}</span>
+                    <br><small style="font-size: 0.75rem;">${mapping.business_logic_description || ''}</small>
+                </div>
+            </td>
+            <td>
+                <div style="min-width: 100px;">
+                    ${Array.isArray(mapping.programs_involved) ? 
+                        mapping.programs_involved.join(', ') : 
+                        mapping.programs_involved || 'Unknown'}
+                </div>
+            </td>
+            <td>
+                <div style="min-width: 80px;">
+                    <button class="btn btn-secondary" onclick="showFieldDetails('${mapping.field_name}')" 
+                            style="padding: 0.25rem 0.5rem; font-size: 0.75rem; white-space: nowrap;">
+                        View Details
+                    </button>
+                </div>
             </td>
         `;
         tbody.appendChild(row);
     });
+
+    // Show summary if available
+    if (summary) {
+        showMappingSummary(summary);
+    }
 }
+
 function showMappingSummary(summary) {
     const summaryHtml = `
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; margin-top: 1rem;">
@@ -3552,27 +3582,54 @@ async function showFieldDetails(fieldName) {
 }
 
 function displayFieldDetailsModal(fieldDetails) {
-    document.getElementById('fieldModalTitle').textContent = `${fieldDetails.field_name} - Field Details`;
+    const modalTitle = document.getElementById('fieldModalTitle');
+    const fieldDetailsContent = document.getElementById('fieldDetailsContent');
     
-    const operationsSummary = fieldDetails.operations.map(op => 
-        `${op.program_name}: ${op.usage_type} (${op.move_source_count + op.move_target_count + op.arithmetic_count + op.conditional_count} operations)`
-    ).join('<br>');
+    if (!modalTitle || !fieldDetailsContent) {
+        console.error('Modal elements not found');
+        return;
+    }
+    
+    try {
+        modalTitle.textContent = `${fieldDetails.field_name} - Field Details`;
+        
+        // Safe template creation
+        const content = createFieldDetailsContent(fieldDetails);
+        fieldDetailsContent.innerHTML = content;
+        
+        const modal = document.getElementById('fieldDetailsModal');
+        if (modal) {
+            modal.style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+    } catch (error) {
+        console.error('Error displaying field details modal:', error);
+        showError('Error displaying field details');
+    }
+}
 
-    const referencesHtml = fieldDetails.references.map(ref => `
-        <div style="padding: 0.5rem; margin-bottom: 0.5rem; background: #f8f9fa; border-left: 3px solid #667eea; border-radius: 4px;">
-            <strong>Line ${ref.line_number}:</strong> ${ref.operation_type}<br>
-            <code style="font-size: 0.8rem;">${ref.line_content}</code>
-        </div>
-    `).join('');
+function createFieldDetailsContent(fieldDetails) {
+    const operationsSummary = fieldDetails.operations ? 
+        fieldDetails.operations.map(op => 
+            `${op.program_name}: ${op.usage_type} (${op.move_source_count + op.move_target_count + op.arithmetic_count + op.conditional_count} operations)`
+        ).join('<br>') : 'No operations found';
 
-    const content = `
+    const referencesHtml = fieldDetails.references ? 
+        fieldDetails.references.map(ref => `
+            <div style="padding: 0.5rem; margin-bottom: 0.5rem; background: #f8f9fa; border-left: 3px solid #667eea; border-radius: 4px;">
+                <strong>Line ${ref.line_number}:</strong> ${ref.operation_type}<br>
+                <code style="font-size: 0.8rem;">${ref.line_content}</code>
+            </div>
+        `).join('') : 'No references found';
+
+    return `
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
             <div>
                 <h5>Field Information</h5>
                 <table style="width: 100%; font-size: 0.9rem;">
-                    <tr><td><strong>Name:</strong></td><td>${fieldDetails.field_name}</td></tr>
-                    <tr><td><strong>Friendly Name:</strong></td><td>${fieldDetails.friendly_name}</td></tr>
-                    <tr><td><strong>Usage Type:</strong></td><td><span class="badge ${getBadgeClass(fieldDetails.usage_type)}">${fieldDetails.usage_type}</span></td></tr>
+                    <tr><td><strong>Name:</strong></td><td>${fieldDetails.field_name || 'N/A'}</td></tr>
+                    <tr><td><strong>Friendly Name:</strong></td><td>${fieldDetails.friendly_name || 'N/A'}</td></tr>
+                    <tr><td><strong>Usage Type:</strong></td><td><span class="badge ${getBadgeClass(fieldDetails.usage_type || 'UNKNOWN')}">${fieldDetails.usage_type || 'UNKNOWN'}</span></td></tr>
                     <tr><td><strong>Source Field:</strong></td><td>${fieldDetails.source_field || 'N/A'}</td></tr>
                     <tr><td><strong>Target Field:</strong></td><td>${fieldDetails.target_field || 'N/A'}</td></tr>
                 </table>
@@ -3580,11 +3637,11 @@ function displayFieldDetailsModal(fieldDetails) {
             <div>
                 <h5>Data Types & Lengths</h5>
                 <table style="width: 100%; font-size: 0.9rem;">
-                    <tr><td><strong>Mainframe Type:</strong></td><td><code>${fieldDetails.mainframe_data_type}</code></td></tr>
-                    <tr><td><strong>Mainframe Length:</strong></td><td>${fieldDetails.mainframe_length}</td></tr>
-                    <tr><td><strong>Oracle Type:</strong></td><td><code>${fieldDetails.oracle_data_type}</code></td></tr>
-                    <tr><td><strong>Oracle Length:</strong></td><td>${fieldDetails.oracle_length}</td></tr>
-                    <tr><td><strong>Total References:</strong></td><td>${fieldDetails.total_references}</td></tr>
+                    <tr><td><strong>Mainframe Type:</strong></td><td><code>${fieldDetails.mainframe_data_type || 'UNKNOWN'}</code></td></tr>
+                    <tr><td><strong>Mainframe Length:</strong></td><td>${fieldDetails.mainframe_length || 0}</td></tr>
+                    <tr><td><strong>Oracle Type:</strong></td><td><code>${fieldDetails.oracle_data_type || 'VARCHAR2(50)'}</code></td></tr>
+                    <tr><td><strong>Oracle Length:</strong></td><td>${fieldDetails.oracle_length || 50}</td></tr>
+                    <tr><td><strong>Total References:</strong></td><td>${fieldDetails.total_references || 0}</td></tr>
                 </table>
             </div>
         </div>
@@ -3592,7 +3649,7 @@ function displayFieldDetailsModal(fieldDetails) {
         <div style="margin-bottom: 2rem;">
             <h5>Business Purpose</h5>
             <div style="padding: 1rem; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #667eea;">
-                ${fieldDetails.business_purpose}
+                ${fieldDetails.business_purpose || 'No description available'}
             </div>
         </div>
 
@@ -3606,28 +3663,24 @@ function displayFieldDetailsModal(fieldDetails) {
         <div style="margin-bottom: 2rem;">
             <h5>Program Operations</h5>
             <div style="font-size: 0.9rem;">
-                ${operationsSummary || 'No operations found'}
+                ${operationsSummary}
             </div>
         </div>
 
         <div style="margin-bottom: 2rem;">
             <h5>Field References (First 10)</h5>
             <div style="max-height: 300px; overflow-y: auto;">
-                ${referencesHtml || 'No references found'}
+                ${referencesHtml}
             </div>
         </div>
 
         <div>
             <h5>Source Code Context</h5>
             <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; max-height: 200px; overflow-y: auto;">
-                <pre style="margin: 0; font-size: 0.8rem; white-space: pre-wrap;">${fieldDetails.source_code_snippet}</pre>
+                <pre style="margin: 0; font-size: 0.8rem; white-space: pre-wrap;">${fieldDetails.source_code_snippet || 'Source code not available'}</pre>
             </div>
         </div>
     `;
-
-    document.getElementById('fieldDetailsContent').innerHTML = content;
-    document.getElementById('fieldDetailsModal').style.display = 'block';
-    document.body.style.overflow = 'hidden';
 }
 
 function closeFieldDetailsModal() {

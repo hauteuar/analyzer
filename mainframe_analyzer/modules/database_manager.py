@@ -870,6 +870,62 @@ class DatabaseManager:
             logger.warning(f"Error generating code snippet for field: {str(e)}")
             return field_data.get('code_snippet', f"Field: {field_data.get('name', 'UNKNOWN')}")
     
+    def store_field_details_enhanced(self, session_id: str, field_data: Dict, program_name: str, layout_id: int = None):
+        """Enhanced field details storage with proper lengths"""
+        field_name = field_data.get('name', 'UNNAMED_FIELD')
+        
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO field_analysis_details 
+                    (session_id, field_id, field_name, friendly_name, program_name, layout_name,
+                    operation_type, line_number, code_snippet, usage_type, source_field, target_field,
+                    business_purpose, analysis_confidence,
+                    definition_line_number, definition_code, program_source_content,
+                    field_references_json, usage_summary_json, total_program_references,
+                    move_source_count, move_target_count, arithmetic_count, conditional_count, cics_count,
+                    mainframe_length, oracle_length, mainframe_data_type, oracle_data_type,
+                    record_classification, inherited_from_record, effective_classification)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    session_id, layout_id, field_name,
+                    field_data.get('friendly_name', field_name)[:100],
+                    program_name[:100], 
+                    field_data.get('layout_name', '')[:100],
+                    field_data.get('operation_type', 'DEFINITION')[:50],
+                    field_data.get('line_number', 0),
+                    field_data.get('code_snippet', '')[:1000],
+                    field_data.get('usage_type', 'STATIC')[:50],
+                    field_data.get('source_field', '')[:100],
+                    field_data.get('target_field', '')[:100],
+                    field_data.get('business_purpose', f"Field definition for {field_name}")[:500],
+                    float(field_data.get('confidence', 0.8)),
+                    field_data.get('definition_line_number', 0),
+                    field_data.get('definition_code', '')[:500],
+                    field_data.get('program_source_content', '')[:10000],
+                    field_data.get('field_references_json', '[]')[:2000],
+                    field_data.get('usage_summary_json', '{}')[:1000],
+                    field_data.get('total_program_references', 0),
+                    field_data.get('move_source_count', 0),
+                    field_data.get('move_target_count', 0),
+                    field_data.get('arithmetic_count', 0),
+                    field_data.get('conditional_count', 0),
+                    field_data.get('cics_count', 0),
+                    # Enhanced field length and type information
+                    field_data.get('mainframe_length', 0),
+                    field_data.get('oracle_length', 50),
+                    field_data.get('mainframe_data_type', 'UNKNOWN')[:100],
+                    field_data.get('oracle_data_type', 'VARCHAR2(50)')[:100],
+                    field_data.get('record_classification', 'STATIC')[:50],
+                    field_data.get('inherited_from_record', False),
+                    field_data.get('effective_classification', 'UNKNOWN')[:50]
+                ))
+                
+        except Exception as e:
+            logger.error(f"Error storing enhanced field details for {field_name}: {str(e)}")
+            raise
+
     def store_field_details(self, session_id: str, field_data: Dict, 
                           program_name: str, layout_id: int = None):
         """Store field analysis details with retry logic (public method)"""

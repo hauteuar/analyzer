@@ -167,22 +167,116 @@ class COBOLParser:
         return ops
 
     def extract_cics_operations(self, lines: List[str]) -> List[Dict]:
-        ops = []
-        seen = set()
-        for i, raw in enumerate(lines):
-            pa = self.extract_program_area_only(raw)
-            if not pa:
+        """Extract CICS operations with proper file name extraction"""
+        operations = []
+        seen_operations = set()
+        
+        for i, line in enumerate(lines):
+            program_area = self.extract_program_area_only(line)
+            if not program_area:
                 continue
-            up = pa.upper()
-            if 'EXEC CICS' in up:
-                cmd = self._extract_complete_cics_command(lines, i)
-                if cmd:
-                    for c in self._parse_cics_command(cmd, i+1):
-                        key = f"CICS::{c.get('file_name')}::{i}"
-                        if key not in seen:
-                            seen.add(key)
-                            ops.append(c)
-        return ops
+            
+            program_upper = program_area.upper()
+            
+            # Multi-line CICS command handling
+            if 'EXEC CICS' in program_upper:
+                cics_command = self._extract_complete_cics_command(lines, i)
+                if cics_command:
+                    cics_ops = self._parse_cics_command_enhanced(cics_command, i + 1)
+                    for cics_op in cics_ops:
+                        op_key = f"CICS_{cics_op['operation']}_{cics_op.get('file_name', 'NOFILE')}_{i}"
+                        if op_key not in seen_operations:
+                            seen_operations.add(op_key)
+                            operations.append(cics_op)
+        
+        return operations
+
+    def _parse_cics_command_enhanced(self, cics_command: str, line_number: int) -> List[Dict]:
+        """Enhanced CICS parsing to detect files from DATASET parameter"""
+        operations = []
+        cics_upper = cics_command.upper()
+        
+        # Pattern from your code: EXEC CICS READ DATASET ('TMS92ASO')
+        cics_patterns = [
+            # Primary DATASET patterns - these should catch TMS92ASO
+            (r'EXEC\s+CICS\s+READ\s+.*?DATASET\s*\(\s*[\'"]?([A-Z0-9]{3,})[\'"]?\s*\)', 'CICS READ', 'INPUT'),
+            (r'EXEC\s+CICS\s+WRITE\s+.*?DATASET\s*\(\s*[\'"]?([A-Z0-9]{3,})[\'"]?\s*\)', 'CICS WRITE', 'OUTPUT'),
+            (r'EXEC\s+CICS\s+REWRITE\s+.*?DATASET\s*\(\s*[\'"]?([A-Z0-9]{3,})[\'"]?\s*\)', 'CICS REWRITE', 'OUTPUT'),
+            (r'EXEC\s+CICS\s+DELETE\s+.*?DATASET\s*\(\s*[\'"]?([A-Z0-9]{3,})[\'"]?\s*\)', 'CICS DELETE', 'OUTPUT'),
+            
+            # Alternative FILE patterns
+            (r'EXEC\s+CICS\s+READ\s+.*?FILE\s*\(\s*[\'"]?([A-Z0-9]{3,})[\'"]?\s*\)', 'CICS READ', 'INPUT'),
+            (r'EXEC\s+CICS\s+WRITE\s+.*?FILE\s*\(\s*[\'"]?([A-Z0-9]{3,})[\'"]?\s*\)', 'CICS WRITE', 'OUTPUT'),
+            
+            # Specific patterns for files ending in ASO, DAO, DCO (common CICS file suffixes)
+            (r'EXEC\s+CICS\s+READ.*?([A-Z0-9]{3,}(?:ASO|DAO|DCO)).*?(?:END-EXEC|\))', 'CICS READ', 'INPUT'),
+            (r'EXEC\s+CICS\s+WRITE.*?([A-Z0-9]{3,}(?:ASO|DAO|DCO)).*?(?:END-EXEC|\))', 'CICS WRITE', 'OUTPUT'),
+            
+            # Catch any valid file name in CICS operations (fallback)
+            (r'EXEC\s+CICS\s+READ.*?\(\s*[\'"]?([A-Z][A-Z0-9]{5,12})[\'"]?\s*\)', 'CICS READ', 'INPUT'),
+            (r'EXEC\s+CICS\s+WRITE.*?\(\s*[\'"]?([A-Z][A-Z0-9]{5,12})[\'"]?\s*\)', 'CICS WRITE', 'OUTPUT'),
+        ]
+        
+        for pattern, operation, io_direction in cics_patterns:
+            matches = re.findall(pattern, cics_upper, re.DOTALL)
+            for file_name in matches:
+                # Enhanced validation specifically for CICS files
+                if self._is_valid_cics_filename_enhanced(file_name):
+                    operations.append({
+                        'operation': operation,
+                        'file_name': file_name,
+                        'friendly_name': self.generate_friendly_name(file_name, 'CICS File'),
+                        'line_number': line_number,
+                        'line_content': cics_command[:100],
+                        'file_type': 'CICS_FILE',
+                        'io_direction': io_direction,
+                        'confidence_score': 0.95
+                    })
+        
+        return operations
+
+    def _is_valid_cics_filename_enhanced(self, name: str) -> bool:
+        """Enhanced validation specifically for CICS file names like TMS92ASO"""
+        if not name or len(name) < 6:
+            return False
+        
+        name_upper = name.upper()
+        
+        # Must start with letter
+        if not re.match(r'^[A-Z]', name_upper):
+            return False
+        
+        # Must be valid CICS file name pattern (6-30 chars, alphanumeric + limited special chars)
+        if not re.match(r'^[A-Z][A-Z0-9]{5,29}, name_upper):
+            return False
+        
+        # EXCLUDE obvious comment tags and sequence numbers
+        if re.match(r'^[A-Z]{2}\d{6}, name_upper):  # Like SR000182
+            return False
+        
+        # EXCLUDE working storage variables
+        if re.match(r'^(WS|LS|WK|TMP)-', name_upper):
+            return False
+        
+        # EXCLUDE COBOL keywords
+        cobol_keywords = {
+            'PICTURE', 'REDEFINES', 'OCCURS', 'VALUE', 'USAGE', 'COMP', 'BINARY',
+            'DISPLAY', 'PACKED', 'PERFORM', 'SECTION', 'PARAGRAPH', 'DIVISION'
+        }
+        if name_upper in cobol_keywords:
+            return False
+        
+        # INCLUDE common CICS file patterns
+        # Files ending in ASO, DAO, DCO, etc. are typically CICS files
+        if re.match(r'^[A-Z0-9]{3,}(?:ASO|DAO|DCO|FILE|TBL|IDX), name_upper):
+            return True
+        
+        # General pattern for CICS files (at least 6 chars, starts with letter)
+        if len(name_upper) >= 6 and re.match(r'^[A-Z][A-Z0-9]{5,}, name_upper):
+            return True
+        
+        return False
+
 
     def extract_mq_operations(self, lines: List[str]) -> List[Dict]:
         ops = []

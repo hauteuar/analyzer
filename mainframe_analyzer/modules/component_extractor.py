@@ -6,7 +6,7 @@ Handles extraction and analysis of COBOL components including record layouts
 import json
 import logging
 import re
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from modules.cobol_parser import COBOLParser
 import time
 import traceback
@@ -1156,7 +1156,7 @@ Please provide a JSON response with:
             }
 
     def _calculate_field_lengths(self, picture: str, usage: str = "") -> Tuple[int, int, str]:
-        """Calculate mainframe and oracle field lengths from PIC clause"""
+        """Fixed field length calculation from PIC clause"""
         if not picture:
             return 0, 50, "VARCHAR2(50)"
         
@@ -1167,37 +1167,45 @@ Please provide a JSON response with:
         
         try:
             # Numeric fields
-            if re.search(r'9|S9', pic_upper):
-                # Count total digits
-                digit_match = re.findall(r'9+|\((\d+)\)', pic_upper)
+            if re.search(r'[9S]', pic_upper):
                 total_digits = 0
-                
-                for match in digit_match:
-                    if match.isdigit():  # (n) format
-                        total_digits += int(match)
-                    else:  # 999 format
-                        total_digits += len([c for c in match if c == '9'])
-                
-                # Handle decimals
                 decimal_digits = 0
+                
+                # Handle parentheses notation like 9(5) or S9(7)
+                paren_matches = re.findall(r'[9S]\((\d+)\)', pic_upper)
+                for match in paren_matches:
+                    total_digits += int(match)
+                
+                # Handle explicit 9s like 99999
+                explicit_nines = len(re.findall(r'9', re.sub(r'9\(\d+\)', '', pic_upper)))
+                total_digits += explicit_nines
+                
+                # Handle decimal point (V)
                 if 'V' in pic_upper:
-                    # Split on V and count digits after
                     parts = pic_upper.split('V')
                     if len(parts) > 1:
                         decimal_part = parts[1]
-                        decimal_match = re.findall(r'9+|\((\d+)\)', decimal_part)
-                        for match in decimal_match:
-                            if match.isdigit():
-                                decimal_digits += int(match)
-                            else:
-                                decimal_digits += len([c for c in match if c == '9'])
+                        # Count decimal digits
+                        decimal_paren = re.findall(r'9\((\d+)\)', decimal_part)
+                        for match in decimal_paren:
+                            decimal_digits += int(match)
+                        decimal_explicit = len(re.findall(r'9', re.sub(r'9\(\d+\)', '', decimal_part)))
+                        decimal_digits += decimal_explicit
                 
-                # Calculate storage
+                # Calculate mainframe storage
                 if usage.upper() in ['COMP-3', 'PACKED-DECIMAL']:
-                    mainframe_length = (total_digits + 1) // 2 + 1  # Packed decimal
+                    mainframe_length = (total_digits + 1) // 2 + 1
+                elif usage.upper() in ['COMP', 'BINARY']:
+                    if total_digits <= 4:
+                        mainframe_length = 2
+                    elif total_digits <= 9:
+                        mainframe_length = 4
+                    else:
+                        mainframe_length = 8
                 else:
-                    mainframe_length = total_digits + (1 if 'S' in pic_upper else 0)  # Display numeric
+                    mainframe_length = total_digits + (1 if 'S' in pic_upper else 0)
                 
+                # Oracle type
                 if decimal_digits > 0:
                     oracle_type = f"NUMBER({total_digits},{decimal_digits})"
                     oracle_length = total_digits
@@ -1206,14 +1214,14 @@ Please provide a JSON response with:
                     oracle_length = total_digits
             
             # Alphanumeric fields
-            elif re.search(r'X|A', pic_upper):
-                # Count X's or extract (n)
-                if '(' in pic_upper:
-                    length_match = re.search(r'\((\d+)\)', pic_upper)
-                    if length_match:
-                        mainframe_length = int(length_match.group(1))
+            elif re.search(r'[XA]', pic_upper):
+                # Handle X(n) notation
+                paren_matches = re.findall(r'X\((\d+)\)', pic_upper)
+                if paren_matches:
+                    mainframe_length = sum(int(match) for match in paren_matches)
                 else:
-                    mainframe_length = len([c for c in pic_upper if c in 'XA'])
+                    # Count explicit Xs
+                    mainframe_length = len(re.findall(r'X', pic_upper))
                 
                 oracle_length = mainframe_length
                 if oracle_length <= 4000:
@@ -1221,7 +1229,7 @@ Please provide a JSON response with:
                 else:
                     oracle_type = "CLOB"
             
-            # Default case
+            # Default for unknown patterns
             else:
                 mainframe_length = 10
                 oracle_length = 50
@@ -1234,7 +1242,6 @@ Please provide a JSON response with:
             oracle_type = "VARCHAR2(50)"
         
         return mainframe_length, oracle_length, oracle_type
-
 
 
     def _infer_field_business_purpose(self, field_name: str, usage_analysis: Dict) -> str:
