@@ -151,15 +151,18 @@ class DatabaseManager:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
                     
-                    # Drop existing tables to start fresh
-                    cursor.execute('DROP TABLE IF EXISTS field_analysis_details')
-                    cursor.execute('DROP TABLE IF EXISTS field_mappings') 
-                    cursor.execute('DROP TABLE IF EXISTS record_layouts')
-                    cursor.execute('DROP TABLE IF EXISTS component_analysis')
-                    cursor.execute('DROP TABLE IF EXISTS dependency_relationships')
-                    cursor.execute('DROP TABLE IF EXISTS chat_conversations')
-                    cursor.execute('DROP TABLE IF EXISTS llm_analysis_calls')
-                    cursor.execute('DROP TABLE IF EXISTS analysis_sessions')
+                    # Get all existing tables first
+                    cursor.execute("""
+                        SELECT name FROM sqlite_master 
+                        WHERE type='table' AND name NOT LIKE 'sqlite_%'
+                    """)
+                    existing_tables = cursor.fetchall()
+                    
+                    # Drop all existing tables
+                    for table in existing_tables:
+                        table_name = table[0]
+                        cursor.execute(f'DROP TABLE IF EXISTS {table_name}')
+                        logger.info(f"Dropped existing table: {table_name}")
                     
                     # Session management
                     cursor.execute('''
@@ -216,6 +219,26 @@ class DatabaseManager:
                         )
                     ''')
                     
+                    # Derived components table (NEW)
+                    cursor.execute('''
+                        CREATE TABLE derived_components (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            parent_component TEXT NOT NULL,
+                            component_name TEXT NOT NULL,
+                            component_type TEXT NOT NULL,
+                            friendly_name TEXT,
+                            business_purpose TEXT,
+                            line_start INTEGER,
+                            line_end INTEGER,
+                            fields_count INTEGER DEFAULT 0,
+                            source_code TEXT,
+                            metadata_json TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
+                        )
+                    ''')
+                    
                     # Record layouts with enhanced source tracking
                     cursor.execute('''
                         CREATE TABLE record_layouts (
@@ -254,7 +277,7 @@ class DatabaseManager:
                             business_purpose TEXT,
                             analysis_confidence REAL DEFAULT 0.0,
                             
-                            -- NEW: Complete source code context fields
+                            -- Complete source code context fields
                             definition_line_number INTEGER,
                             definition_code TEXT,
                             program_source_content TEXT,
@@ -293,7 +316,7 @@ class DatabaseManager:
                             programs_involved_json TEXT,
                             confidence_score REAL DEFAULT 0.0,
                             
-                            -- NEW: Source code evidence
+                            -- Source code evidence
                             source_code_evidence_json TEXT,
                             actual_cobol_definition TEXT,
                             usage_patterns_json TEXT,
@@ -335,33 +358,10 @@ class DatabaseManager:
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
                         )
                     ''')
-                    cursor.execute('''
-                        CREATE TABLE derived_components (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            session_id TEXT NOT NULL,
-                            parent_component TEXT NOT NULL,
-                            component_name TEXT NOT NULL,
-                            component_type TEXT NOT NULL,
-                            friendly_name TEXT,
-                            business_purpose TEXT,
-                            line_start INTEGER,
-                            line_end INTEGER,
-                            fields_count INTEGER DEFAULT 0,
-                            source_code TEXT,
-                            metadata_json TEXT,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
-                        )
-                    ''')
-                    
-                    # Add index for performance
-                    cursor.execute('''
-                        CREATE INDEX idx_derived_components_parent 
-                        ON derived_components(session_id, parent_component)
-                    ''')
 
                     # Create performance indexes
                     indexes = [
+                        'CREATE INDEX idx_derived_components_parent ON derived_components(session_id, parent_component)',
                         'CREATE INDEX idx_field_mappings_target_file ON field_mappings(target_file_name, session_id)',
                         'CREATE INDEX idx_field_details_field_name ON field_analysis_details(field_name, session_id)',
                         'CREATE INDEX idx_field_details_program ON field_analysis_details(program_name, session_id)',
@@ -372,11 +372,12 @@ class DatabaseManager:
                         'CREATE INDEX idx_record_layouts_session ON record_layouts(session_id, program_name)',
                         'CREATE INDEX idx_record_layouts_name ON record_layouts(layout_name, session_id)'
                     ]
-                    
-
 
                     for index_sql in indexes:
-                        cursor.execute(index_sql)
+                        try:
+                            cursor.execute(index_sql)
+                        except Exception as idx_error:
+                            logger.warning(f"Failed to create index: {index_sql[:50]}... Error: {idx_error}")
                     
                     logger.info("Fresh database schema created successfully with enhanced field context support")
                     self.init_executed = True
@@ -387,7 +388,6 @@ class DatabaseManager:
                 raise
         
         raise sqlite3.OperationalError("Failed to initialize database after multiple attempts")
-
 
     def store_derived_components(self, session_id: str, parent_component: str, derived_components: List[Dict]):
         """Store derived components in separate table"""
