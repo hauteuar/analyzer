@@ -247,11 +247,11 @@ class COBOLParser:
             return False
         
         # Must be valid CICS file name pattern (6-30 chars, alphanumeric + limited special chars)
-        if not re.match(r'^[A-Z][A-Z0-9]{5,29}, name_upper):
+        if not re.match(r'^[A-Z][A-Z0-9]{5,29}', name_upper):
             return False
         
         # EXCLUDE obvious comment tags and sequence numbers
-        if re.match(r'^[A-Z]{2}\d{6}, name_upper):  # Like SR000182
+        if re.match(r'^[A-Z]{2}\d{6}', name_upper):  # Like SR000182
             return False
         
         # EXCLUDE working storage variables
@@ -268,11 +268,11 @@ class COBOLParser:
         
         # INCLUDE common CICS file patterns
         # Files ending in ASO, DAO, DCO, etc. are typically CICS files
-        if re.match(r'^[A-Z0-9]{3,}(?:ASO|DAO|DCO|FILE|TBL|IDX), name_upper):
+        if re.match(r'^[A-Z0-9]{3,}(?:ASO|DAO|DCO|FILE|TBL|IDX)', name_upper):
             return True
         
         # General pattern for CICS files (at least 6 chars, starts with letter)
-        if len(name_upper) >= 6 and re.match(r'^[A-Z][A-Z0-9]{5,}, name_upper):
+        if len(name_upper) >= 6 and re.match(r'^[A-Z][A-Z0-9]{5,}', name_upper):
             return True
         
         return False
