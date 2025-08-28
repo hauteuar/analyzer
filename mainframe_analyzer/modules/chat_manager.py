@@ -50,8 +50,8 @@ class ChatManager:
             # Build comprehensive prompt with source code
             prompt = self._build_enhanced_prompt(message, context)
             
-            # Call LLM
-            response = self.llm_client.call_llm(prompt, max_tokens=2000, temperature=0.1)
+            # Call LLM (with chunking if prompt is very large)
+            response = self._call_llm_with_optional_chunking(session_id, message, prompt, context)
             
             # Log the call
             self.db_manager.log_llm_call(
@@ -82,6 +82,100 @@ class ChatManager:
             logger.error(f"Error processing chat query: {str(e)}")
             return "I'm sorry, I encountered an error processing your request."
 
+    def _call_llm_with_optional_chunking(self, session_id: str, message: str, prompt: str, context: Dict):
+        """Call the LLM directly or via chunked analysis if the prompt is too large.
+
+        Strategy:
+        - If estimated tokens for the prompt <= CHAT_TOKEN_LIMIT, call LLM directly.
+        - Otherwise, chunk the combined component source using TokenManager, call the LLM for each chunk,
+          collect chunk-level analyses, then synthesize a final response with a final LLM call.
+        """
+        try:
+            CHAT_TOKEN_LIMIT = 6000
+
+            estimated = 0
+            try:
+                estimated = self.token_manager.estimate_tokens(prompt)
+            except Exception:
+                # Fallback estimation
+                estimated = len(prompt) // getattr(self.token_manager, 'CHARACTERS_PER_TOKEN', 4)
+
+            # If prompt is small enough, do a normal call
+            if estimated <= CHAT_TOKEN_LIMIT:
+                return self.llm_client.call_llm(prompt, max_tokens=2000, temperature=0.1)
+
+            # Otherwise, perform chunked analysis on component source
+            components = context.get('components', [])
+            if not components:
+                # No component source to chunk; fallback to direct call (may fail for very large prompts)
+                return self.llm_client.call_llm(prompt, max_tokens=2000, temperature=0.1)
+
+            # Build a combined source string from available components
+            combined_source_parts = [c.get('source_for_chat', '') for c in components if c.get('source_for_chat')]
+            combined_source = '\n\n'.join(combined_source_parts)
+            if not combined_source.strip():
+                return self.llm_client.call_llm(prompt, max_tokens=2000, temperature=0.1)
+
+            # Chunk the combined source while preserving structure when possible
+            try:
+                chunks = self.token_manager.chunk_cobol_code(combined_source, preserve_structure=True)
+            except Exception:
+                # Fallback to naive chunking if token manager fails
+                chunks = [type('C', (), {'content': combined_source, 'chunk_number': 1, 'total_chunks': 1})()]
+
+            chunk_responses = []
+            for chunk in chunks:
+                chunk_prompt = (
+                    f"You are a COBOL/mainframe expert. The user asked: \"{message}\"\n\n"
+                    f"Analyze the following code chunk and return any information relevant to answering the user's question."
+                    f" Provide concise findings, code locations, and potential impacts.\n\nCODE CHUNK:\n{chunk.content}"
+                )
+
+                resp = self.llm_client.call_llm(chunk_prompt, max_tokens=800, temperature=0.2)
+                # Log chunk call
+                try:
+                    self.db_manager.log_llm_call(
+                        session_id, 'chat_chunk', getattr(chunk, 'chunk_number', 1), getattr(chunk, 'total_chunks', 1),
+                        resp.prompt_tokens, resp.response_tokens, resp.processing_time_ms, resp.success, resp.error_message
+                    )
+                except Exception:
+                    logger.debug('Failed to log chunk LLM call', exc_info=True)
+
+                if resp.success and resp.content:
+                    chunk_responses.append((getattr(chunk, 'chunk_number', 1), resp.content))
+
+            # If no chunk produced useful content, fallback
+            if not chunk_responses:
+                return self.llm_client.call_llm(prompt, max_tokens=2000, temperature=0.1)
+
+            # Sort chunk responses by chunk number and assemble
+            chunk_responses.sort(key=lambda x: x[0])
+            assembled = "\n\n".join([f"--- CHUNK {num} RESPONSE ---\n{content}" for num, content in chunk_responses])
+
+            # Synthesize final answer from assembled chunk responses
+            synth_prompt = (
+                f"You are a COBOL/mainframe expert. The user asked: \"{message}\"\n\n"
+                "Below are analyses derived from different chunks of the program source. Use these to produce a single, concise, accurate answer to the user's question. If the analyses conflict, reconcile them and highlight uncertainty. Provide concrete code references where possible.\n\n"
+                f"CHUNK ANALYSES:\n{assembled}\n\nFINAL ANSWER:\n"
+            )
+
+            final_resp = self.llm_client.call_llm(synth_prompt, max_tokens=2000, temperature=0.1)
+            # Log synthesis call
+            try:
+                self.db_manager.log_llm_call(
+                    session_id, 'chat_synthesis', 1, len(chunks),
+                    final_resp.prompt_tokens, final_resp.response_tokens, final_resp.processing_time_ms, final_resp.success, final_resp.error_message
+                )
+            except Exception:
+                logger.debug('Failed to log synthesis LLM call', exc_info=True)
+
+            return final_resp
+
+        except Exception as e:
+            logger.error(f"Error in chunked LLM call: {e}")
+            # Final fallback
+            return self.llm_client.call_llm(prompt, max_tokens=2000, temperature=0.1)
+
     def _get_enhanced_context(self, session_id: str, message: str) -> Dict:
         """Get enhanced context including source code based on query"""
         context = {
@@ -93,28 +187,63 @@ class ChatManager:
         }
         
         try:
-            # Check if user is asking about specific component
-            component_mentioned = self._extract_component_name_from_message(message)
-            
-            if component_mentioned:
-                # Get specific component with source code
-                source_data = self.db_manager.get_component_source_code(
-                    session_id, component_mentioned, max_size=30000
-                )
-                if source_data['success'] and source_data['components']:
-                    context['components'] = source_data['components']
-                    context['source_code_included'] = True
-            else:
-                # Get general context (smaller components with source code)
-                source_data = self.db_manager.get_component_source_code(
-                    session_id, max_size=20000
-                )
-                if source_data['success']:
-                    # Include up to 2 small components with full source
-                    small_components = [c for c in source_data['components'] 
-                                    if c.get('source_strategy') == 'full'][:2]
-                    context['components'] = small_components
-                    context['source_code_included'] = len(small_components) > 0
+            # First, check if the user mentions a field; if so, prefer components that contain that field
+            field_names = self._extract_field_names(message)
+            seen_components = set()
+
+            if field_names:
+                # For each extracted field, fetch its DB context and then the program/component that contains it
+                for fname in field_names[:2]:
+                    try:
+                        fctx = self.db_manager.get_context_for_field(session_id, fname)
+                        field_details = fctx.get('field_details', []) if fctx else []
+
+                        for fd in field_details:
+                            prog = fd.get('program_name')
+                            if not prog:
+                                continue
+
+                            # Avoid duplicate component fetches
+                            if prog in seen_components:
+                                continue
+                            seen_components.add(prog)
+
+                            source_data = self.db_manager.get_component_source_code(
+                                session_id, prog, max_size=30000
+                            )
+                            if source_data.get('success') and source_data.get('components'):
+                                # Append components returned for this program
+                                for comp in source_data['components']:
+                                    if comp.get('component_name') not in [c.get('component_name') for c in context['components']]:
+                                        context['components'].append(comp)
+                                        context['source_code_included'] = True
+                    except Exception as e:
+                        logger.debug(f"Error fetching components for field {fname}: {e}")
+
+            # If no field-based components were attached, fall back to explicit component mention or general sample
+            if not context['components']:
+                # Check if user is asking about specific component
+                component_mentioned = self._extract_component_name_from_message(message)
+                
+                if component_mentioned:
+                    # Get specific component with source code
+                    source_data = self.db_manager.get_component_source_code(
+                        session_id, component_mentioned, max_size=30000
+                    )
+                    if source_data['success'] and source_data['components']:
+                        context['components'] = source_data['components']
+                        context['source_code_included'] = True
+                else:
+                    # Get general context (smaller components with source code)
+                    source_data = self.db_manager.get_component_source_code(
+                        session_id, max_size=20000
+                    )
+                    if source_data['success']:
+                        # Include up to 2 small components with full source
+                        small_components = [c for c in source_data['components'] 
+                                        if c.get('source_strategy') == 'full'][:2]
+                        context['components'] = small_components
+                        context['source_code_included'] = len(small_components) > 0
             
             # Get other context as before
             context['record_layouts'] = self.db_manager.get_record_layouts(session_id)[:5]
@@ -124,6 +253,57 @@ class ChatManager:
             logger.error(f"Error getting enhanced context: {str(e)}")
         
         return context
+
+    def _extract_component_name_from_message(self, message: str) -> Optional[str]:
+        """Extract a likely component or program name from a user message.
+
+        This is a heuristic extractor that looks for common patterns such as:
+        - "program PROGRAM-NAME"
+        - "component COMPONENT-NAME"
+        - bare identifiers that look like COBOL program names (ALL-CAPS, dashes, numbers)
+        - filenames ending with .cob/.cbl/.cpy/etc.
+
+        Returns the extracted name in the original-like form (uppercased, with dashes) or None.
+        """
+        if not message:
+            return None
+
+        try:
+            msg = message.strip()
+
+            # First try file-like names with extensions
+            file_match = re.search(r"\b([A-Za-z0-9_\-]+)\.(cob|cbl|cpy|cpyk|cpyb)\b", msg, re.IGNORECASE)
+            if file_match:
+                name = file_match.group(1)
+                return name.upper()
+
+            # Try common keyword patterns
+            patterns = [
+                r"\bprogram\s+([A-Z][A-Z0-9\-]{2,})\b",
+                r"\bcomponent\s+([A-Z][A-Z0-9\-]{2,})\b",
+                r"\babout\s+([A-Z][A-Z0-9\-]{2,})\b",
+                r"\bshow\s+(?:me\s+)?([A-Z][A-Z0-9\-]{2,})\b",
+                r"\bopen\s+([A-Z][A-Z0-9\-]{2,})\b",
+                r"\bwhat\s+does\s+([A-Z][A-Z0-9\-]{2,})\s+do\b",
+            ]
+
+            for pat in patterns:
+                m = re.search(pat, msg, re.IGNORECASE)
+                if m:
+                    return m.group(1).upper().replace('_', '-')
+
+            # As a last resort, look for an ALL-CAPS token that resembles a program/component name
+            tokens = re.findall(r"\b[A-Z][A-Z0-9\-]{2,}\b", msg)
+            if tokens:
+                # Prefer the first token not in common English words
+                for t in tokens:
+                    if t.upper() not in self.cobol_keywords:
+                        return t.upper()
+
+        except Exception:
+            logger.debug("_extract_component_name_from_message failed", exc_info=True)
+
+        return None
 
     def _build_enhanced_prompt(self, message: str, context: Dict) -> str:
         """Build enhanced prompt with source code context"""
