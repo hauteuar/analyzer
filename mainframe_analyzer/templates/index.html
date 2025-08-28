@@ -3288,8 +3288,9 @@ function displayComponentSummariesWithDerived(components) {
         console.log('Processing program:', program.component_name);
         console.log('Derived count from database:', program.derived_count);
         
-        let businessPurpose = program.business_purpose || 'Analysis in progress...';
-        let complexityScore = program.complexity_score || 0;
+    // Prefer the llm_summary provided by the backend, then the direct column, then a friendly fallback
+    let businessPurpose = (program.llm_summary && program.llm_summary.business_purpose) || program.business_purpose || 'Analysis in progress...';
+    let complexityScore = (program.llm_summary && program.llm_summary.complexity_score) || program.complexity_score || 0;
         let derivedCount = program.derived_count || 0; // Use the count from separate table
         
         // Try to get additional data from analysis_result_json if needed
@@ -3425,14 +3426,10 @@ function closeModal() {
                 console.log('📊 Direct business_purpose:', program.business_purpose);
                 console.log('📋 Analysis JSON length:', program.analysis_result_json ? program.analysis_result_json.length : 'null');
                 
-                let businessPurpose = 'Analysis in progress...';
-                let complexityScore = 0;
-                let derivedCount = 0;
-                
-                // First try direct fields
-                if (program.business_purpose && program.business_purpose !== '' && program.business_purpose !== 'Analysis in progress...') {
-                    businessPurpose = program.business_purpose;
-                }
+                        // Prefer the llm_summary provided by the backend, then the direct column, then a friendly fallback
+                        let businessPurpose = (program.llm_summary && program.llm_summary.business_purpose) || program.business_purpose || 'Analysis in progress...';
+                        let complexityScore = (program.llm_summary && program.llm_summary.complexity_score) || 0;
+                        let derivedCount = 0;
                 
                 // Then try parsing JSON
                 try {
@@ -3441,6 +3438,7 @@ function closeModal() {
                         console.log('📈 Parsed analysis keys:', Object.keys(analysisResult));
                         
                         // Extract business purpose
+                        // If we still don't have a richer purpose, prefer JSON fields
                         if (!businessPurpose || businessPurpose === 'Analysis in progress...') {
                             businessPurpose = analysisResult.business_purpose || businessPurpose;
                         }
@@ -3449,7 +3447,7 @@ function closeModal() {
                         if (analysisResult.llm_summary) {
                             console.log('🤖 Found LLM summary:', analysisResult.llm_summary);
                             businessPurpose = analysisResult.llm_summary.business_purpose || businessPurpose;
-                            complexityScore = analysisResult.llm_summary.complexity_score || 0;
+                            complexityScore = analysisResult.llm_summary.complexity_score || complexityScore;
                         }
                         
                         // Extract derived components count
@@ -3714,18 +3712,21 @@ function closeModal() {
             item.style.borderRadius = '4px';
             item.style.cursor = 'pointer';
             
-            let businessPurpose = component.business_purpose || 'Analysis pending';
+            // Prefer the backend-provided llm_summary object, fall back to stored JSON or column
+            let businessPurpose = (component.llm_summary && component.llm_summary.business_purpose) || component.business_purpose || 'Analysis pending';
             
-            // Try to extract from analysis_result_json if available
-            try {
-                if (component.analysis_result_json) {
+            // Backward compatibility: try to extract from analysis_result_json if llm_summary is not present
+            if ((!component.llm_summary || !component.llm_summary.business_purpose) && component.analysis_result_json) {
+                try {
                     const analysis = JSON.parse(component.analysis_result_json);
                     if (analysis.llm_summary && analysis.llm_summary.business_purpose) {
                         businessPurpose = analysis.llm_summary.business_purpose;
+                    } else if (analysis.business_purpose) {
+                        businessPurpose = analysis.business_purpose;
                     }
+                } catch (e) {
+                    console.warn('Could not parse analysis for', component.component_name);
                 }
-            } catch (e) {
-                console.warn('Could not parse analysis for', component.component_name);
             }
             
             item.innerHTML = `
