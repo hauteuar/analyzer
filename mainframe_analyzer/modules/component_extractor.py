@@ -18,7 +18,7 @@ class ComponentExtractor:
         self.llm_client = llm_client
         self.token_manager = token_manager
         self.db_manager = db_manager
-        self.cobol_parser = COBOLParser()
+        self.cobol_parser = COBOLParser(llm_client) 
     
     def extract_components(self, session_id: str, file_content: str, file_name: str, file_type: str) -> List[Dict]:
         """Extract all components from uploaded file"""
@@ -296,7 +296,7 @@ class ComponentExtractor:
                         # Store fields for this layout
                         for field_data in enhanced_fields:
                             field_data['layout_id'] = layout_id
-                            self.db_manager.store_field_details(session_id, field_data, program_name, layout_id)
+                            self.db_manager.store_field_details_with_lengths(session_id, field_data, program_name, layout_id)
                         
                         logger.info(f"Stored layout {layout_name} with {len(enhanced_fields)} fields")
                         
@@ -366,6 +366,234 @@ class ComponentExtractor:
                     return ref['source_field']
         return ''
 
+    def _field_to_dict_with_lengths(self, field, program_content: str, program_name: str = "PROGRAM") -> Dict:
+        """Enhanced field conversion with proper length calculation using parser"""
+        try:
+            field_name = field.name
+            
+            # Use parser's length calculation method
+            mainframe_length, oracle_length, oracle_type = self.cobol_parser._calculate_field_lengths_fixed(
+                field.picture, field.usage
+            )
+            
+            # Perform complete source analysis
+            source_analysis = self._complete_field_source_analysis(field_name, program_content, program_name)
+            
+            return {
+                'name': field_name,
+                'friendly_name': field.friendly_name or self.cobol_parser.generate_friendly_name(field_name, 'Field'),
+                'level': field.level,
+                'picture': field.picture,
+                'usage': field.usage,
+                'occurs': field.occurs,
+                'redefines': field.redefines,
+                'value': field.value,
+                'line_number': field.line_number,
+                'code_snippet': f"{field.level:02d} {field_name}" + (f" PIC {field.picture}" if field.picture else ""),
+                'usage_type': source_analysis['primary_usage'],
+                'operation_type': 'COMPREHENSIVE_DEFINITION',
+                'business_purpose': source_analysis['business_purpose'],
+                'confidence': 0.95,
+                'source_field': source_analysis.get('primary_source_field', ''),
+                'target_field': field_name if source_analysis.get('receives_data', False) else '',
+                
+                # FIXED: Proper field length calculation using parser
+                'mainframe_length': mainframe_length,
+                'oracle_length': oracle_length,
+                'oracle_data_type': oracle_type,
+                'mainframe_data_type': f"PIC {field.picture}" if field.picture else "UNKNOWN",
+                
+                # Complete source code storage
+                'definition_line_number': source_analysis.get('definition_line', field.line_number),
+                'definition_code': source_analysis.get('definition_code', ''),
+                'program_source_content': program_content,
+                'field_references_json': json.dumps(source_analysis['all_references']),
+                'usage_summary_json': json.dumps(source_analysis.get('usage_summary', {})),
+                'total_program_references': len(source_analysis['all_references']),
+                'move_source_count': source_analysis['counts']['move_source'],
+                'move_target_count': source_analysis['counts']['move_target'],
+                'arithmetic_count': source_analysis['counts']['arithmetic'],
+                'conditional_count': source_analysis['counts']['conditional'],
+                'cics_count': source_analysis['counts']['cics']
+            }
+            
+        except Exception as e:
+            logger.error(f"Error enhancing field {field.name}: {str(e)}")
+            return {
+                'name': field.name,
+                'level': field.level,
+                'picture': getattr(field, 'picture', ''),
+                'line_number': getattr(field, 'line_number', 0),
+                'mainframe_length': 1,  # Minimum valid length
+                'oracle_length': 50,
+                'error': str(e)
+            }
+
+    def generate_friendly_names_batch(self, session_id: str, items: List[Dict], context: str) -> Dict[str, str]:
+        """Generate friendly names for multiple items efficiently"""
+        try:
+            # Use parser's method for consistent naming
+            friendly_names = {}
+            for item in items:
+                if isinstance(item, dict):
+                    name = item.get('name', item.get('copybook_name', item.get('file_name', item.get('program_name', 'UNKNOWN'))))
+                else:
+                    name = str(item)
+                
+                if name and name != 'UNKNOWN':
+                    friendly_names[name] = self.cobol_parser.generate_friendly_name_enhanced(name, context, 'WEALTH_MANAGEMENT')
+            
+            return friendly_names
+        except Exception as e:
+            logger.error(f"Error generating batch friendly names: {str(e)}")
+            return {}
+
+    def validate_component_data(self, component: Dict) -> bool:
+        """Validate component data before storage"""
+        required_fields = ['name', 'type', 'file_path']
+        
+        for field in required_fields:
+            if not component.get(field):
+                logger.warning(f"Component missing required field: {field}")
+                return False
+        
+        # Validate component name using parser
+        if not self.cobol_parser.validate_cobol_identifier(component['name'], 'GENERAL'):
+            logger.warning(f"Invalid component name: {component['name']}")
+            return False
+        
+        return True
+
+    def enhanced_dependency_extraction(self, session_id: str, components: List[Dict], filename: str):
+        """Enhanced dependency extraction with better validation"""
+        try:
+            main_program = None
+            for component in components:
+                if component.get('type') == 'PROGRAM':
+                    main_program = component
+                    break
+            
+            if not main_program:
+                return
+            
+            dependencies = []
+            program_name = main_program['name']
+            
+            # Extract file dependencies with enhanced validation
+            file_operations = main_program.get('file_operations', [])
+            for file_op in file_operations:
+                file_name = file_op.get('file_name')
+                if file_name and self.cobol_parser.validate_cobol_identifier(file_name, 'FILE'):
+                    # Determine I/O direction and relationship type
+                    io_direction = file_op.get('io_direction', 'UNKNOWN')
+                    relationship_type = self._map_io_to_relationship(io_direction)
+                    
+                    dependencies.append({
+                        'source_component': program_name,
+                        'target_component': file_name,
+                        'relationship_type': relationship_type,
+                        'interface_type': self._determine_interface_type(file_op),
+                        'confidence_score': 0.95,
+                        'analysis_details_json': json.dumps({
+                            'io_direction': io_direction,
+                            'operation': file_op.get('operation'),
+                            'line_number': file_op.get('line_number')
+                        })
+                    })
+            
+            # Extract CICS dependencies with enhanced validation
+            cics_operations = main_program.get('cics_operations', [])
+            for cics_op in cics_operations:
+                file_name = cics_op.get('file_name')
+                if file_name and self.cobol_parser.validate_cobol_identifier(file_name, 'CICS_FILE'):
+                    dependencies.append({
+                        'source_component': program_name,
+                        'target_component': file_name,
+                        'relationship_type': 'CICS_FILE',
+                        'interface_type': 'CICS',
+                        'confidence_score': 0.95,
+                        'analysis_details_json': json.dumps({
+                            'operation': cics_op.get('operation'),
+                            'line_number': cics_op.get('line_number')
+                        })
+                    })
+            
+            # Store dependencies
+            if dependencies:
+                self._store_validated_dependencies(session_id, dependencies)
+            
+        except Exception as e:
+            logger.error(f"Error in enhanced dependency extraction: {str(e)}")
+
+    def _map_io_to_relationship(self, io_direction: str) -> str:
+        """Map I/O direction to relationship type"""
+        mapping = {
+            'INPUT': 'INPUT_FILE',
+            'OUTPUT': 'OUTPUT_FILE',
+            'INPUT_OUTPUT': 'INPUT_OUTPUT_FILE',
+            'DECLARATION': 'FILE_DECLARATION'
+        }
+        return mapping.get(io_direction, 'FILE_ACCESS')
+
+    def _determine_interface_type(self, file_op: Dict) -> str:
+        """Determine interface type from file operation"""
+        file_type = file_op.get('file_type', '')
+        if 'CICS' in file_type:
+            return 'CICS'
+        elif file_op.get('operation') in ['FD', 'SELECT']:
+            return 'FILE_SYSTEM'
+        else:
+            return 'COBOL'
+
+    def _store_validated_dependencies(self, session_id: str, dependencies: List[Dict]):
+        """Store dependencies with validation and deduplication"""
+        try:
+            unique_dependencies = {}
+            
+            for dep in dependencies:
+                # Create unique key
+                key = (
+                    dep['source_component'],
+                    dep['target_component'],
+                    dep['relationship_type'],
+                    dep['interface_type']
+                )
+                
+                # Keep highest confidence entry
+                if key not in unique_dependencies or dep['confidence_score'] > unique_dependencies[key]['confidence_score']:
+                    unique_dependencies[key] = dep
+            
+            # Store in database
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                stored_count = 0
+                
+                for dep in unique_dependencies.values():
+                    try:
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO dependency_relationships 
+                            (session_id, source_component, target_component, relationship_type,
+                            interface_type, confidence_score, analysis_details_json, source_code_evidence)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            session_id,
+                            dep['source_component'],
+                            dep['target_component'],
+                            dep['relationship_type'],
+                            dep['interface_type'],
+                            dep['confidence_score'],
+                            dep['analysis_details_json'],
+                            dep.get('source_code_evidence', '')
+                        ))
+                        stored_count += 1
+                    except Exception as store_error:
+                        logger.error(f"Error storing dependency: {store_error}")
+                        continue
+                
+                logger.info(f"Stored {stored_count} validated dependencies")
+                
+        except Exception as e:
+            logger.error(f"Error storing validated dependencies: {str(e)}")
 
     def store_field_details(self, session_id: str, field_data: Dict, program_name: str, layout_id: int = None):
         """Store complete field details with source code context"""
@@ -787,6 +1015,195 @@ Please provide a JSON response with:
             return f"{record_classification}_INHERITED"
         
         return field_classification
+    
+    def generate_component_friendly_names(self, session_id: str, components: List[Dict]) -> List[Dict]:
+        """Generate friendly names for components using LLM"""
+        
+        try:
+            # Separate different component types
+            programs = [c for c in components if c.get('type') == 'PROGRAM']
+            record_layouts = [c for c in components if c.get('type') == 'RECORD_LAYOUT']
+            files = [c for c in components if c.get('type') in ['FILE', 'CICS_FILE']]
+            
+            # Generate friendly names by type
+            enhanced_components = []
+            
+            # Programs
+            if programs:
+                program_names = self.cobol_parser.generate_batch_friendly_names(
+                    programs, 'PROGRAM', 'WEALTH_MANAGEMENT', session_id
+                )
+                for component in programs:
+                    name = self._get_component_name(component)
+                    component['friendly_name'] = program_names.get(name, 
+                        self.cobol_parser._generate_simple_friendly_name(name, 'Program'))
+                    enhanced_components.append(component)
+            
+            # Record Layouts - with additional context
+            if record_layouts:
+                layout_names = {}
+                for layout in record_layouts:
+                    name = self._get_component_name(layout)
+                    # Add field information as context for better naming
+                    field_info = f"Fields: {len(layout.get('fields', []))}"
+                    source_snippet = layout.get('source_code', '')[:200]
+                    
+                    friendly_name = self.cobol_parser.generate_business_friendly_name(
+                        name, 'RECORD_LAYOUT', 'WEALTH_MANAGEMENT', 
+                        f"{field_info}\n{source_snippet}", session_id
+                    )
+                    layout['friendly_name'] = friendly_name
+                    enhanced_components.append(layout)
+            
+            # Files
+            if files:
+                file_names = self.cobol_parser.generate_batch_friendly_names(
+                    files, 'FILE', 'WEALTH_MANAGEMENT', session_id
+                )
+                for component in files:
+                    name = self._get_component_name(component)
+                    component['friendly_name'] = file_names.get(name,
+                        self.cobol_parser._generate_simple_friendly_name(name, 'File'))
+                    enhanced_components.append(component)
+            
+            # Add any remaining components
+            for component in components:
+                if component not in enhanced_components:
+                    name = self._get_component_name(component)
+                    component['friendly_name'] = self.cobol_parser.generate_business_friendly_name(
+                        name, component.get('type', 'Component'), 'WEALTH_MANAGEMENT', '', session_id
+                    )
+                    enhanced_components.append(component)
+            
+            return enhanced_components
+            
+        except Exception as e:
+            logger.error(f"Error generating component friendly names: {str(e)}")
+            
+            # Fallback: use simple friendly names
+            for component in components:
+                name = self._get_component_name(component)
+                component['friendly_name'] = self.cobol_parser._generate_simple_friendly_name(
+                    name, component.get('type', 'Component')
+                )
+            
+            return components
+    
+    def _get_component_name(self, component) -> str:
+        """Extract component name consistently"""
+        if isinstance(component, dict):
+            return component.get('name', component.get('layout_name', 
+                   component.get('file_name', 'UNKNOWN')))
+        return str(component)
+
+    def enhance_record_layout_with_llm_naming(self, session_id: str, layout, program_context: str) -> Dict:
+        """Enhanced record layout analysis with LLM-generated friendly names"""
+        try:
+            field_count = len(layout.fields) if hasattr(layout, 'fields') else 0
+            layout_name = layout.name if hasattr(layout, 'name') else str(layout)
+            
+            # Prepare context for LLM
+            field_names = []
+            field_types = {}
+            
+            if hasattr(layout, 'fields'):
+                field_names = [f.name for f in layout.fields[:10]]  # First 10 fields
+                for field in layout.fields:
+                    if hasattr(field, 'picture') and field.picture:
+                        if 'X' in field.picture:
+                            field_types['alphanumeric'] = field_types.get('alphanumeric', 0) + 1
+                        elif '9' in field.picture:
+                            field_types['numeric'] = field_types.get('numeric', 0) + 1
+            
+            # Generate business-friendly name using LLM
+            context_info = f"""
+Layout: {layout_name}
+Fields ({field_count}): {', '.join(field_names)}
+Field Types: {', '.join([f'{count} {ftype}' for ftype, count in field_types.items()])}
+Program Context: {program_context}
+"""
+            
+            friendly_name = self.cobol_parser.generate_business_friendly_name(
+                layout_name, 'RECORD_LAYOUT', 'WEALTH_MANAGEMENT', context_info, session_id
+            )
+            
+            # Generate business purpose using LLM
+            business_purpose = self._generate_layout_business_purpose(
+                session_id, layout_name, friendly_name, field_names, field_types, program_context
+            )
+            
+            return {
+                'friendly_name': friendly_name,
+                'business_purpose': business_purpose,
+                'usage_pattern': self._infer_usage_pattern(field_names, field_types),
+                'business_domain': 'WEALTH_MANAGEMENT',
+                'field_analysis': field_types,
+                'complexity_score': min(0.9, field_count / 50)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in LLM record layout enhancement: {str(e)}")
+            return {
+                'friendly_name': self.cobol_parser._generate_simple_friendly_name(layout_name, 'Record Layout'),
+                'business_purpose': f"Data structure with {field_count} fields",
+                'usage_pattern': 'WORKING_STORAGE',
+                'business_domain': 'WEALTH_MANAGEMENT',
+                'field_analysis': field_types,
+                'complexity_score': 0.5
+            }
+
+    def _generate_layout_business_purpose(self, session_id: str, layout_name: str, 
+                                        friendly_name: str, field_names: List[str], 
+                                        field_types: Dict, program_context: str) -> str:
+        """Generate business purpose for record layout using LLM"""
+        try:
+            prompt = f"""
+Analyze this COBOL record layout and describe its business purpose in 1-2 concise sentences.
+
+Record Layout: {layout_name}
+Business Name: {friendly_name}
+Program: {program_context}
+Field Count: {len(field_names)}
+Field Types: {field_types}
+Sample Fields: {', '.join(field_names[:8])}
+
+This is for a wealth management system. Focus on:
+- What business data this record represents
+- How it's used in wealth management operations
+- Keep it business-focused, not technical
+
+Return only the business purpose description (1-2 sentences).
+"""
+            
+            response = self.llm_client.call_llm(prompt, max_tokens=150, temperature=0.3)
+            
+            if response.success and response.content:
+                purpose = response.content.strip()
+                # Clean up the response
+                purpose = purpose.replace('\n', ' ').strip()
+                if len(purpose) > 200:
+                    purpose = purpose[:197] + "..."
+                return purpose
+            
+        except Exception as e:
+            logger.warning(f"LLM business purpose generation failed: {str(e)}")
+        
+        # Fallback
+        return f"{friendly_name} - Data structure containing {len(field_names)} fields for {program_context.lower()}"
+    
+    def _infer_usage_pattern(self, field_names: List[str], field_types: Dict) -> str:
+        """Infer usage pattern from field characteristics"""
+        name_patterns = ' '.join(field_names).upper()
+        
+        if any(pattern in name_patterns for pattern in ['INPUT', 'IN-', 'FROM']):
+            return 'INPUT'
+        elif any(pattern in name_patterns for pattern in ['OUTPUT', 'OUT-', 'TO']):
+            return 'OUTPUT'
+        elif any(pattern in name_patterns for pattern in ['PARM', 'PARAMETER']):
+            return 'PARAMETER'
+        else:
+            return 'WORKING_STORAGE'
+
     def _generate_layout_summary(self, session_id: str, layout, parsed_data: Dict) -> Dict:
         """Generate LLM summary for record layout with friendly name"""
         try:
@@ -1017,7 +1434,7 @@ Please provide a JSON response with:
                     'line_start': layout.line_start,
                     'line_end': layout.line_end,
                     'source_code': layout.source_code,
-                    'fields': [self._field_to_dict_enhanced(field, content) for field in layout.fields]  # NEW METHOD
+                    'fields': [self._field_to_dict_with_lengths(field, content) for field in layout.fields]  # NEW METHOD
                 }
                 components.append(layout_component)
                 copybook_component['record_layouts'].append(layout_component['name'])
@@ -1030,7 +1447,7 @@ Please provide a JSON response with:
                     'line_start': layout.line_start,
                     'line_end': layout.line_end,
                     'source_code': layout.source_code,
-                    'fields': [self._field_to_dict_enhanced(field, content) for field in layout.fields]  # NEW METHOD
+                    'fields': [self._field_to_dict_with_lengths(field, content) for field in layout.fields]  # NEW METHOD
                 }, copybook_component['name'])
             
             components.insert(0, copybook_component)  # Main component first
@@ -1756,7 +2173,7 @@ File Content ({filename}):
                              operation_type: str, line_number: int, code_snippet: str):
         """Store individual field operation"""
         try:
-            self.db_manager.store_field_details(session_id, {
+            self.db_manager.store_field_details_with_lengths(session_id, {
                 'name': field_name,
                 'operation_type': operation_type,
                 'line_number': line_number,

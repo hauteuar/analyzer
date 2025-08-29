@@ -511,7 +511,7 @@ def upload_file():
 
 @app.route('/api/field-mapping', methods=['POST'])
 def analyze_field_mapping():
-    """Fixed field mapping analysis with proper field lengths and types"""
+    """Fixed field mapping analysis with proper field lengths, types, and validation"""
     data = request.json
     session_id = data.get('session_id')
     target_file = data.get('target_file')
@@ -519,18 +519,21 @@ def analyze_field_mapping():
     logger.info(f"Field mapping request - Session: {session_id[:8]}, Target: {target_file}")
     
     try:
-        # Get field details from field_analysis_details table
+        # Enhanced field query with proper length calculation and filtering
         with analyzer.db_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT fad.field_name, fad.friendly_name, fad.mainframe_data_type, 
+                SELECT DISTINCT fad.field_name, fad.friendly_name, fad.mainframe_data_type, 
                        fad.oracle_data_type, fad.mainframe_length, fad.oracle_length,
                        fad.source_field, fad.business_purpose, fad.usage_type,
                        fad.program_name, rl.layout_name,
-                       fad.field_references_json, fad.definition_code
+                       fad.field_references_json, fad.definition_code,
+                       fad.total_program_references, fad.move_source_count, fad.move_target_count
                 FROM field_analysis_details fad
                 LEFT JOIN record_layouts rl ON fad.field_id = rl.id
                 WHERE fad.session_id = ?
+                AND fad.mainframe_length > 0  -- Filter out invalid length calculations
+                AND fad.field_name NOT IN ('VALUE', 'VALUES', 'PIC', 'PICTURE', 'USAGE', 'COMP')
                 AND (UPPER(rl.layout_name) LIKE UPPER(?) 
                      OR UPPER(fad.program_name) LIKE UPPER(?)
                      OR UPPER(fad.field_name) LIKE UPPER(?))
@@ -543,10 +546,11 @@ def analyze_field_mapping():
             return jsonify({
                 'success': True,
                 'field_mappings': [],
-                'message': f'No fields found matching "{target_file}". Please check the target file name.'
+                'message': f'No valid fields found matching "{target_file}". Please check the target file name.',
+                'summary': {'total_fields': 0, 'input_fields': 0, 'output_fields': 0, 'static_fields': 0, 'calculated_fields': 0}
             })
         
-        # Transform to field mappings
+        # Transform to field mappings with proper business logic classification
         field_mappings = []
         for row in field_results:
             field_references = []
@@ -556,22 +560,36 @@ def analyze_field_mapping():
             except:
                 pass
             
-            # Determine business logic type from usage patterns
-            business_logic_type = row[8] or 'UNKNOWN'  # usage_type
-            if business_logic_type == 'INPUT':
+            # Proper business logic type determination
+            usage_type = row[8] or 'STATIC'  # usage_type
+            move_source_count = row[14] or 0
+            move_target_count = row[15] or 0
+            
+            # Enhanced business logic classification
+            if move_target_count > 0 and move_source_count > 0:
+                business_logic_type = 'INPUT_OUTPUT'
+            elif move_target_count > 0:
                 business_logic_type = 'DIRECT_MOVE'
-            elif business_logic_type == 'DERIVED':
+            elif move_source_count > 0:
+                business_logic_type = 'OUTPUT_SOURCE'
+            elif usage_type == 'DERIVED':
                 business_logic_type = 'CALCULATED'
-            elif business_logic_type == 'STATIC':
+            elif usage_type == 'STATIC':
                 business_logic_type = 'CONSTANT'
+            else:
+                business_logic_type = 'REFERENCE'
+            
+            # Fixed mainframe length - ensure it's properly calculated
+            mainframe_length = max(row[4] or 0, 1)  # Ensure minimum length of 1
+            oracle_length = max(row[5] or mainframe_length, mainframe_length)  # Oracle length should be at least mainframe length
             
             field_mapping = {
                 'field_name': row[0],
                 'friendly_name': row[1] or row[0].replace('-', ' ').title(),
                 'mainframe_data_type': row[2] or 'UNKNOWN',
-                'oracle_data_type': row[3] or 'VARCHAR2(50)',
-                'mainframe_length': row[4] or 0,
-                'oracle_length': row[5] or 50,
+                'oracle_data_type': row[3] or f'VARCHAR2({oracle_length})',
+                'mainframe_length': mainframe_length,
+                'oracle_length': oracle_length,
                 'population_source': row[6] or 'Program logic',
                 'source_record_layout': row[10] or 'Unknown',
                 'business_logic_type': business_logic_type,
@@ -580,24 +598,32 @@ def analyze_field_mapping():
                 'programs_involved': [row[9]] if row[9] else [],
                 'confidence_score': 0.9,
                 'field_references': field_references,
-                'definition_code': row[12] or ''
+                'definition_code': row[12] or '',
+                'total_references': row[13] or 0,
+                'move_operations': {
+                    'source_count': move_source_count,
+                    'target_count': move_target_count
+                }
             }
             
             field_mappings.append(field_mapping)
         
         logger.info(f"Generated {len(field_mappings)} field mappings for {target_file}")
         
+        # Corrected summary calculations
+        summary = {
+            'total_fields': len(field_mappings),
+            'input_fields': len([f for f in field_mappings if 'INPUT' in f['business_logic_type'] or f['business_logic_type'] == 'DIRECT_MOVE']),
+            'output_fields': len([f for f in field_mappings if 'OUTPUT' in f['business_logic_type']]),
+            'static_fields': len([f for f in field_mappings if f['business_logic_type'] == 'CONSTANT']),
+            'calculated_fields': len([f for f in field_mappings if f['business_logic_type'] == 'CALCULATED'])
+        }
+        
         return jsonify({
             'success': True,
             'field_mappings': field_mappings,
             'message': f'Successfully analyzed {len(field_mappings)} field mappings for "{target_file}".',
-            'summary': {
-                'total_fields': len(field_mappings),
-                'input_fields': len([f for f in field_mappings if 'INPUT' in f['business_logic_type']]),
-                'output_fields': len([f for f in field_mappings if 'OUTPUT' in f['business_logic_type']]),
-                'static_fields': len([f for f in field_mappings if 'STATIC' in f['business_logic_type']]),
-                'calculated_fields': len([f for f in field_mappings if 'CALCULATED' in f['business_logic_type']])
-            }
+            'summary': summary
         })
         
     except Exception as e:
@@ -606,6 +632,7 @@ def analyze_field_mapping():
             'success': False,
             'error': str(e)
         })
+
     
 @app.route('/api/field-matrix', methods=['GET'])
 def get_field_matrix():
@@ -700,14 +727,14 @@ def get_field_source_code(session_id, field_name):
         })
 @app.route('/api/components/<session_id>')
 def get_components(session_id):
-    """Fixed component retrieval with proper LLM summary extraction"""
+    """Fixed component retrieval with proper LLM summary extraction and friendly names"""
     try:
         with analyzer.db_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT component_name, component_type, total_lines, total_fields, 
                        business_purpose, complexity_score, analysis_result_json, 
-                        file_path, created_at
+                       file_path, created_at
                 FROM component_analysis 
                 WHERE session_id = ?
                 ORDER BY component_name
@@ -719,41 +746,68 @@ def get_components(session_id):
         for row in raw_components:
             component = dict(row)
             
-            # Enhanced LLM summary extraction
-            business_purpose = 'Analysis pending...'
+            # Enhanced LLM summary extraction with proper fallbacks
+            business_purpose = 'Analysis in progress...'
             llm_summary = {}
             complexity_score = 0.5
+            friendly_name = component['component_name']
             
-            # Parse analysis_result_json
+            # Parse analysis_result_json thoroughly
             if component.get('analysis_result_json'):
                 try:
                     parsed_analysis = json.loads(component['analysis_result_json'])
                     
-                    # Extract LLM summary
+                    # Extract friendly name first
+                    if parsed_analysis.get('friendly_name'):
+                        friendly_name = parsed_analysis['friendly_name']
+                    else:
+                        # Generate friendly name using parser
+                        friendly_name = analyzer.cobol_parser.generate_friendly_name(
+                            component['component_name'], 'Program'
+                        )
+                    
+                    # Extract LLM summary with multiple fallback paths
                     if parsed_analysis.get('llm_summary'):
                         llm_summary = parsed_analysis['llm_summary']
                         
-                        if llm_summary.get('business_purpose'):
+                        # Primary: business_purpose from LLM summary
+                        if llm_summary.get('business_purpose') and llm_summary['business_purpose'] not in ['undefined', 'null', '']:
                             business_purpose = llm_summary['business_purpose']
+                        # Secondary: raw response from LLM
                         elif llm_summary.get('raw'):
-                            business_purpose = llm_summary['raw'][:200] + '...' if len(llm_summary['raw']) > 200 else llm_summary['raw']
+                            raw_response = llm_summary['raw']
+                            business_purpose = (raw_response[:200] + '...' if len(raw_response) > 200 else raw_response)
                             llm_summary['is_raw'] = True
+                        # Tertiary: primary_function as description
+                        elif llm_summary.get('primary_function'):
+                            business_purpose = f"{llm_summary['primary_function']} component"
                         
-                        if llm_summary.get('complexity_score'):
+                        # Extract complexity score
+                        if isinstance(llm_summary.get('complexity_score'), (int, float)):
                             complexity_score = float(llm_summary['complexity_score'])
                     
                     # Fallback to direct business_purpose in parsed data
-                    elif parsed_analysis.get('business_purpose'):
+                    elif parsed_analysis.get('business_purpose') and parsed_analysis['business_purpose'] not in ['undefined', 'null', '']:
                         business_purpose = parsed_analysis['business_purpose']
                         
                 except Exception as e:
                     logger.warning(f"Error parsing analysis JSON for {component['component_name']}: {e}")
+                    # Generate friendly name even if JSON parsing fails
+                    friendly_name = analyzer.cobol_parser.generate_friendly_name(
+                        component['component_name'], 'Program'
+                    )
+            else:
+                # No analysis JSON - generate friendly name
+                friendly_name = analyzer.cobol_parser.generate_friendly_name(
+                    component['component_name'], 'Program'
+                )
             
-            # Use explicit business_purpose column if available and valid
-            if component.get('business_purpose') and component['business_purpose'] not in [None, '', 'undefined', 'null']:
+            # Use database business_purpose if available and valid
+            if (component.get('business_purpose') and 
+                component['business_purpose'] not in [None, '', 'undefined', 'null', 'Analysis pending...', 'Analysis in progress...']):
                 business_purpose = component['business_purpose']
             
-            # Use explicit complexity_score if available
+            # Use database complexity_score if available
             if component.get('complexity_score') and component['complexity_score'] > 0:
                 complexity_score = float(component['complexity_score'])
             
@@ -763,7 +817,7 @@ def get_components(session_id):
             transformed = {
                 'component_name': component['component_name'],
                 'component_type': component['component_type'],
-                'friendly_name': component.get('friendly_name') or component['component_name'].replace('-', ' ').title(),
+                'friendly_name': friendly_name,
                 'total_lines': component.get('total_lines', 0),
                 'total_fields': component.get('total_fields', 0),
                 'business_purpose': business_purpose,
@@ -771,9 +825,12 @@ def get_components(session_id):
                 'complexity_score': complexity_score,
                 'derived_count': derived_count,
                 'file_path': component.get('file_path', ''),
-                'created_at': component.get('created_at', '')
+                'created_at': component.get('created_at', ''),
+                'analysis_status': 'completed' if business_purpose != 'Analysis in progress...' else 'pending'
             }
             transformed_components.append(transformed)
+
+        logger.info(f"Transformed {len(transformed_components)} components with proper LLM summaries")
 
         return jsonify({
             'success': True,
@@ -784,49 +841,124 @@ def get_components(session_id):
         logger.error(f"Error retrieving components: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
-
 @app.route('/api/dependencies/<session_id>')
 def get_dependencies(session_id):
-    """Get dependency relationships with enhanced data and debugging"""
+    """Get dependency relationships with enhanced I/O categorization and friendly names"""
     try:
         logger.info(f"Getting dependencies for session: {session_id}")
         
-        dependencies = analyzer.db_manager.get_dependencies(session_id)
-        logger.info(f"Found {len(dependencies)} dependencies")
-        
-        if not dependencies:
-            # Debug: Check if we have any components at all
-            components = analyzer.db_manager.get_session_components(session_id)
-            logger.info(f"Session has {len(components)} components")
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
             
+            # Enhanced query with proper I/O direction analysis
+            cursor.execute('''
+                SELECT dr.source_component, dr.target_component, dr.relationship_type,
+                       dr.interface_type, dr.confidence_score, dr.analysis_details_json,
+                       dr.source_code_evidence, dr.created_at,
+                       ca.business_purpose as source_purpose,
+                       ca2.business_purpose as target_purpose
+                FROM dependency_relationships dr
+                LEFT JOIN component_analysis ca ON (dr.source_component = ca.component_name AND ca.session_id = ?)
+                LEFT JOIN component_analysis ca2 ON (dr.target_component = ca2.component_name AND ca2.session_id = ?)
+                WHERE dr.session_id = ?
+                ORDER BY dr.source_component, dr.relationship_type, dr.target_component
+            ''', (session_id, session_id, session_id))
+            
+            raw_dependencies = cursor.fetchall()
+        
+        if not raw_dependencies:
+            components = analyzer.db_manager.get_session_components(session_id)
             return jsonify({
                 'success': True, 
                 'dependencies': [],
                 'dependency_groups': {},
+                'categorized_dependencies': {},
                 'total_count': 0,
                 'debug_info': f"No dependencies found. Session has {len(components)} components."
             })
         
-        # Transform dependencies for UI
+        # Process and categorize dependencies
         transformed_deps = []
-        for dep in dependencies:
+        cics_files = {}  # Track CICS files for I/O categorization
+        
+        for dep in raw_dependencies:
             details = {}
-            if dep.get('analysis_details_json'):
+            if dep[5]:  # analysis_details_json
                 try:
-                    details = json.loads(dep['analysis_details_json'])
+                    details = json.loads(dep[5])
                 except:
                     pass
             
+            # Generate friendly names using the parser's method
+            target_friendly = analyzer.cobol_parser.generate_friendly_name(dep[1], 'Component')
+            source_friendly = analyzer.cobol_parser.generate_friendly_name(dep[0], 'Program')
+            
+            # Determine I/O direction for CICS files
+            io_direction = 'UNKNOWN'
+            if dep[2].startswith('CICS') and 'FILE' in dep[2]:
+                if 'INPUT' in dep[2]:
+                    io_direction = 'INPUT'
+                elif 'OUTPUT' in dep[2]:
+                    io_direction = 'OUTPUT'
+                else:
+                    # Analyze from details
+                    io_direction = details.get('io_direction', 'UNKNOWN')
+            elif dep[2] in ['INPUT_FILE', 'OUTPUT_FILE', 'INPUT_OUTPUT_FILE']:
+                io_direction = dep[2].replace('_FILE', '')
+            
+            # Track CICS files for deduplication
+            if dep[3] == 'CICS':
+                file_key = dep[1]  # target_component (file name)
+                if file_key not in cics_files:
+                    cics_files[file_key] = {
+                        'file_name': dep[1],
+                        'friendly_name': target_friendly,
+                        'operations': [],
+                        'io_directions': set(),
+                        'source_programs': set()
+                    }
+                
+                cics_files[file_key]['operations'].append(dep[2])
+                cics_files[file_key]['io_directions'].add(io_direction)
+                cics_files[file_key]['source_programs'].add(dep[0])
+            
             transformed_dep = {
-                'source_component': dep['source_component'],
-                'target_component': dep['target_component'],
-                'relationship_type': dep['relationship_type'],
-                'interface_type': dep.get('interface_type', 'UNKNOWN'),
-                'confidence_score': dep.get('confidence_score', 0.0),
+                'source_component': dep[0],
+                'source_friendly': source_friendly,
+                'target_component': dep[1],
+                'target_friendly': target_friendly,
+                'relationship_type': dep[2],
+                'interface_type': dep[3],
+                'io_direction': io_direction,
+                'confidence_score': dep[4] or 0.0,
                 'details': details,
-                'created_at': dep.get('created_at', '')
+                'source_code_evidence': dep[6],
+                'created_at': dep[7]
             }
             transformed_deps.append(transformed_dep)
+        
+        # Create categorized view of CICS files
+        cics_categorized = {}
+        for file_info in cics_files.values():
+            directions = file_info['io_directions']
+            if 'INPUT' in directions and 'OUTPUT' in directions:
+                category = 'INPUT_OUTPUT'
+            elif 'INPUT' in directions:
+                category = 'INPUT'
+            elif 'OUTPUT' in directions:
+                category = 'OUTPUT'
+            else:
+                category = 'UNKNOWN'
+            
+            if category not in cics_categorized:
+                cics_categorized[category] = []
+            
+            cics_categorized[category].append({
+                'file_name': file_info['file_name'],
+                'friendly_name': file_info['friendly_name'],
+                'operations': list(file_info['operations']),
+                'source_programs': list(file_info['source_programs'])
+            })
         
         # Group dependencies by type
         dependency_groups = {}
@@ -836,18 +968,19 @@ def get_dependencies(session_id):
                 dependency_groups[rel_type] = []
             dependency_groups[rel_type].append(dep)
         
-        logger.info(f"Returning {len(transformed_deps)} dependencies in {len(dependency_groups)} groups")
+        logger.info(f"Returning {len(transformed_deps)} dependencies with {len(cics_categorized)} CICS file categories")
         
         return jsonify({
             'success': True, 
             'dependencies': transformed_deps,
             'dependency_groups': dependency_groups,
-            'total_count': len(transformed_deps)
+            'cics_categorized': cics_categorized,
+            'total_count': len(transformed_deps),
+            'cics_file_count': len(cics_files)
         })
         
     except Exception as e:
         logger.error(f"Error getting dependencies: {str(e)}")
-        logger.error(f"Stack trace: {traceback.format_exc()}")
         return jsonify({'success': False, 'error': str(e)})
         
 @app.route('/api/session-metrics/<session_id>')
@@ -919,12 +1052,12 @@ def get_layout_summary(session_id, layout_name):
 
 @app.route('/api/field-details/<session_id>/<field_name>')
 def get_field_details(session_id, field_name):
-    """Get complete field details including operations and source code"""
+    """Get complete field details including operations and source code - FIXED VERSION"""
     try:
         with analyzer.db_manager.get_connection() as conn:
             cursor = conn.cursor()
             
-            # Get field details with all operations
+            # Enhanced query with proper joins and validation
             cursor.execute('''
                 SELECT fad.field_name, fad.friendly_name, fad.business_purpose,
                        fad.usage_type, fad.source_field, fad.target_field,
@@ -934,10 +1067,11 @@ def get_field_details(session_id, field_name):
                        fad.field_references_json, fad.total_program_references,
                        fad.move_source_count, fad.move_target_count,
                        fad.arithmetic_count, fad.conditional_count,
-                       rl.layout_name, fad.program_name
+                       rl.layout_name, fad.program_name, fad.line_number
                 FROM field_analysis_details fad
                 LEFT JOIN record_layouts rl ON fad.field_id = rl.id
                 WHERE fad.session_id = ? AND UPPER(fad.field_name) = UPPER(?)
+                AND fad.field_name NOT IN ('VALUE', 'VALUES', 'PIC', 'PICTURE')
                 ORDER BY fad.program_name, fad.line_number
             ''', (session_id, field_name))
             
@@ -946,51 +1080,65 @@ def get_field_details(session_id, field_name):
             if not results:
                 return jsonify({
                     'success': False,
-                    'error': f'Field {field_name} not found'
+                    'error': f'Field "{field_name}" not found in analysis results'
                 })
             
             # Process field references and operations
-            field_operations = []
             all_references = []
+            field_operations = []
             
             for row in results:
-                # Parse field references
+                # Parse field references safely
                 try:
                     if row[12]:  # field_references_json
                         references = json.loads(row[12])
-                        all_references.extend(references)
-                except:
-                    pass
+                        if isinstance(references, list):
+                            all_references.extend(references)
+                except Exception as ref_error:
+                    logger.warning(f"Error parsing references for {field_name}: {ref_error}")
                 
+                # Create operation summary
                 field_operations.append({
                     'program_name': row[19],
                     'layout_name': row[18],
                     'usage_type': row[3],
-                    'move_source_count': row[15],
-                    'move_target_count': row[16],
-                    'arithmetic_count': row[17],
-                    'conditional_count': row[18]
+                    'move_source_count': row[15] or 0,
+                    'move_target_count': row[16] or 0,
+                    'arithmetic_count': row[17] or 0,
+                    'conditional_count': row[18] or 0,
+                    'line_number': row[20] or 0
                 })
             
             # Get the primary field info (first result)
             primary = results[0]
             
+            # Ensure mainframe length is properly calculated
+            mainframe_length = max(primary[8] or 0, 1)  # Minimum length 1
+            oracle_length = max(primary[9] or mainframe_length, mainframe_length)
+            
+            # Get source code snippet with error handling
+            source_snippet = 'Source not available'
+            if primary[11]:  # program_source_content
+                source_snippet = primary[11][:2000] if len(primary[11]) > 2000 else primary[11]
+            
             field_details = {
                 'field_name': primary[0],
-                'friendly_name': primary[1] or primary[0],
-                'business_purpose': primary[2] or 'No description available',
-                'usage_type': primary[3],
-                'source_field': primary[4],
-                'target_field': primary[5],
+                'friendly_name': primary[1] or primary[0].replace('-', ' ').title(),
+                'business_purpose': primary[2] or f'Field {primary[0]} - analysis pending',
+                'usage_type': primary[3] or 'STATIC',
+                'source_field': primary[4] or '',
+                'target_field': primary[5] or '',
                 'mainframe_data_type': primary[6] or 'UNKNOWN',
-                'oracle_data_type': primary[7] or 'VARCHAR2(50)',
-                'mainframe_length': primary[8] or 0,
-                'oracle_length': primary[9] or 50,
-                'definition_code': primary[10] or '',
-                'source_code_snippet': primary[11][:1000] if primary[11] else 'Source not available',
-                'total_references': primary[13] or 0,
+                'oracle_data_type': primary[7] or f'VARCHAR2({oracle_length})',
+                'mainframe_length': mainframe_length,
+                'oracle_length': oracle_length,
+                'definition_code': primary[10] or f'Field definition for {primary[0]}',
+                'source_code_snippet': source_snippet,
+                'total_references': primary[13] or len(all_references),
                 'operations': field_operations,
-                'references': all_references[:10]  # Limit to first 10 references
+                'references': all_references[:15],  # Limit to first 15 references
+                'layout_name': primary[18] or 'Unknown',
+                'program_name': primary[19] or 'Unknown'
             }
             
             return jsonify({
@@ -999,10 +1147,10 @@ def get_field_details(session_id, field_name):
             })
             
     except Exception as e:
-        logger.error(f"Error getting field details: {str(e)}")
+        logger.error(f"Error getting field details for {field_name}: {str(e)}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': f'Error retrieving field details: {str(e)}'
         })
 
 @app.route('/api/db-health', methods=['GET'])

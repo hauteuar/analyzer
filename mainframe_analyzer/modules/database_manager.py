@@ -1443,3 +1443,145 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error creating source summary: {str(e)}")
             return f"Source code available ({len(source_content)} characters) but summary generation failed"
+    
+    def store_field_details_with_lengths(self, session_id: str, field_data: Dict, 
+                                   program_name: str, layout_id: int = None):
+        """Enhanced field storage with proper length calculation"""
+        field_name = field_data.get('name', 'UNNAMED_FIELD')
+        
+        try:
+            # Ensure proper field lengths are calculated
+            if not field_data.get('mainframe_length') or field_data.get('mainframe_length') == 0:
+                # Calculate lengths if missing
+                picture = field_data.get('picture', '')
+                usage = field_data.get('usage', '')
+                
+                if picture:
+                    # Use parser's calculation method
+                    mainframe_length, oracle_length, oracle_type = self._calculate_field_lengths_from_pic(
+                        picture, usage
+                    )
+                    field_data['mainframe_length'] = mainframe_length
+                    field_data['oracle_length'] = oracle_length
+                    field_data['oracle_data_type'] = oracle_type
+            
+            # Call the existing store method
+            self.store_field_details(session_id, field_data, program_name, layout_id)
+            
+        except Exception as e:
+            logger.error(f"Error storing field details with lengths for {field_name}: {str(e)}")
+            raise
+
+    def _calculate_field_lengths_from_pic(self, picture: str, usage: str = "") -> Tuple[int, int, str]:
+        """Database version of field length calculation"""
+        if not picture or picture.strip() == '':
+            return 1, 50, "VARCHAR2(50)"
+        
+        pic_upper = picture.upper().strip()
+        mainframe_length = 1
+        oracle_length = 50
+        oracle_type = "VARCHAR2(50)"
+        
+        try:
+            # Numeric fields
+            if re.search(r'[9S]', pic_upper):
+                total_digits = 0
+                decimal_digits = 0
+                
+                # Handle 9(n) patterns
+                paren_matches = re.findall(r'[9S]\((\d+)\)', pic_upper)
+                for match in paren_matches:
+                    total_digits += int(match)
+                
+                # Handle explicit 9s
+                remaining_pic = re.sub(r'[9S]\(\d+\)', '', pic_upper)
+                explicit_nines = len(re.findall(r'9', remaining_pic))
+                total_digits += explicit_nines
+                
+                # Handle V (decimal)
+                if 'V' in pic_upper:
+                    v_parts = pic_upper.split('V', 1)
+                    if len(v_parts) > 1:
+                        decimal_part = v_parts[1]
+                        decimal_paren = re.findall(r'9\((\d+)\)', decimal_part)
+                        for match in decimal_paren:
+                            decimal_digits += int(match)
+                        decimal_explicit = len(re.findall(r'9', re.sub(r'9\(\d+\)', '', decimal_part)))
+                        decimal_digits += decimal_explicit
+                
+                total_digits = max(total_digits, 1)
+                
+                # Calculate storage
+                if usage.upper() in ['COMP-3', 'PACKED-DECIMAL']:
+                    mainframe_length = max((total_digits + 1) // 2 + 1, 1)
+                elif usage.upper() in ['COMP', 'BINARY']:
+                    if total_digits <= 4:
+                        mainframe_length = 2
+                    elif total_digits <= 9:
+                        mainframe_length = 4
+                    else:
+                        mainframe_length = 8
+                else:
+                    mainframe_length = total_digits + (1 if 'S' in pic_upper else 0)
+                    mainframe_length = max(mainframe_length, 1)
+                
+                if decimal_digits > 0:
+                    oracle_type = f"NUMBER({total_digits},{decimal_digits})"
+                    oracle_length = total_digits + 1
+                else:
+                    oracle_type = f"NUMBER({total_digits})"
+                    oracle_length = total_digits
+            
+            # Alphanumeric fields
+            elif re.search(r'[XA]', pic_upper):
+                paren_matches = re.findall(r'[XA]\((\d+)\)', pic_upper)
+                if paren_matches:
+                    mainframe_length = sum(int(match) for match in paren_matches)
+                else:
+                    mainframe_length = max(len(re.findall(r'[XA]', pic_upper)), 1)
+                
+                oracle_length = mainframe_length
+                if oracle_length <= 4000:
+                    oracle_type = f"VARCHAR2({oracle_length})"
+                else:
+                    oracle_type = "CLOB"
+            
+            mainframe_length = max(mainframe_length, 1)
+            oracle_length = max(oracle_length, mainframe_length)
+            
+        except Exception as e:
+            logger.warning(f"Error calculating lengths for PIC {picture}: {str(e)}")
+            mainframe_length = 1
+            oracle_length = 50
+            oracle_type = "VARCHAR2(50)"
+        
+        return mainframe_length, oracle_length, oracle_type
+
+    def get_enhanced_field_mappings(self, session_id: str, target_file: str) -> List[Dict]:
+        """Get field mappings with enhanced validation and lengths"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT DISTINCT fad.field_name, fad.friendly_name, fad.mainframe_data_type, 
+                        fad.oracle_data_type, fad.mainframe_length, fad.oracle_length,
+                        fad.source_field, fad.business_purpose, fad.usage_type,
+                        fad.program_name, rl.layout_name,
+                        fad.field_references_json, fad.definition_code,
+                        fad.total_program_references, fad.move_source_count, fad.move_target_count
+                    FROM field_analysis_details fad
+                    LEFT JOIN record_layouts rl ON fad.field_id = rl.id
+                    WHERE fad.session_id = ?
+                    AND fad.mainframe_length > 0
+                    AND fad.field_name NOT IN ('VALUE', 'VALUES', 'PIC', 'PICTURE', 'USAGE', 'COMP')
+                    AND LENGTH(fad.field_name) >= 3
+                    AND (UPPER(rl.layout_name) LIKE UPPER(?) 
+                        OR UPPER(fad.program_name) LIKE UPPER(?)
+                        OR UPPER(fad.field_name) LIKE UPPER(?))
+                    ORDER BY rl.layout_name, fad.field_name
+                ''', (session_id, f'%{target_file}%', f'%{target_file}%', f'%{target_file}%'))
+                
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting enhanced field mappings: {str(e)}")
+            return []
