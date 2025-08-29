@@ -1399,9 +1399,20 @@
                 <div id="fieldMapping" class="tab-pane">
                     <h2>Field Mapping Analysis</h2>
                     <div class="field-mapping-controls">
-                        <input type="text" id="targetFileInput" placeholder="Enter target file name (e.g., CUSTOMER-FILE)">
-                        <button class="btn btn-primary" onclick="analyzeFieldMapping()">Analyze Field Mapping</button>
-                        <button class="btn btn-secondary" onclick="exportFieldMappings()">Export to CSV</button>
+                        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                            <input type="text" id="targetFileInput" placeholder="Enter target file name (e.g., CUSTOMER-FILE)" style="flex: 1; min-width: 200px;">
+                            <select id="recordLayoutSelector" onchange="updateTargetFileFromLayout()" style="min-width: 200px;">
+                                <option value="">Or select a record layout</option>
+                            </select>
+                            <button class="btn btn-primary" onclick="analyzeFieldMapping()">Analyze Field Mapping</button>
+                            <button class="btn btn-secondary" onclick="exportFieldMappings()">Export to CSV</button>
+                        </div>
+                    </div>
+
+                    <!-- Layout Summary Section -->
+                    <div id="layoutSummarySection" style="display: none; margin: 1rem 0; padding: 1rem; background: #f8f9fa; border-radius: 8px;">
+                        <h4>Layout Summary</h4>
+                        <div id="layoutSummaryContent"></div>
                     </div>
                     <div id="fieldMappingResults">
                         <table class="data-table">
@@ -2143,27 +2154,48 @@ function updateTargetFileFromLayout() {
         function loadRecordLayoutSelector() {
     const selector = document.getElementById('recordLayoutSelector');
     if (!selector) {
-        console.error('Record layout selector not found');
+        console.warn('Record layout selector not found');
+        return;
+    }
+    
+    if (!currentSessionId) {
+        console.warn('No active session for loading layouts');
         return;
     }
     
     try {
         fetch(`/api/record-layouts/${currentSessionId}`)
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 if (data.success) {
                     selector.innerHTML = '<option value="">Or select a record layout</option>';
                     
-                    data.layouts.forEach(layout => {
+                    if (data.layouts && data.layouts.length > 0) {
+                        data.layouts.forEach(layout => {
+                            const option = document.createElement('option');
+                            option.value = layout.layout_name;
+                            option.textContent = `${layout.layout_name} (${layout.fields_count || 0} fields) - ${layout.program_name}`;
+                            selector.appendChild(option);
+                        });
+                    } else {
                         const option = document.createElement('option');
-                        option.value = layout.layout_name;
-                        option.textContent = `${layout.layout_name} (${layout.fields_count || 0} fields) - ${layout.program_name}`;
+                        option.value = '';
+                        option.textContent = 'No record layouts found';
+                        option.disabled = true;
                         selector.appendChild(option);
-                    });
+                    }
+                } else {
+                    console.warn('Failed to load record layouts:', data.error);
                 }
             })
             .catch(error => {
                 console.error('Error loading record layouts:', error);
+                selector.innerHTML = '<option value="">Error loading layouts</option>';
             });
     } catch (error) {
         console.error('Error in loadRecordLayoutSelector:', error);
@@ -2530,7 +2562,14 @@ function escapeForTemplate(str) {
     function initializeFieldMapping() {
     loadRecordLayoutSelector();
 }
-
+function updateTargetFileFromLayout() {
+    const selector = document.getElementById('recordLayoutSelector');
+    const targetInput = document.getElementById('targetFileInput');
+    
+    if (selector && selector.value && targetInput) {
+        targetInput.value = selector.value;
+    }
+}
 
 
         function categorizeDependenciesForFlow(dependencies, focusComponent = null) {
@@ -3519,6 +3558,11 @@ async function displayLayoutSummary(layoutName) {
                 const summary = data.summary;
                 const summarySection = document.getElementById('layoutSummarySection');
                 const summaryContent = document.getElementById('layoutSummaryContent');
+                
+                if (!summarySection || !summaryContent) {
+                    console.warn('Layout summary elements not found in DOM');
+                    return;
+                }
                 
                 summaryContent.innerHTML = `
                     <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 2rem;">
