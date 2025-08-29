@@ -1291,6 +1291,36 @@ def update_llm_config():
             'success': False,
             'error': str(e) 
         }), 500
-    
+
+# Add to your Flask app
+@app.route('/api/llm-summaries/<session_id>', methods=['GET'])
+def get_llm_summaries(session_id):
+    try:
+        summaries = db_manager.get_all_llm_summaries(session_id)
+        return jsonify({
+            'success': True,
+            'summaries': summaries,
+            'count': len(summaries)
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/llm-summary/<session_id>/<component_name>', methods=['GET'])
+def get_component_llm_summary(session_id, component_name):
+    try:
+        summary = db_manager.get_llm_summary(session_id, component_name)
+        return jsonify({
+            'success': True,
+            'summary': summary
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

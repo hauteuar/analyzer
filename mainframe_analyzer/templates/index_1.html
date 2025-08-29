@@ -1395,49 +1395,66 @@
                     </div>
                 </div>
 
-                <!-- Field Mapping Analysis Tab -->
-                <div id="fieldMapping" class="tab-pane">
-                    <h2>Field Mapping Analysis</h2>
-                    <div class="field-mapping-controls">
-                        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-                            <input type="text" id="targetFileInput" placeholder="Enter target file name (e.g., CUSTOMER-FILE)" style="flex: 1; min-width: 200px;">
-                            <select id="recordLayoutSelector" onchange="updateTargetFileFromLayout()" style="min-width: 200px;">
-                                <option value="">Or select a record layout</option>
-                            </select>
-                            <button class="btn btn-primary" onclick="analyzeFieldMapping()">Analyze Field Mapping</button>
-                            <button class="btn btn-secondary" onclick="exportFieldMappings()">Export to CSV</button>
-                        </div>
-                    </div>
-
-                    <!-- Layout Summary Section -->
-                    <div id="layoutSummarySection" style="display: none; margin: 1rem 0; padding: 1rem; background: #f8f9fa; border-radius: 8px;">
-                        <h4>Layout Summary</h4>
-                        <div id="layoutSummaryContent"></div>
-                    </div>
-                    <div id="fieldMappingResults">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Field Name</th>
-                                    <th>Mainframe Data Type</th>
-                                    <th>Oracle Data Type</th>
-                                    <th>MF Length</th>
-                                    <th>Oracle Length</th>
-                                    <th>Population Source</th>
-                                    <th>Business Logic</th>
-                                    <th>Programs Involved</th>
-                                </tr>
-                            </thead>
-                            <tbody id="fieldMappingTableBody">
-                                <tr>
-                                    <td colspan="8" class="text-center text-muted">Enter a target file name and click Analyze</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                
+    <!-- Field Mapping Analysis Tab -->
+    <div id="fieldMapping" class="tab-pane">
+        <h2>Field Mapping Analysis</h2>
+        <div class="field-mapping-controls">
+            <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="targetFileInput" placeholder="Enter target file name (e.g., CUSTOMER-FILE)" style="flex: 1; min-width: 200px;">
+                <select id="recordLayoutSelector" onchange="updateTargetFileFromLayout()" style="min-width: 200px;">
+                    <option value="">Or select a record layout</option>
+                </select>
+                <button class="btn btn-primary" onclick="analyzeFieldMapping()">Analyze Field Mapping</button>
+                <button class="btn btn-secondary" onclick="exportFieldMappings()">Export to CSV</button>
             </div>
         </div>
+
+        <!-- Layout Summary Section -->
+        <div id="layoutSummarySection" style="display: none; margin: 1rem 0; padding: 1rem; background: #f8f9fa; border-radius: 8px;">
+            <h4>Layout Summary</h4>
+            <div id="layoutSummaryContent"></div>
+        </div>
+        
+        <div id="fieldMappingResults">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Field Name</th>
+                        <th>Mainframe Type & Length</th>
+                        <th>Oracle Type & Length</th>
+                        <th>Population Source</th>
+                        <th>Business Logic</th>
+                        <th>Programs Involved</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="fieldMappingTableBody">
+                    <tr>
+                        <td colspan="7" class="text-center text-muted">Enter a target file name or select a layout and click Analyze</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Field Details Modal -->
+    <div id="fieldDetailsModal" class="modal">
+        <div class="modal-content" style="width: 80%; max-width: 900px;">
+            <div class="modal-header">
+                <h3 class="modal-title" id="fieldModalTitle">Field Details</h3>
+                <button class="close" onclick="closeFieldDetailsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="fieldDetailsContent">
+                    <!-- Will be populated with field details -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeFieldDetailsModal()">Close</button>
+            </div>
+        </div>
+    </div>
 
         <!-- Right Panel - Chat -->
         <div class="right-panel" id="rightPanel">
@@ -2151,87 +2168,130 @@ function updateTargetFileFromLayout() {
             }
         }
 
-        function loadRecordLayoutSelector() {
-    const selector = document.getElementById('recordLayoutSelector');
-    if (!selector) {
-        console.warn('Record layout selector not found');
-        return;
-    }
+        function normalizeUsageType(usageType) {
+    if (!usageType) return 'STATIC';
     
-    if (!currentSessionId) {
-        console.warn('No active session for loading layouts');
-        return;
-    }
+    const normalizedMappings = {
+        'MOVE_TARGET': 'INPUT',
+        'MOVE_SOURCE': 'OUTPUT', 
+        'MOVE': 'INPUT_OUTPUT',
+        'COMPUTED': 'DERIVED',
+        'DEFINITION': 'STATIC',
+        'CONDITION': 'REFERENCE',
+        'CONDITIONAL': 'REFERENCE',
+        'CICS_INPUT': 'INPUT',
+        'CICS_OUTPUT': 'OUTPUT',
+        'CICS_REWRITE': 'INPUT_OUTPUT',
+        'STRING_MANIPULATION': 'DERIVED',
+        'CALCULATED': 'DERIVED',
+        'UNUSED': 'UNUSED'
+    };
     
-    try {
-        fetch(`/api/record-layouts/${currentSessionId}`)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (data.success) {
-                    selector.innerHTML = '<option value="">Or select a record layout</option>';
-                    
-                    if (data.layouts && data.layouts.length > 0) {
-                        data.layouts.forEach(layout => {
-                            const option = document.createElement('option');
-                            option.value = layout.layout_name;
-                            option.textContent = `${layout.layout_name} (${layout.fields_count || 0} fields) - ${layout.program_name}`;
-                            selector.appendChild(option);
-                        });
-                    } else {
-                        const option = document.createElement('option');
-                        option.value = '';
-                        option.textContent = 'No record layouts found';
-                        option.disabled = true;
-                        selector.appendChild(option);
-                    }
-                } else {
-                    console.warn('Failed to load record layouts:', data.error);
-                }
-            })
-            .catch(error => {
-                console.error('Error loading record layouts:', error);
-                selector.innerHTML = '<option value="">Error loading layouts</option>';
-            });
-    } catch (error) {
-        console.error('Error in loadRecordLayoutSelector:', error);
-    }
+    return normalizedMappings[usageType.toUpperCase()] || usageType.toUpperCase();
 }
 
         // Enhanced Dashboard Summaries with Raw Response Handling
-        async function loadDashboardSummaries() {
-            try {
-                const response = await fetch(`/api/components-with-derived/${currentSessionId}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success) {
-                        displayComponentSummariesWithDerived(data.components);
-                        updateDashboardMetrics(data.components);
-                        populateDependencyDropdown(data.components);
-                    }
-                }
-            } catch (error) {
-                console.error('Error loading dashboard summaries:', error);
-                
-                try {
-                    const fallbackResponse = await fetch(`/api/components/${currentSessionId}`);
-                    if (fallbackResponse.ok) {
-                        const fallbackData = await fallbackResponse.json();
-                        if (fallbackData.success) {
-                            displayComponentSummaries(fallbackData.components);
-                            updateDashboardMetrics(fallbackData.components);
-                            populateDependencyDropdown(fallbackData.components);
-                        }
-                    }
-                } catch (fallbackError) {
-                    console.error('Fallback also failed:', fallbackError);
-                }
+        // In index.html, update loadDashboardSummaries function:
+async function loadDashboardSummaries() {
+    try {
+        // Get components with LLM summaries from new table
+        const response = await fetch(`/api/llm-summaries/${currentSessionId}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                displayComponentSummariesFromLLMTable(data.summaries);
+                updateDashboardMetrics(data.summaries);
             }
         }
+    } catch (error) {
+        console.error('Error loading LLM summaries:', error);
+    }
+}
+
+function displayComponentSummariesFromLLMTable(summaries) {
+    const container = document.getElementById('componentSummaries');
+    container.innerHTML = '';
+
+    if (summaries.length === 0) {
+        container.innerHTML = '<p class="text-muted">No component summaries available</p>';
+        return;
+    }
+
+    summaries.forEach(summary => {
+        const card = document.createElement('div');
+        card.className = 'component-summary-card';
+        
+        const businessPurpose = summary.business_purpose || 'No business purpose available';
+        const complexityScore = summary.complexity_score || 0.5;
+        const keyFeatures = summary.key_features || [];
+        
+        if (summary.is_raw_response) {
+            // Handle raw LLM responses
+            card.innerHTML = `
+                <div class="component-header">
+                    <div>
+                        <div class="component-title">${summary.component_name}</div>
+                        <div class="text-muted">${summary.friendly_name || ''}</div>
+                    </div>
+                    <span class="component-type badge badge-warning">RAW AI ANALYSIS</span>
+                </div>
+                
+                <div class="business-purpose raw-analysis">
+                    <strong>AI Analysis (Raw Response):</strong><br>
+                    <div style="background: #fff3cd; padding: 1rem; border-radius: 6px; max-height: 150px; overflow-y: auto;">
+                        ${businessPurpose}
+                    </div>
+                </div>
+                
+                <div class="component-metrics">
+                    <div class="metric">
+                        <span class="metric-value">RAW</span>
+                        <span class="metric-label">Analysis</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-value">${Math.round(complexityScore * 100)}%</span>
+                        <span class="metric-label">Complexity</span>
+                    </div>
+                </div>
+            `;
+        } else {
+            // Handle structured summaries
+            card.innerHTML = `
+                <div class="component-header">
+                    <div>
+                        <div class="component-title">${summary.component_name}</div>
+                        <div class="text-muted">${summary.friendly_name || ''}</div>
+                    </div>
+                    <span class="component-type badge badge-primary">${summary.component_type}</span>
+                </div>
+                
+                <div class="business-purpose">${businessPurpose}</div>
+                
+                <div class="component-metrics">
+                    <div class="metric">
+                        <span class="metric-value">${summary.primary_function || 'GENERAL'}</span>
+                        <span class="metric-label">Function</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-value">${Math.round(complexityScore * 100)}%</span>
+                        <span class="metric-label">Complexity</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-value">${keyFeatures.length}</span>
+                        <span class="metric-label">Features</span>
+                    </div>
+                </div>
+                
+                <div class="complexity-bar">
+                    <div class="complexity-fill" style="width: ${complexityScore * 100}%"></div>
+                </div>
+            `;
+        }
+        
+        container.appendChild(card);
+    });
+}
+
 function escapeForTemplate(str) {
     if (!str) return '';
     return str
@@ -2562,6 +2622,58 @@ function escapeForTemplate(str) {
     function initializeFieldMapping() {
     loadRecordLayoutSelector();
 }
+
+function loadRecordLayoutSelector() {
+    const selector = document.getElementById('recordLayoutSelector');
+    if (!selector) {
+        console.warn('Record layout selector not found');
+        return;
+    }
+    
+    if (!currentSessionId) {
+        console.warn('No active session for loading layouts');
+        return;
+    }
+    
+    try {
+        fetch(`/api/record-layouts/${currentSessionId}`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    selector.innerHTML = '<option value="">Or select a record layout</option>';
+                    
+                    if (data.layouts && data.layouts.length > 0) {
+                        data.layouts.forEach(layout => {
+                            const option = document.createElement('option');
+                            option.value = layout.layout_name;
+                            option.textContent = `${layout.layout_name} (${layout.fields_count || 0} fields) - ${layout.program_name}`;
+                            selector.appendChild(option);
+                        });
+                    } else {
+                        const option = document.createElement('option');
+                        option.value = '';
+                        option.textContent = 'No record layouts found';
+                        option.disabled = true;
+                        selector.appendChild(option);
+                    }
+                } else {
+                    console.warn('Failed to load record layouts:', data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading record layouts:', error);
+                selector.innerHTML = '<option value="">Error loading layouts</option>';
+            });
+    } catch (error) {
+        console.error('Error in loadRecordLayoutSelector:', error);
+    }
+}
+
 function updateTargetFileFromLayout() {
     const selector = document.getElementById('recordLayoutSelector');
     const targetInput = document.getElementById('targetFileInput');
@@ -3449,6 +3561,9 @@ function displayFieldMappingsWithSummary(mappings, summary) {
     mappings.forEach(mapping => {
         const row = document.createElement('tr');
         
+        // Normalize usage type for consistency with field matrix
+        let normalizedUsageType = normalizeUsageType(mapping.business_logic_type || 'STATIC');
+        
         row.innerHTML = `
             <td>
                 <div style="min-width: 150px;">
@@ -3477,7 +3592,7 @@ function displayFieldMappingsWithSummary(mappings, summary) {
             </td>
             <td>
                 <div style="min-width: 120px;">
-                    <span class="badge ${getBadgeClass(mapping.business_logic_type)}">${mapping.business_logic_type}</span>
+                    <span class="badge ${getBadgeClass(normalizedUsageType)}">${normalizedUsageType}</span>
                     <br><small style="font-size: 0.75rem;">${mapping.business_logic_description || ''}</small>
                 </div>
             </td>
@@ -3506,6 +3621,133 @@ function displayFieldMappingsWithSummary(mappings, summary) {
     }
 }
 
+// Add the missing field details modal functions
+async function showFieldDetails(fieldName) {
+    try {
+        const response = await fetch(`/api/field-details/${currentSessionId}/${fieldName}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                displayFieldDetailsModal(data.field_details);
+            } else {
+                showError(`Could not load details for field ${fieldName}`);
+            }
+        }
+    } catch (error) {
+        console.error('Error loading field details:', error);
+        showError('Error loading field details');
+    }
+}
+
+function displayFieldDetailsModal(fieldDetails) {
+    const modalTitle = document.getElementById('fieldModalTitle');
+    const fieldDetailsContent = document.getElementById('fieldDetailsContent');
+    
+    if (!modalTitle || !fieldDetailsContent) {
+        console.error('Modal elements not found');
+        return;
+    }
+    
+    try {
+        modalTitle.textContent = `${fieldDetails.field_name} - Field Details`;
+        
+        // Get normalized usage type for consistency
+        const normalizedUsageType = normalizeUsageType(fieldDetails.usage_type || 'STATIC');
+        
+        // Safe template creation
+        const content = createFieldDetailsContent({...fieldDetails, usage_type: normalizedUsageType});
+        fieldDetailsContent.innerHTML = content;
+        
+        const modal = document.getElementById('fieldDetailsModal');
+        if (modal) {
+            modal.style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+    } catch (error) {
+        console.error('Error displaying field details modal:', error);
+        showError('Error displaying field details');
+    }
+}
+
+function createFieldDetailsContent(fieldDetails) {
+    const operationsSummary = fieldDetails.operations ? 
+        fieldDetails.operations.map(op => 
+            `${op.program_name}: ${normalizeUsageType(op.usage_type)} (${op.move_source_count + op.move_target_count + op.arithmetic_count + op.conditional_count} operations)`
+        ).join('<br>') : 'No operations found';
+
+    const referencesHtml = fieldDetails.references ? 
+        fieldDetails.references.map(ref => `
+            <div style="padding: 0.5rem; margin-bottom: 0.5rem; background: #f8f9fa; border-left: 3px solid #667eea; border-radius: 4px;">
+                <strong>Line ${ref.line_number}:</strong> ${normalizeUsageType(ref.operation_type)}<br>
+                <code style="font-size: 0.8rem;">${ref.line_content}</code>
+            </div>
+        `).join('') : 'No references found';
+
+    return `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+            <div>
+                <h5>Field Information</h5>
+                <table style="width: 100%; font-size: 0.9rem;">
+                    <tr><td><strong>Name:</strong></td><td>${fieldDetails.field_name || 'N/A'}</td></tr>
+                    <tr><td><strong>Friendly Name:</strong></td><td>${fieldDetails.friendly_name || 'N/A'}</td></tr>
+                    <tr><td><strong>Usage Type:</strong></td><td><span class="badge ${getBadgeClass(fieldDetails.usage_type || 'UNKNOWN')}">${fieldDetails.usage_type || 'UNKNOWN'}</span></td></tr>
+                    <tr><td><strong>Source Field:</strong></td><td>${fieldDetails.source_field || 'N/A'}</td></tr>
+                    <tr><td><strong>Target Field:</strong></td><td>${fieldDetails.target_field || 'N/A'}</td></tr>
+                </table>
+            </div>
+            <div>
+                <h5>Data Types & Lengths</h5>
+                <table style="width: 100%; font-size: 0.9rem;">
+                    <tr><td><strong>Mainframe Type:</strong></td><td><code>${fieldDetails.mainframe_data_type || 'UNKNOWN'}</code></td></tr>
+                    <tr><td><strong>Mainframe Length:</strong></td><td>${fieldDetails.mainframe_length || 0}</td></tr>
+                    <tr><td><strong>Oracle Type:</strong></td><td><code>${fieldDetails.oracle_data_type || 'VARCHAR2(50)'}</code></td></tr>
+                    <tr><td><strong>Oracle Length:</strong></td><td>${fieldDetails.oracle_length || 50}</td></tr>
+                    <tr><td><strong>Total References:</strong></td><td>${fieldDetails.total_references || 0}</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 2rem;">
+            <h5>Business Purpose</h5>
+            <div style="padding: 1rem; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #667eea;">
+                ${fieldDetails.business_purpose || 'No description available'}
+            </div>
+        </div>
+
+        <div style="margin-bottom: 2rem;">
+            <h5>Field Definition</h5>
+            <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; font-family: monospace; font-size: 0.9rem;">
+                ${fieldDetails.definition_code || 'Definition not available'}
+            </div>
+        </div>
+
+        <div style="margin-bottom: 2rem;">
+            <h5>Program Operations</h5>
+            <div style="font-size: 0.9rem;">
+                ${operationsSummary}
+            </div>
+        </div>
+
+        <div style="margin-bottom: 2rem;">
+            <h5>Field References (First 10)</h5>
+            <div style="max-height: 300px; overflow-y: auto;">
+                ${referencesHtml}
+            </div>
+        </div>
+
+        <div>
+            <h5>Source Code Context</h5>
+            <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; max-height: 200px; overflow-y: auto;">
+                <pre style="margin: 0; font-size: 0.8rem; white-space: pre-wrap;">${fieldDetails.source_code_snippet || 'Source code not available'}</pre>
+            </div>
+        </div>
+    `;
+}
+
+function closeFieldDetailsModal() {
+    document.getElementById('fieldDetailsModal').style.display = 'none';
+    document.body.style.overflow = 'auto';
+}
 function showMappingSummary(summary) {
     const summaryHtml = `
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 1rem; margin-top: 1rem;">

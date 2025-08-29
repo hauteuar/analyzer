@@ -377,6 +377,36 @@ class DatabaseManager:
                         )
                     ''')
 
+                    cursor.execute('''
+                        CREATE TABLE llm_component_summaries (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            component_name TEXT NOT NULL,
+                            component_type TEXT NOT NULL,
+                            business_purpose TEXT,
+                            primary_function TEXT,
+                            complexity_score REAL DEFAULT 0.5,
+                            key_features_json TEXT,
+                            integration_points_json TEXT,
+                            data_sources_json TEXT,
+                            business_domain TEXT DEFAULT 'WEALTH_MANAGEMENT',
+                            raw_llm_response TEXT,
+                            is_raw_response BOOLEAN DEFAULT 0,
+                            friendly_name TEXT,
+                            analysis_confidence REAL DEFAULT 0.8,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id),
+                            UNIQUE(session_id, component_name, component_type)
+                        )
+                    ''')
+                    
+                    # Add index for faster retrieval
+                    cursor.execute('''
+                        CREATE INDEX idx_llm_summaries_lookup 
+                        ON llm_component_summaries(session_id, component_name, component_type)
+                    ''')
+
                     # Create performance indexes (UPDATED with new classification indexes)
                     indexes = [
                         'CREATE INDEX idx_derived_components_parent ON derived_components(session_id, parent_component)',
@@ -401,7 +431,7 @@ class DatabaseManager:
                             cursor.execute(index_sql)
                         except Exception as idx_error:
                             logger.warning(f"Failed to create index: {index_sql[:50]}... Error: {idx_error}")
-                    
+                    self.create_friendly_name_cache_table()
                     logger.info("Database schema created successfully with record-level classification support")
                     self.init_executed = True
                     return
@@ -802,7 +832,7 @@ class DatabaseManager:
                 field_name[:100],
                 field_data.get('friendly_name', field_name)[:100],
                 program_name[:100], 
-                field_data.get('layout_name', '')[:100],
+                field_data.get('parent_layout', '')[:100],
                 field_data.get('operation_type', 'DEFINITION')[:50],
                 field_data.get('line_number', 0), 
                 str(field_data.get('code_snippet', ''))[:1000],
@@ -892,7 +922,7 @@ class DatabaseManager:
                     session_id, layout_id, field_name,
                     field_data.get('friendly_name', field_name)[:100],
                     program_name[:100], 
-                    field_data.get('layout_name', '')[:100],
+                    field_data.get('parent_layout', '')[:100],
                     field_data.get('operation_type', 'DEFINITION')[:50],
                     field_data.get('line_number', 0),
                     field_data.get('code_snippet', '')[:1000],
@@ -937,7 +967,7 @@ class DatabaseManager:
             try:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
-                    self._store_field_details_internal(session_id, field_data, program_name, layout_id, cursor)
+                    self.store_field_details_enhanced(session_id, field_data, program_name, layout_id)
                     return  # Success, exit retry loop
                     
             except sqlite3.OperationalError as e:
@@ -1255,6 +1285,237 @@ class DatabaseManager:
             logger.error(f"Error getting field context: {str(e)}")
             return {}
     
+    def generate_friendly_name(self, technical_name: str, context: str = '', 
+                            business_domain: str = 'WEALTH_MANAGEMENT') -> str:
+        """Generate business-friendly names with caching and fallback logic"""
+        
+        # Check cache first
+        cache_key = f"{technical_name}_{context}_{business_domain}"
+        if hasattr(self, '_friendly_name_cache') and cache_key in self._friendly_name_cache:
+            return self._friendly_name_cache[cache_key]
+        
+        # Initialize cache if it doesn't exist
+        if not hasattr(self, '_friendly_name_cache'):
+            self._friendly_name_cache = {}
+        
+        try:
+            # Try to get from database first
+            friendly_name = self._get_cached_friendly_name_from_db(technical_name, context)
+            if friendly_name:
+                self._friendly_name_cache[cache_key] = friendly_name
+                return friendly_name
+            
+            # Generate new friendly name
+            friendly_name = self._generate_simple_friendly_name(technical_name, context, business_domain)
+            
+            # Store in cache and database
+            self._friendly_name_cache[cache_key] = friendly_name
+            self._store_friendly_name_in_db(technical_name, context, friendly_name)
+            
+            return friendly_name
+            
+        except Exception as e:
+            logger.error(f"Error generating friendly name for {technical_name}: {str(e)}")
+            return self._fallback_friendly_name(technical_name, context)
+
+    def _get_cached_friendly_name_from_db(self, technical_name: str, context: str) -> Optional[str]:
+        """Retrieve cached friendly name from database"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT friendly_name FROM friendly_name_cache 
+                    WHERE technical_name = ? AND context = ?
+                    ORDER BY created_at DESC LIMIT 1
+                ''', (technical_name, context))
+                
+                result = cursor.fetchone()
+                return result[0] if result else None
+                
+        except Exception as e:
+            logger.debug(f"Error retrieving cached friendly name: {str(e)}")
+            return None
+
+    def _store_friendly_name_in_db(self, technical_name: str, context: str, friendly_name: str):
+        """Store friendly name in database cache"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO friendly_name_cache 
+                    (technical_name, context, friendly_name, created_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (technical_name, context, friendly_name))
+                
+        except Exception as e:
+            logger.debug(f"Error storing friendly name cache: {str(e)}")
+
+    def _generate_simple_friendly_name(self, technical_name: str, context: str = '', 
+                                    business_domain: str = 'WEALTH_MANAGEMENT') -> str:
+        """Generate friendly name using business domain patterns"""
+        if not technical_name:
+            return context.title() if context else 'Unknown Component'
+
+        name = str(technical_name).upper().strip()
+
+        # Remove common technical prefixes
+        prefixes = ['WS-', 'LS-', 'WK-', 'FD-', 'FD_', 'TB-', 'TB_', 'SRV-', 'PRG-', 'TMS', 'TMST']
+        for prefix in prefixes:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+                break
+
+        # Business domain mappings for wealth management
+        if business_domain == 'WEALTH_MANAGEMENT':
+            wm_mappings = {
+                'ACCT': 'Account',
+                'CUST': 'Customer', 
+                'PORT': 'Portfolio',
+                'POS': 'Position',
+                'TXN': 'Transaction',
+                'TRAN': 'Transaction',
+                'BAL': 'Balance',
+                'VAL': 'Valuation',
+                'PERF': 'Performance',
+                'RISK': 'Risk',
+                'FEE': 'Fee',
+                'COMM': 'Commission',
+                'RPT': 'Report',
+                'ALLOC': 'Allocation',
+                'TRADE': 'Trade',
+                'HOLD': 'Holdings',
+                'CASH': 'Cash',
+                'SEC': 'Security',
+                'PRICE': 'Pricing',
+                'STMT': 'Statement',
+                'ADDR': 'Address',
+                'PHONE': 'Phone',
+                'EMAIL': 'Email'
+            }
+            
+            # Apply mappings
+            for tech_term, business_term in wm_mappings.items():
+                if tech_term in name:
+                    name = name.replace(tech_term, business_term)
+        
+        # Clean up formatting
+        name = re.sub(r'[_\-\.]', ' ', name)
+        name = re.sub(r'\s+', ' ', name).strip()
+        name = name.title()
+        
+        # Add context suffix if provided
+        if context and context.lower() not in name.lower():
+            context_suffix = context.replace('_', ' ').title()
+            if context_suffix not in ['Field', 'Component', 'Program', 'File']:
+                name = f"{name} {context_suffix}"
+        
+        if not name:
+            return context.title() if context else technical_name
+        
+        return name
+
+    def _fallback_friendly_name(self, technical_name: str, context: str) -> str:
+        """Fallback friendly name generation"""
+        if not technical_name:
+            return 'Unknown'
+        
+        # Simple cleanup
+        name = str(technical_name).replace('_', ' ').replace('-', ' ').title()
+        
+        if context:
+            return f"{name} ({context})"
+        
+        return name
+
+    def create_friendly_name_cache_table(self):
+        """Create friendly name cache table - call this in initialize_database()"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS friendly_name_cache (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        technical_name TEXT NOT NULL,
+                        context TEXT NOT NULL DEFAULT '',
+                        friendly_name TEXT NOT NULL,
+                        business_domain TEXT DEFAULT 'WEALTH_MANAGEMENT',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(technical_name, context)
+                    )
+                ''')
+                
+                # Create index for faster lookups
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_friendly_name_lookup 
+                    ON friendly_name_cache(technical_name, context)
+                ''')
+                
+                logger.debug("Friendly name cache table created successfully")
+                
+        except Exception as e:
+            logger.error(f"Error creating friendly name cache table: {str(e)}")
+
+    def batch_generate_friendly_names(self, items: List[Dict], context: str = '', 
+                                    business_domain: str = 'WEALTH_MANAGEMENT') -> Dict[str, str]:
+        """Generate friendly names for multiple items efficiently"""
+        
+        friendly_names = {}
+        
+        for item in items[:50]:  # Limit to prevent performance issues
+            try:
+                if isinstance(item, dict):
+                    name = item.get('name', item.get('copybook_name', 
+                        item.get('file_name', item.get('program_name', 'UNKNOWN'))))
+                else:
+                    name = str(item)
+                
+                if name and name != 'UNKNOWN':
+                    friendly_names[name] = self.generate_friendly_name(name, context, business_domain)
+                    
+            except Exception as e:
+                logger.warning(f"Error generating friendly name for item {item}: {str(e)}")
+                continue
+        
+        return friendly_names
+
+    def update_component_friendly_names(self, session_id: str):
+        """Update friendly names for all components in a session"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get all components that need friendly names
+                cursor.execute('''
+                    SELECT id, component_name, component_type 
+                    FROM component_analysis 
+                    WHERE session_id = ? AND (friendly_name IS NULL OR friendly_name = '' OR friendly_name = component_name)
+                ''', (session_id,))
+                
+                components = cursor.fetchall()
+                updated_count = 0
+                
+                for comp_id, comp_name, comp_type in components:
+                    try:
+                        friendly_name = self.generate_friendly_name(comp_name, comp_type)
+                        
+                        cursor.execute('''
+                            UPDATE component_analysis 
+                            SET friendly_name = ? 
+                            WHERE id = ?
+                        ''', (friendly_name, comp_id))
+                        
+                        updated_count += 1
+                        
+                    except Exception as e:
+                        logger.error(f"Error updating friendly name for {comp_name}: {str(e)}")
+                        continue
+                
+                logger.info(f"Updated {updated_count} component friendly names for session {session_id}")
+                
+        except Exception as e:
+            logger.error(f"Error updating component friendly names: {str(e)}")
+
+
     def export_field_mappings(self, session_id: str) -> List[Dict]:
         """Export field mappings for the session"""
         try:
@@ -1444,6 +1705,125 @@ class DatabaseManager:
             logger.error(f"Error creating source summary: {str(e)}")
             return f"Source code available ({len(source_content)} characters) but summary generation failed"
     
+
+    def store_llm_summary(self, session_id: str, component_name: str, component_type: str, llm_summary: Dict):
+        """Store LLM summary in dedicated table"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Handle both structured and raw responses
+                if llm_summary.get('is_raw', False):
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO llm_component_summaries 
+                        (session_id, component_name, component_type, business_purpose, 
+                        raw_llm_response, is_raw_response, friendly_name, analysis_confidence)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        session_id, component_name, component_type,
+                        llm_summary.get('business_purpose', ''),
+                        llm_summary.get('raw_response', ''),
+                        True,
+                        llm_summary.get('friendly_name', ''),
+                        llm_summary.get('analysis_confidence', 0.5)
+                    ))
+                else:
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO llm_component_summaries 
+                        (session_id, component_name, component_type, business_purpose, primary_function,
+                        complexity_score, key_features_json, integration_points_json, data_sources_json,
+                        business_domain, friendly_name, analysis_confidence, is_raw_response)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        session_id, component_name, component_type,
+                        llm_summary.get('business_purpose', ''),
+                        llm_summary.get('primary_function', ''),
+                        llm_summary.get('complexity_score', 0.5),
+                        json.dumps(llm_summary.get('key_features', [])),
+                        json.dumps(llm_summary.get('integration_points', [])),
+                        json.dumps(llm_summary.get('data_sources', [])),
+                        llm_summary.get('business_domain', 'WEALTH_MANAGEMENT'),
+                        llm_summary.get('friendly_name', ''),
+                        llm_summary.get('analysis_confidence', 0.8),
+                        False
+                    ))
+                
+                logger.info(f"Stored LLM summary for {component_name}")
+                
+        except Exception as e:
+            logger.error(f"Error storing LLM summary for {component_name}: {str(e)}")
+
+    def get_llm_summary(self, session_id: str, component_name: str, component_type: str = None) -> Dict:
+        """Get LLM summary from dedicated table"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if component_type:
+                    cursor.execute('''
+                        SELECT * FROM llm_component_summaries 
+                        WHERE session_id = ? AND component_name = ? AND component_type = ?
+                    ''', (session_id, component_name, component_type))
+                else:
+                    cursor.execute('''
+                        SELECT * FROM llm_component_summaries 
+                        WHERE session_id = ? AND component_name = ?
+                        ORDER BY created_at DESC LIMIT 1
+                    ''', (session_id, component_name))
+                
+                result = cursor.fetchone()
+                
+                if result:
+                    summary = dict(result)
+                    
+                    # Parse JSON fields
+                    if summary['key_features_json']:
+                        summary['key_features'] = json.loads(summary['key_features_json'])
+                    if summary['integration_points_json']:
+                        summary['integration_points'] = json.loads(summary['integration_points_json'])
+                    if summary['data_sources_json']:
+                        summary['data_sources'] = json.loads(summary['data_sources_json'])
+                    
+                    return summary
+                
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Error getting LLM summary for {component_name}: {str(e)}")
+            return {}
+
+    def get_all_llm_summaries(self, session_id: str) -> List[Dict]:
+        """Get all LLM summaries for a session"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT * FROM llm_component_summaries 
+                    WHERE session_id = ?
+                    ORDER BY component_type, component_name
+                ''', (session_id,))
+                
+                summaries = []
+                for row in cursor.fetchall():
+                    summary = dict(row)
+                    
+                    # Parse JSON fields
+                    if summary['key_features_json']:
+                        summary['key_features'] = json.loads(summary['key_features_json'])
+                    if summary['integration_points_json']:
+                        summary['integration_points'] = json.loads(summary['integration_points_json'])
+                    if summary['data_sources_json']:
+                        summary['data_sources'] = json.loads(summary['data_sources_json'])
+                    
+                    summaries.append(summary)
+                
+                return summaries
+                
+        except Exception as e:
+            logger.error(f"Error getting all LLM summaries: {str(e)}")
+            return []
+
+
     def store_field_details_with_lengths(self, session_id: str, field_data: Dict, 
                                    program_name: str, layout_id: int = None):
         """Enhanced field storage with proper length calculation"""
@@ -1580,8 +1960,37 @@ class DatabaseManager:
                         OR UPPER(fad.field_name) LIKE UPPER(?))
                     ORDER BY rl.layout_name, fad.field_name
                 ''', (session_id, f'%{target_file}%', f'%{target_file}%', f'%{target_file}%'))
+                                
                 
-                return [dict(row) for row in cursor.fetchall()]
+                mappings = []
+                for row in cursor.fetchall():
+                    mapping = dict(row)
+                    # Normalize business logic type for consistency
+                    mapping['business_logic_type'] = self._normalize_usage_type(mapping.get('usage_type', 'STATIC'))
+                    mappings.append(mapping)
+                
+                return mappings
+
         except Exception as e:
             logger.error(f"Error getting enhanced field mappings: {str(e)}")
             return []
+
+    def _normalize_usage_type(self, usage_type: str) -> str:
+        """Normalize usage types for consistency across UI"""
+        if not usage_type:
+            return 'STATIC'
+        
+        normalized_mappings = {
+            'MOVE_TARGET': 'INPUT',
+            'MOVE_SOURCE': 'OUTPUT',
+            'COMPUTED': 'DERIVED',
+            'DEFINITION': 'UNUSED',
+            'CONDITION': 'REFERENCE',
+            'CONDITIONAL': 'REFERENCE',
+            'CICS_INPUT': 'INPUT',
+            'CICS_OUTPUT': 'OUTPUT',
+            'STRING_MANIPULATION': 'DERIVED',
+            'CALCULATED': 'DERIVED'
+        }
+        
+        return normalized_mappings.get(usage_type.upper(), usage_type.upper())

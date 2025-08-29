@@ -524,7 +524,7 @@ class COBOLParser:
         field = CobolField(name=name, level=level, line_number=line_number)
         
         # PIC clause
-        pic_m = re.search(r'PIC(?:TURE)?\s+([X9SVP\(\)\.,\+\-]+)', definition, re.IGNORECASE)
+        pic_m = re.search(r'PIC(?:TURE)?\s+([A-Z0-9SVX\(\)\.\,\-\s]*)', definition, re.IGNORECASE)
         if pic_m:
             field.picture = pic_m.group(1)
             

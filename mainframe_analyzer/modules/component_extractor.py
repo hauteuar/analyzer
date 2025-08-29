@@ -84,6 +84,14 @@ class ComponentExtractor:
                         main_component_data
                     )
                     
+                    llm_summary = component.get('llm_summary', {})
+                    if llm_summary:
+                        self.db_manager.store_llm_summary(
+                            session_id, 
+                            component['name'], 
+                            component['type'], 
+                            llm_summary
+                        )
                     # Store derived components separately
                     derived_components = component.get('derived_components', [])
                     if derived_components:
@@ -746,19 +754,22 @@ class ComponentExtractor:
                     analysis['all_references'].append(reference)
             
             # Determine primary usage and business purpose
-            if analysis['receives_data'] and analysis['provides_data']:
-                analysis['primary_usage'] = 'INPUT_OUTPUT'
-            elif analysis['receives_data']:
-                analysis['primary_usage'] = 'INPUT'
-            elif analysis['provides_data']:
-                analysis['primary_usage'] = 'OUTPUT'
-            elif analysis['counts']['arithmetic'] > 0:
-                analysis['primary_usage'] = 'DERIVED'
-            elif analysis['counts']['conditional'] > 0:
-                analysis['primary_usage'] = 'REFERENCE'
-            else:
-                analysis['primary_usage'] = 'STATIC'
-            
+                    if analysis['receives_data'] and analysis['provides_data']:
+                            analysis['primary_usage'] = 'INPUT_OUTPUT'
+                    elif analysis['receives_data']:
+                        analysis['primary_usage'] = 'INPUT'
+                    elif analysis['provides_data']:
+                        analysis['primary_usage'] = 'OUTPUT'
+                    elif analysis['counts']['arithmetic'] > 0:
+                        analysis['primary_usage'] = 'DERIVED'
+                    elif analysis['counts']['conditional'] > 0:
+                        analysis['primary_usage'] = 'REFERENCE'
+                    elif len(analysis['all_references']) == 0:
+                        analysis['primary_usage'] = 'STATIC'
+                    else:
+                        analysis['primary_usage'] = 'UNUSED'
+                        
+                
             # Generate business purpose
             if analysis['primary_source_field']:
                 analysis['business_purpose'] = f"{field_name} - receives data from {analysis['primary_source_field']}"
