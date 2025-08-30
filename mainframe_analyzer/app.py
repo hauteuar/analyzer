@@ -559,7 +559,7 @@ def analyze_field_mapping():
                     field_references = json.loads(row[11])
             except:
                 pass
-            
+            logger.info(f"Processing field: {row[8]}, references: {field_references}")
             # Proper business logic type determination
             usage_type = row[8] or 'STATIC'  # usage_type
             move_source_count = row[14] or 0

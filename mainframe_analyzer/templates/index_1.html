@@ -2611,8 +2611,46 @@ function escapeForTemplate(str) {
     const flowHtml = createDependencyFlowHTML(categorizedDeps, selectedComponent);
     flowContainer.innerHTML = flowHtml;
 }
+
     function initializeFieldMapping() {
     loadRecordLayoutSelector();
+}
+
+function createDependencyFlowHTML(categorized, focusComponent) {
+    let html = '<div class="dependency-flow">';
+    
+    // Input Sources Level
+    if (categorized.inputSources.length > 0) {
+        html += createFlowLevel('Input Sources', categorized.inputSources, 'input-source');
+        html += '<div class="flow-arrow">↓</div>';
+    }
+    
+    // Core Programs Level  
+    if (categorized.corePrograms.length > 0) {
+        html += createFlowLevel(focusComponent ? `${focusComponent} Dependencies` : 'Core Programs', categorized.corePrograms, 'core-program');
+        html += '<div class="flow-arrow">↓</div>';
+    }
+    
+    // CICS Interfaces Level
+    if (categorized.cicsInterfaces.length > 0) {
+        html += createFlowLevel('CICS Interfaces', categorized.cicsInterfaces, 'cics-interface');
+        html += '<div class="flow-arrow">↓</div>';
+    }
+    
+    // Output Files Level
+    if (categorized.outputFiles.length > 0) {
+        html += createFlowLevel('Output Files', categorized.outputFiles, 'output-file');
+    }
+    
+    // Missing Dependencies Level
+    if (categorized.missingDeps.length > 0) {
+        html += '<div style="margin-top: 2rem; padding-top: 2rem; border-top: 2px dashed #dc3545;">';
+        html += createFlowLevel('Missing Dependencies', categorized.missingDeps, 'missing-dependency');
+        html += '</div>';
+    }
+    
+    html += '</div>';
+    return html;
 }
 
 function loadRecordLayoutSelector() {
