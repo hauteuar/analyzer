@@ -2559,6 +2559,9 @@ function escapeForTemplate(str) {
             try {
                 console.log('Loading dependency flow for:', selectedComponent || 'Overall System');
                 
+                // First, populate the dropdown with available components if it's empty
+                await populateDependencyDropdown();
+                
                 const response = await fetch(`/api/dependencies/${currentSessionId}`);
                 
                 if (response.ok) {
