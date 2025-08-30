@@ -3591,8 +3591,8 @@ function displayFieldMappingsWithSummary(mappings, summary) {
         const row = document.createElement('tr');
         
         // Normalize usage type for consistency with field matrix
-        let normalizedUsageType = normalizeUsageType(mapping.business_logic_type || 'STATIC');
-        console.log('mapping:', mapping.usageType, 'normalized to:', normalizedUsageType);
+        let normalizedUsageType = normalizeUsageType(mapping.usage_type || 'STATIC');
+        console.log('mapping:', mapping.usage_type, 'normalized to:', normalizedUsageType);
         
          // Function to get badge class based on usage type
         row.innerHTML = `

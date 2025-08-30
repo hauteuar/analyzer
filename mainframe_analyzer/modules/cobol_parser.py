@@ -53,8 +53,8 @@ class COBOLParser:
         self.paragraph_pattern = re.compile(r'^\s*([A-Z0-9\-]+)\s*\.', re.IGNORECASE)
 
         # Data item
-        self.data_item_pattern = re.compile(r'^\s*(\d+)\s+([A-Z0-9\-]+)(?:\s+(.*))?$', re.IGNORECASE)
-
+        #self.data_item_pattern = re.compile(r'^\s*(\d+)\s+([A-Z0-9\-]+)(?:\s+(.*))?$', re.IGNORECASE)
+        self.data_item_pattern = re.compile(r'^\s*(\d+)\s+([A-Z0-9\-]+)(?:\s+(.*?))?\s*\.?\s*$', re.IGNORECASE)
         # File / program / copy patterns (operate on program area only)
         self.fd_pattern = re.compile(r'FD\s+([A-Z][A-Z0-9\-]{2,})', re.IGNORECASE)
         self.select_pattern = re.compile(r'SELECT\s+([A-Z][A-Z0-9\-]{2,})\s+ASSIGN\s+TO\s+([A-Z0-9\-\.]+)', re.IGNORECASE)
