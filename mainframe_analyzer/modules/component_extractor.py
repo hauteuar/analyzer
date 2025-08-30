@@ -785,9 +785,15 @@ class ComponentExtractor:
             return analysis
 
     def _generate_component_summary(self, session_id: str, parsed_data: Dict, component_type: str) -> Dict:
-        """Generate LLM summary for component"""
+        """Generate LLM summary with enhanced COBOL context"""
         try:
-            # Build context from parsed data and comments
+            # Get the actual source code for analysis
+            source_content = parsed_data.get('content', '')
+            
+            # Extract key COBOL sections
+            key_sections = self._extract_key_cobol_sections(source_content)
+            
+            # Build enhanced context
             context_info = {
                 'type': component_type,
                 'total_lines': parsed_data.get('total_lines', 0),
@@ -796,52 +802,56 @@ class ComponentExtractor:
                 'record_layouts': len(parsed_data.get('record_layouts', [])),
                 'file_operations': parsed_data.get('file_operations', []),
                 'cics_operations': parsed_data.get('cics_operations', []),
-                'mq_operations': parsed_data.get('mq_operations', []),
-                'xml_operations': parsed_data.get('xml_operations', []),
                 'program_calls': parsed_data.get('program_calls', []),
-                'copybooks': parsed_data.get('copybooks', []),
-                'business_comments': parsed_data.get('business_comments', [])
+                'business_comments': parsed_data.get('business_comments', [])[:10],
+                'key_sections': key_sections
             }
             
-            # Create summary prompt
+            # Create enhanced prompt with actual COBOL content
             prompt = f"""
-Analyze this COBOL {component_type} and provide a business summary this is part of wealth management system.
+    You are analyzing a COBOL program in a wealth management/financial services system.
 
-Component Analysis:
-- Total Lines: {context_info['total_lines']}
-- Executable Lines: {context_info['executable_lines']}
-- Divisions: {context_info['divisions']}
-- Record Layouts: {context_info['record_layouts']}
-- File Operations: {len(context_info['file_operations'])}
-- CICS Operations: {len(context_info['cics_operations'])}
-- MQ Operations: {len(context_info['mq_operations'])}
-- XML Operations: {len(context_info['xml_operations'])}
+    PROGRAM ANALYSIS:
+    - Type: {component_type}
+    - Total Lines: {context_info['total_lines']} ({context_info['executable_lines']} executable)
+    - Data Structures: {context_info['record_layouts']} record layouts
+    - File Operations: {len(context_info['file_operations'])} operations
+    - CICS Operations: {len(context_info['cics_operations'])} operations  
+    - Program Calls: {len(context_info['program_calls'])} calls
 
-Business Comments:
-{chr(10).join(context_info['business_comments'][:5])}
+    KEY PROGRAM SECTIONS:
+    {self._format_key_sections(key_sections)}
 
-File Operations:
-{chr(10).join([f"- {op.get('operation', 'N/A')}: {op.get('file_name', 'N/A')}" for op in context_info['file_operations'][:5]])}
+    BUSINESS COMMENTS FROM SOURCE:
+    {chr(10).join(context_info['business_comments'])}
 
-CICS Operations:
-{chr(10).join([f"- {op.get('operation', 'N/A')}: {op.get('file_name', op.get('operation', 'N/A'))}" for op in context_info['cics_operations'][:5]])}
+    FILE OPERATIONS:
+    {self._format_operations(context_info['file_operations'], 'File')}
 
-Please provide a JSON response with:
-{{
-    "business_purpose": "What this component does from a business perspective",
-    "primary_function": "Main function category (e.g., BATCH_PROCESSING, ONLINE_TRANSACTION, DATA_CONVERSION, REPORT_GENERATION)",
-    "complexity_score": 0.7,
-    "key_features": ["feature1", "feature2", "feature3"],
-    "integration_points": ["system1", "system2"],
-    "data_sources": ["source1", "source2"],
-    "business_domain": "FINANCIAL|INSURANCE|RETAIL|MANUFACTURING|GENERAL"
-}}
-"""
+    CICS OPERATIONS:
+    {self._format_operations(context_info['cics_operations'], 'CICS')}
+
+    PROGRAM CALLS:
+    {self._format_program_calls(context_info['program_calls'])}
+
+    Based on this COBOL program analysis, provide a JSON response describing what this program actually does in business terms:
+
+    {{
+        "business_purpose": "Specific description of what this program does in the business process (be specific about financial/wealth management functions)",
+        "primary_function": "CUSTOMER_PROCESSING|ACCOUNT_MANAGEMENT|TRANSACTION_PROCESSING|PORTFOLIO_MANAGEMENT|REPORTING|BATCH_PROCESSING|ONLINE_TRANSACTION|DATA_CONVERSION",
+        "complexity_score": 0.7,
+        "key_features": ["specific feature 1", "specific feature 2", "specific feature 3"],
+        "integration_points": ["system1", "system2"],
+        "data_sources": ["file1", "file2"],
+        "business_domain": "WEALTH_MANAGEMENT"
+    }}
+
+    Focus on SPECIFIC business functionality, not generic descriptions.
+    """
             
-            response = self.llm_client.call_llm(prompt, max_tokens=800, temperature=0.3)
-            logger.info(f"📊 LLM Response - Success: {response.success}, Content length: {len(response.content)}")
-        
-            # Log LLM call
+            response = self.llm_client.call_llm(prompt, max_tokens=1200, temperature=0.2)  # Increased tokens, lower temperature
+            
+            # Log the LLM call
             self.db_manager.log_llm_call(
                 session_id, 'component_summary', 1, 1,
                 response.prompt_tokens, response.response_tokens, response.processing_time_ms,
@@ -850,70 +860,155 @@ Please provide a JSON response with:
             
             if response.success:
                 summary = self.llm_client.extract_json_from_response(response.content)
-
-                # Defensive: the LLM client should return a dict, but sometimes a cleaned string
-                # is returned by mistake. Normalize here to avoid downstream attribute errors.
-                if isinstance(summary, str):
-                    try:
-                        parsed = json.loads(summary)
-                        if isinstance(parsed, dict):
-                            summary = parsed
-                        else:
-                            logger.warning('LLM returned a string that JSON-parsed to non-dict; ignoring parsed value')
-                            summary = None
-                    except Exception:
-                        logger.warning('LLM returned a non-JSON string; treating as no structured result')
-                        summary = None
-
+                
                 if isinstance(summary, dict):
-                    logger.info(f"✅ Successfully extracted LLM summary: {summary.get('business_purpose', 'No purpose')}")
+                    logger.info(f"Generated specific summary: {summary.get('business_purpose', 'No purpose')[:100]}")
                     return summary
                 else:
-                    logger.warning(f"⚠️ Could not extract JSON from LLM response: {response.content[:200]}")
-
-                    # Fallback: if LLM returned plain text, preserve it in a minimal dict so
-                    # callers can safely access 'business_purpose' without attribute errors.
-                    if response.content and isinstance(response.content, str) and len(response.content.strip()) > 0:
-                        raw_text = response.content.strip()
-                        fallback_summary = {
-                        'business_purpose': raw_text.split('\n')[0][:500],  # Use first line or truncated
-                        'primary_function': 'UNKNOWN',
-                        'complexity_score': 0.5,
-                        'key_features': [],
-                        'integration_points': [],
-                        'data_sources': [],
-                        'business_domain': 'GENERAL',
-                        'raw_response': raw_text,  # Store complete raw response
-                        'is_raw': True  # Flag to indicate this is raw text
-                    }
-                        logger.info('Using raw LLM text as fallback summary (stored under llm_summary.raw)')
-                        return fallback_summary
+                    logger.warning(f"LLM returned non-JSON: {response.content[:200]}")
+                    # Better fallback with actual analysis
+                    return self._create_fallback_summary_with_analysis(context_info)
             else:
-                logger.error(f"❌ LLM call failed: {response.error_message}")
-            
-            # Fallback summary
-            return {
-                'business_purpose': f"{component_type} component with {len(context_info['file_operations'])} file operations",
-                'primary_function': 'GENERAL_PROCESSING',
-                'complexity_score': min(0.9, (context_info['executable_lines'] / 1000) * 0.5 + 0.3),
-                'key_features': [f"{len(context_info['file_operations'])} file operations", 
-                               f"{len(context_info['cics_operations'])} CICS operations"],
-                'integration_points': [],
-                'data_sources': [op.get('file_name', 'Unknown') for op in context_info['file_operations'][:3]],
-                'business_domain': 'GENERAL'
-            }
-            
+                logger.error(f"LLM call failed: {response.error_message}")
+                return self._create_fallback_summary_with_analysis(context_info)
+                
         except Exception as e:
             logger.error(f"Error generating component summary: {str(e)}")
-            return {
-                'business_purpose': 'Summary generation failed - manual review required',
-                'primary_function': 'UNKNOWN',
-                'complexity_score': 0.5,
-                'key_features': [],
-                'integration_points': [],
-                'data_sources': [],
-                'business_domain': 'GENERAL'
-            }
+            return self._create_fallback_summary_with_analysis(context_info)
+
+    def _extract_key_cobol_sections(self, source_content: str) -> Dict:
+        """Extract key sections from COBOL source for LLM analysis"""
+        lines = source_content.split('\n')
+        key_sections = {
+            'identification': [],
+            'procedure_division_start': [],
+            'main_logic': [],
+            'file_definitions': []
+        }
+        
+        try:
+            current_section = None
+            procedure_started = False
+            
+            for i, line in enumerate(lines):
+                line_upper = line.upper().strip()
+                
+                # Identification Division
+                if 'PROGRAM-ID' in line_upper:
+                    key_sections['identification'].append(line.strip())
+                
+                # File definitions
+                if line_upper.startswith('FD ') or line_upper.startswith('SELECT '):
+                    key_sections['file_definitions'].append(line.strip())
+                
+                # Procedure Division start
+                if 'PROCEDURE DIVISION' in line_upper:
+                    procedure_started = True
+                    # Get next 10 lines of procedure division
+                    for j in range(i, min(i + 10, len(lines))):
+                        if lines[j].strip():
+                            key_sections['procedure_division_start'].append(lines[j].strip())
+                    break
+            
+            # Get main processing logic (look for PERFORM, IF, CALL statements)
+            if procedure_started:
+                for line in lines[i:i+50]:  # Look in first 50 lines of procedure division
+                    line_stripped = line.strip()
+                    if any(keyword in line.upper() for keyword in ['PERFORM', 'IF ', 'CALL ', 'EXEC CICS']):
+                        key_sections['main_logic'].append(line_stripped)
+                        if len(key_sections['main_logic']) >= 10:
+                            break
+            
+        except Exception as e:
+            logger.warning(f"Error extracting key sections: {e}")
+        
+        return key_sections
+
+    def _format_key_sections(self, key_sections: Dict) -> str:
+        """Format key sections for LLM prompt"""
+        formatted = []
+        
+        if key_sections.get('identification'):
+            formatted.append("IDENTIFICATION:")
+            formatted.extend([f"  {line}" for line in key_sections['identification']])
+        
+        if key_sections.get('file_definitions'):
+            formatted.append("FILE DEFINITIONS:")
+            formatted.extend([f"  {line}" for line in key_sections['file_definitions'][:5]])
+        
+        if key_sections.get('procedure_division_start'):
+            formatted.append("PROCEDURE DIVISION START:")
+            formatted.extend([f"  {line}" for line in key_sections['procedure_division_start'][:8]])
+        
+        if key_sections.get('main_logic'):
+            formatted.append("MAIN PROCESSING LOGIC:")
+            formatted.extend([f"  {line}" for line in key_sections['main_logic'][:8]])
+        
+        return '\n'.join(formatted) if formatted else "No key sections extracted"
+
+    def _format_operations(self, operations: List[Dict], op_type: str) -> str:
+        """Format operations for LLM prompt"""
+        if not operations:
+            return f"No {op_type} operations found"
+        
+        formatted = []
+        for op in operations[:5]:  # Limit to first 5
+            if op_type == 'File':
+                formatted.append(f"  {op.get('operation', 'UNKNOWN')}: {op.get('file_name', 'UNKNOWN')} (Line {op.get('line_number', 0)})")
+            else:  # CICS
+                formatted.append(f"  {op.get('operation', 'UNKNOWN')}: {op.get('file_name', 'UNKNOWN')} (Line {op.get('line_number', 0)})")
+        
+        return '\n'.join(formatted)
+
+    def _format_program_calls(self, program_calls: List[Dict]) -> str:
+        """Format program calls for LLM prompt"""
+        if not program_calls:
+            return "No program calls found"
+        
+        formatted = []
+        for call in program_calls[:5]:
+            formatted.append(f"  {call.get('operation', 'CALL')}: {call.get('program_name', 'UNKNOWN')} (Line {call.get('line_number', 0)})")
+        
+        return '\n'.join(formatted)
+
+    def _create_fallback_summary_with_analysis(self, context_info: Dict) -> Dict:
+        """Create intelligent fallback summary based on analysis"""
+        
+        # Analyze operations to determine function
+        file_ops = context_info.get('file_operations', [])
+        cics_ops = context_info.get('cics_operations', [])
+        program_calls = context_info.get('program_calls', [])
+        
+        primary_function = 'GENERAL_PROCESSING'
+        key_features = []
+        
+        if len(cics_ops) > len(file_ops):
+            primary_function = 'ONLINE_TRANSACTION'
+            key_features.append(f"{len(cics_ops)} CICS operations")
+        elif len(file_ops) > 3:
+            primary_function = 'BATCH_PROCESSING'  
+            key_features.append(f"{len(file_ops)} file operations")
+        
+        if program_calls:
+            key_features.append(f"Calls {len(program_calls)} other programs")
+        
+        # Generate business purpose based on operations
+        business_purpose = f"COBOL program with {context_info.get('executable_lines', 0)} executable lines"
+        if file_ops:
+            business_purpose += f", processes {len(file_ops)} files"
+        if cics_ops:
+            business_purpose += f", {len(cics_ops)} CICS transactions"
+        
+        return {
+            'business_purpose': business_purpose,
+            'primary_function': primary_function,
+            'complexity_score': min(0.9, context_info.get('executable_lines', 0) / 1000),
+            'key_features': key_features,
+            'integration_points': [op.get('file_name', '') for op in file_ops[:3]],
+            'data_sources': [op.get('file_name', '') for op in (file_ops + cics_ops)[:3]],
+            'business_domain': 'WEALTH_MANAGEMENT',
+            'analysis_method': 'fallback_with_analysis'
+        }
     
     def _analyze_record_level_operations(self, program_content: str, record_layouts: List) -> Dict[str, str]:
         """
