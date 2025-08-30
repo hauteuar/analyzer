@@ -2320,84 +2320,69 @@ function escapeForTemplate(str) {
     programs.forEach(program => {
         console.log('Processing program:', program.component_name);
         
-        // ENHANCED business purpose extraction with multiple fallbacks
         let businessPurpose = 'Analysis pending...';
         let complexityScore = 0.5;
         let isRawResponse = false;
         let rawResponse = '';
         let friendlyName = program.component_name;
         
-        // Generate friendly name if not provided
         if (program.friendly_name && program.friendly_name !== program.component_name) {
             friendlyName = program.friendly_name;
-        } else {
-            friendlyName = program.component_name.replace(/[_-]/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase());
         }
         
-        // Extract business purpose with comprehensive fallback chain
-        if (program.business_purpose && 
-            program.business_purpose !== 'undefined' && 
-            program.business_purpose !== 'null' &&
-            program.business_purpose.trim() !== '' &&
-            program.business_purpose !== 'Analysis pending...') {
-            businessPurpose = program.business_purpose;
-        } else if (program.llm_summary) {
-            if (program.llm_summary.business_purpose && 
-                program.llm_summary.business_purpose !== 'undefined' &&
-                program.llm_summary.business_purpose.trim() !== '') {
+        // Check for LLM summary with better raw response detection
+        if (program.llm_summary) {
+            // Check if it's a raw response (JSON parsing failed)
+            if (program.llm_summary.is_raw === true || program.llm_summary.raw_response) {
+                rawResponse = program.llm_summary.raw_response || program.llm_summary.business_purpose || '';
+                businessPurpose = rawResponse.length > 200 ? 
+                    rawResponse.substring(0, 197) + '...' : rawResponse;
+                isRawResponse = true;
+                complexityScore = program.llm_summary.complexity_score || 0.5;
+            } 
+            // Check if it's a structured response
+            else if (program.llm_summary.business_purpose && 
+                     program.llm_summary.business_purpose !== 'undefined' &&
+                     program.llm_summary.business_purpose.trim() !== '') {
                 businessPurpose = program.llm_summary.business_purpose;
                 complexityScore = program.llm_summary.complexity_score || 0.5;
-            } else if (program.llm_summary.raw && program.llm_summary.raw.trim() !== '') {
-                rawResponse = program.llm_summary.raw;
-                businessPurpose = rawResponse.substring(0, 200) + (rawResponse.length > 200 ? '...' : '');
-                isRawResponse = true;
-            } else if (program.llm_summary.is_raw && program.llm_summary.raw_response) {
-                rawResponse = program.llm_summary.raw_response;
-                businessPurpose = rawResponse.substring(0, 200) + (rawResponse.length > 200 ? '...' : '');
+                isRawResponse = false;
+            }
+            // Fallback: check if the whole llm_summary is actually a raw string
+            else if (typeof program.llm_summary === 'string') {
+                rawResponse = program.llm_summary;
+                businessPurpose = rawResponse.length > 200 ? 
+                    rawResponse.substring(0, 197) + '...' : rawResponse;
                 isRawResponse = true;
             }
         }
-        
-        // Set complexity score with fallbacks
-        if (program.complexity_score && program.complexity_score > 0) {
-            complexityScore = program.complexity_score;
-        } else if (program.llm_summary && program.llm_summary.complexity_score) {
-            complexityScore = program.llm_summary.complexity_score;
-        } else {
-            // Calculate basic complexity from metrics
-            const lines = program.total_lines || 0;
-            const fields = program.total_fields || 0;
-            complexityScore = Math.min(0.95, Math.max(0.1, (lines / 1000 + fields / 100) / 2));
+        // Fallback to component-level business_purpose
+        else if (program.business_purpose && 
+                 program.business_purpose !== 'undefined' && 
+                 program.business_purpose.trim() !== '') {
+            businessPurpose = program.business_purpose;
         }
         
         const derivedCount = program.derived_count || 0;
-        
         const card = document.createElement('div');
         card.className = 'component-summary-card';
         
-        // Enhanced template with proper escaping
-        const safeBusinessPurpose = businessPurpose.replace(/'/g, '&apos;').replace(/"/g, '&quot;');
-        const safeFriendlyName = friendlyName.replace(/'/g, '&apos;').replace(/"/g, '&quot;');
-        const safeProgramName = program.component_name.replace(/'/g, '&apos;').replace(/"/g, '&quot;');
-        
         if (isRawResponse) {
-            const safeRawResponse = rawResponse.replace(/'/g, '&apos;').replace(/"/g, '&quot;').replace(/\n/g, '\\n');
-            
             card.innerHTML = `
                 <div class="component-header">
                     <div>
                         <div class="component-title">${program.component_name}</div>
-                        <div class="text-muted" style="font-size: 0.8rem;">${safeFriendlyName}</div>
+                        <div class="text-muted" style="font-size: 0.8rem;">${friendlyName}</div>
                     </div>
                     <span class="component-type badge badge-warning">RAW AI ANALYSIS</span>
                 </div>
                 
                 <div class="business-purpose raw-analysis">
                     <strong>AI Analysis (Raw Response):</strong><br>
-                    <div style="background: #fff3cd; padding: 1rem; border-radius: 6px; border-left: 4px solid #ffc107; font-size: 0.9rem; line-height: 1.4; max-height: 150px; overflow-y: auto;">
-                        ${safeBusinessPurpose}
-                        ${rawResponse.length > 200 ? '<br><small><em>Click "View Full Analysis" to see complete response</em></small>' : ''}
+                    <div style="background: #fff3cd; padding: 1rem; border-radius: 6px; border-left: 4px solid #ffc107; font-size: 0.9rem; line-height: 1.4; max-height: 150px; overflow-y: auto; white-space: pre-wrap;">
+                        ${businessPurpose}
                     </div>
+                    ${rawResponse.length > 200 ? '<small style="color: #856404;"><em>Click "View Full Analysis" to see complete response</em></small>' : ''}
                 </div>
                 
                 <div class="component-metrics">
@@ -2416,7 +2401,7 @@ function escapeForTemplate(str) {
                 </div>
                 
                 <div class="derived-components">
-                    <button class="derived-toggle" onclick="toggleDerivedComponents('${safeProgramName}', this)">
+                    <button class="derived-toggle" onclick="toggleDerivedComponents('${program.component_name}', this)">
                         View ${derivedCount} Components
                     </button>
                     <div class="derived-list" id="derived-${program.component_name}">
@@ -2425,8 +2410,10 @@ function escapeForTemplate(str) {
                 </div>
                 
                 ${rawResponse.length > 200 ? 
-                    '<button class="btn btn-secondary" style="width: 100%; margin-top: 1rem;" onclick="showRawAnalysisModal(\\'+safeProgramName+''+safeRawResponse+')">View Full AI Analysis</button>' 
-                    : ''}
+                    `<button class="btn btn-secondary" style="width: 100%; margin-top: 1rem;" 
+                             onclick="showRawAnalysisModal('${program.component_name.replace(/'/g, "\\'")}', '${rawResponse.replace(/'/g, "\\'").replace(/\n/g, '\\n')}')">
+                        View Full AI Analysis
+                     </button>` : ''}
             `;
         } else {
             // Standard structured display
@@ -2434,12 +2421,12 @@ function escapeForTemplate(str) {
                 <div class="component-header">
                     <div>
                         <div class="component-title">${program.component_name}</div>
-                        <div class="text-muted" style="font-size: 0.8rem;">${safeFriendlyName}</div>
+                        <div class="text-muted" style="font-size: 0.8rem;">${friendlyName}</div>
                     </div>
                     <span class="component-type badge badge-primary">PROGRAM</span>
                 </div>
                 
-                <div class="business-purpose">${safeBusinessPurpose}</div>
+                <div class="business-purpose">${businessPurpose}</div>
                 
                 <div class="component-metrics">
                     <div class="metric">
@@ -2461,7 +2448,7 @@ function escapeForTemplate(str) {
                 </div>
                 
                 <div class="derived-components">
-                    <button class="derived-toggle" onclick="toggleDerivedComponents('${safeProgramName}', this)">
+                    <button class="derived-toggle" onclick="toggleDerivedComponents('${program.component_name}', this)">
                         View ${derivedCount} Components
                     </button>
                     <div class="derived-list" id="derived-${program.component_name}">
@@ -2524,32 +2511,37 @@ function escapeForTemplate(str) {
 
         // Show raw analysis modal
         function showRawAnalysisModal(componentName, rawResponse) {
-            const decodedResponse = rawResponse.replace(/&apos;/g, "'");
-            
-            const modalHtml = `
-                <div class="modal" style="display: block; z-index: 10001; position: fixed; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); backdrop-filter: blur(5px);">
-                    <div class="modal-content" style="background-color: white; margin: 5% auto; padding: 0; border-radius: 12px; width: 70%; max-width: 800px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3); animation: modalSlideIn 0.3s ease;">
-                        <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: center;">
-                            <h3 style="margin: 0; font-size: 1.2rem; font-weight: 600;">${componentName} - Raw AI Analysis</h3>
-                            <button onclick="closeRawAnalysisModal()" style="background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; padding: 0; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.2s ease;">&times;</button>
-                        </div>
-                        <div style="padding: 2rem;">
-                            <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border: 1px solid #dee2e6; max-height: 500px; overflow-y: auto;">
-                                <pre style="white-space: pre-wrap; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.9rem; line-height: 1.4; margin: 0;">${decodedResponse}</pre>
-                            </div>
-                            <div style="margin-top: 1rem; padding: 1rem; background: #fff3cd; border-radius: 6px; border: 1px solid #ffeaa7;">
-                                <strong>Note:</strong> This is the raw response from the AI model. The JSON parsing failed, but the AI still provided useful analysis. Consider reviewing the prompt or model configuration if you see this frequently.
-                            </div>
-                        </div>
-                        <div style="padding: 1.5rem 2rem; border-top: 1px solid #e9ecef; display: flex; gap: 1rem; justify-content: flex-end; background: #f8f9fa; border-radius: 0 0 12px 12px;">
-                            <button class="btn btn-secondary" onclick="closeRawAnalysisModal()">Close</button>
-                        </div>
+    // Decode escaped characters
+    const decodedResponse = rawResponse
+        .replace(/\\'/g, "'")
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t');
+    
+    const modalHtml = `
+        <div class="modal" style="display: block; z-index: 10001; position: fixed; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); backdrop-filter: blur(5px);">
+            <div class="modal-content" style="background-color: white; margin: 5% auto; padding: 0; border-radius: 12px; width: 70%; max-width: 800px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3); animation: modalSlideIn 0.3s ease;">
+                <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: center;">
+                    <h3 style="margin: 0; font-size: 1.2rem; font-weight: 600;">${componentName} - Complete AI Analysis</h3>
+                    <button onclick="closeRawAnalysisModal()" style="background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; padding: 0; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.2s ease;">&times;</button>
+                </div>
+                <div style="padding: 2rem;">
+                    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 8px; border: 1px solid #dee2e6; max-height: 500px; overflow-y: auto;">
+                        <pre style="white-space: pre-wrap; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 0.9rem; line-height: 1.4; margin: 0; word-wrap: break-word;">${decodedResponse}</pre>
+                    </div>
+                    <div style="margin-top: 1rem; padding: 1rem; background: #fff3cd; border-radius: 6px; border: 1px solid #ffeaa7;">
+                        <strong>Note:</strong> This is the raw response from the AI model. The JSON parsing failed, but the AI provided useful analysis. Consider reviewing the prompt or model configuration if you see this frequently.
                     </div>
                 </div>
-            `;
-            
-            document.body.insertAdjacentHTML('beforeend', modalHtml);
-        }
+                <div style="padding: 1.5rem 2rem; border-top: 1px solid #e9ecef; display: flex; gap: 1rem; justify-content: flex-end; background: #f8f9fa; border-radius: 0 0 12px 12px;">
+                    <button class="btn btn-secondary" onclick="closeRawAnalysisModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
 
         function closeRawAnalysisModal() {
             const modals = document.querySelectorAll('.modal');
@@ -2685,164 +2677,139 @@ function updateTargetFileFromLayout() {
 
 
         function categorizeDependenciesForFlow(dependencies, focusComponent = null) {
-            const categorized = {
-                inputSources: new Set(),
-                cicsInterfaces: new Set(),
-                corePrograms: new Set(),
-                outputFiles: new Set(),
-                missingDeps: new Set()
-            };
-            
-            dependencies.forEach(dep => {
-                const source = dep.source_component;
-                const target = dep.target_component;
-                const type = dep.relationship_type;
-                
-                // Always add the source as a core program if it's a main component
-                if (!focusComponent || source === focusComponent) {
-                    categorized.corePrograms.add({
-                        name: source,
-                        friendly_name: generateFriendlyName(source),
-                        type: 'Program',
-                        confidence: dep.confidence_score || 0.8
-                    });
-                }
-                
-                // Categorize targets based on relationship type
-                if (type === 'INPUT_FILE') {
-                    categorized.inputSources.add({
-                        name: target,
-                        friendly_name: generateFriendlyName(target),
-                        type: 'Input File',
-                        confidence: dep.confidence_score || 0.8
-                    });
-                } else if (type === 'OUTPUT_FILE') {
-                    categorized.outputFiles.add({
-                        name: target,
-                        friendly_name: generateFriendlyName(target),
-                        type: 'Output File',
-                        confidence: dep.confidence_score || 0.8
-                    });
-                } else if (type === 'CICS_FILE') {
-                    categorized.cicsInterfaces.add({
-                        name: target,
-                        friendly_name: generateFriendlyName(target),
-                        type: 'CICS Interface',
-                        confidence: dep.confidence_score || 0.8
-                    });
-                } else if (type === 'PROGRAM_CALL') {
-                    categorized.corePrograms.add({
-                        name: target,
-                        friendly_name: generateFriendlyName(target),
-                        type: 'Called Program',
-                        confidence: dep.confidence_score || 0.8
-                    });
-                } else {
-                    categorized.missingDeps.add({
-                        name: target,
-                        friendly_name: generateFriendlyName(target),
-                        type: type.replace('_', ' '),
-                        confidence: dep.confidence_score || 0.5,
-                        reason: 'Unknown relationship type'
-                    });
-                }
+    const categorized = {
+        inputSources: new Map(),      // Use Map instead of Set for deduplication
+        cicsInterfaces: new Map(),
+        corePrograms: new Map(),
+        outputFiles: new Map(),
+        missingDeps: new Map()
+    };
+    
+    dependencies.forEach(dep => {
+        const source = dep.source_component;
+        const target = dep.target_component;
+        const type = dep.relationship_type;
+        
+        // Only add the main program once
+        if ((!focusComponent || source === focusComponent) && !categorized.corePrograms.has(source)) {
+            categorized.corePrograms.set(source, {
+                name: source,
+                friendly_name: source.toUpperCase(), // Keep UPPER CASE
+                type: 'Program',
+                confidence: dep.confidence_score || 0.8
             });
-            
-            // Convert Sets to Arrays
-            Object.keys(categorized).forEach(key => {
-                categorized[key] = Array.from(categorized[key]);
+        }
+        
+        // Categorize targets based on relationship type - using Map for deduplication
+        if (type === 'INPUT_FILE') {
+            categorized.inputSources.set(target, {
+                name: target,
+                friendly_name: target.toUpperCase(), // Keep UPPER CASE
+                type: 'Input File',
+                confidence: dep.confidence_score || 0.8
             });
-            
-            return categorized;
+        } else if (type === 'OUTPUT_FILE') {
+            categorized.outputFiles.set(target, {
+                name: target,
+                friendly_name: target.toUpperCase(), // Keep UPPER CASE
+                type: 'Output File',
+                confidence: dep.confidence_score || 0.8
+            });
+        } else if (type === 'CICS_FILE') {
+            categorized.cicsInterfaces.set(target, {
+                name: target,
+                friendly_name: target.toUpperCase(), // Keep UPPER CASE
+                type: 'CICS Interface',
+                confidence: dep.confidence_score || 0.8
+            });
+        } else if (type === 'PROGRAM_CALL') {
+            categorized.corePrograms.set(target, {
+                name: target,
+                friendly_name: target.toUpperCase(), // Keep UPPER CASE
+                type: 'Called Program',
+                confidence: dep.confidence_score || 0.8
+            });
+        } else {
+            categorized.missingDeps.set(target, {
+                name: target,
+                friendly_name: target.toUpperCase(), // Keep UPPER CASE
+                type: type.replace('_', ' '),
+                confidence: dep.confidence_score || 0.5,
+                reason: 'Unknown relationship type'
+            });
         }
-
-        function createDependencyFlowHTML(categorized, focusComponent) {
-            let html = '<div class="dependency-flow">';
-            
-            // Input Sources Level
-            if (categorized.inputSources.length > 0) {
-                html += createFlowLevel('Input Sources', categorized.inputSources, 'input-source');
-                html += '<div class="flow-arrow">↓</div>';
-            }
-            
-            // Core Programs Level  
-            if (categorized.corePrograms.length > 0) {
-                html += createFlowLevel(focusComponent ? `${focusComponent} Dependencies` : 'Core Programs', categorized.corePrograms, 'core-program');
-                html += '<div class="flow-arrow">↓</div>';
-            }
-            
-            // CICS Interfaces Level
-            if (categorized.cicsInterfaces.length > 0) {
-                html += createFlowLevel('CICS Interfaces', categorized.cicsInterfaces, 'cics-interface');
-                html += '<div class="flow-arrow">↓</div>';
-            }
-            
-            // Output Files Level
-            if (categorized.outputFiles.length > 0) {
-                html += createFlowLevel('Output Files', categorized.outputFiles, 'output-file');
-            }
-            
-            // Missing Dependencies Level
-            if (categorized.missingDeps.length > 0) {
-                html += '<div style="margin-top: 2rem; padding-top: 2rem; border-top: 2px dashed #dc3545;">';
-                html += createFlowLevel('Missing Dependencies', categorized.missingDeps, 'missing-dependency');
-                html += '</div>';
-            }
-            
-            html += '</div>';
-            return html;
-        }
-
+    });
+    
+    // Convert Maps to Arrays
+    Object.keys(categorized).forEach(key => {
+        categorized[key] = Array.from(categorized[key].values());
+    });
+    
+    return categorized;
+}
         function createFlowLevel(title, items, className) {
-            let html = `
-                <div class="flow-level">
-                    <div class="flow-level-title">${title}</div>
-                    <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-left: 160px;">
-            `;
-            
-            items.forEach(item => {
-                const displayName = item.friendly_name || item.name;
-                const confidenceClass = item.confidence > 0.8 ? 'confidence-high' : 
-                                       item.confidence > 0.5 ? 'confidence-medium' : 'confidence-low';
-                
-                html += `
-                    <div class="flow-component ${className}" onclick="showComponentDetails('${item.name}')">
-                        <div class="confidence-indicator ${confidenceClass}"></div>
-                        <div class="component-name">${displayName}</div>
-                        <div class="component-type-badge">${item.type}</div>
-                        <div class="component-description">
-                            Confidence: ${(item.confidence * 100).toFixed(0)}%
-                            ${item.reason ? `<br><small>${item.reason}</small>` : ''}
-                        </div>
-                    </div>
-                `;
-            });
-            
-            html += '</div></div>';
-            return html;
-        }
-
+    let html = `
+        <div class="flow-level">
+            <div class="flow-level-title">${title}</div>
+            <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-left: 160px;">
+    `;
+    
+    items.forEach(item => {
+        // Use the name directly (already uppercase from categorization)
+        const displayName = item.name || item.friendly_name || 'UNKNOWN';
+        const confidenceClass = item.confidence > 0.8 ? 'confidence-high' : 
+                               item.confidence > 0.5 ? 'confidence-medium' : 'confidence-low';
+        
+        html += `
+            <div class="flow-component ${className}" onclick="showComponentDetails('${item.name}')">
+                <div class="confidence-indicator ${confidenceClass}"></div>
+                <div class="component-name">${displayName}</div>
+                <div class="component-type-badge">${item.type}</div>
+                <div class="component-description">
+                    Confidence: ${(item.confidence * 100).toFixed(0)}%
+                    ${item.reason ? `<br><small>${item.reason}</small>` : ''}
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div></div>';
+    return html;
+}
         function generateFriendlyName(technicalName) {
-            if (!technicalName) return 'Unknown';
-            
-            return technicalName
-                .replace(/[-_]/g, ' ')
-                .toLowerCase()
-                .replace(/\b\w/g, l => l.toUpperCase())
-                .replace(/\bWs\b/g, 'Working Storage')
-                .replace(/\bFd\b/g, 'File Description')
-                .replace(/\bMq\b/g, 'Message Queue')
-                .replace(/\bDb2\b/g, 'DB2')
-                .replace(/\bCics\b/g, 'CICS')
-                .replace(/\bXml\b/g, 'XML')
-                .replace(/\bJson\b/g, 'JSON')
-                .replace(/\bSql\b/g, 'SQL')
-                .replace(/\bAcc\b/g, 'Account')
-                .replace(/\bCust\b/g, 'Customer')
-                .replace(/\bTxn\b/g, 'Transaction')
-                .replace(/\bRec\b/g, 'Record')
-                .replace(/\bTbl\b/g, 'Table');
+    if (!technicalName) return 'Unknown';
+    
+    const name = String(technicalName).toUpperCase().trim();
+    
+    // Remove common prefixes but keep uppercase
+    const prefixes = ['WS-', 'LS-', 'WK-', 'FD-', 'FD_', 'TB-', 'TB_', 'SRV-', 'PRG-', 'TMS', 'TMST'];
+    for (const prefix of prefixes) {
+        if (name.startsWith(prefix)) {
+            return name.substring(prefix.length);
         }
+    }
+    
+    return name; // Return as UPPER CASE
+}
+
+// Alternative: Create a specific function for dependency display names
+function generateDependencyDisplayName(technicalName) {
+    if (!technicalName) return 'UNKNOWN';
+    
+    let name = String(technicalName).toUpperCase().trim();
+    
+    // Remove technical prefixes but keep everything uppercase
+    const prefixes = ['WS-', 'LS-', 'WK-', 'FD-', 'TB-', 'SRV-', 'PRG-'];
+    for (const prefix of prefixes) {
+        if (name.startsWith(prefix)) {
+            name = name.substring(prefix.length);
+            break;
+        }
+    }
+    
+    // Replace underscores and hyphens with spaces, but keep UPPER CASE
+    return name.replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim();
+}
 
         function populateDependencyDropdown(components) {
             const select = document.getElementById('dependencyComponentSelect');
@@ -3563,7 +3530,9 @@ function displayFieldMappingsWithSummary(mappings, summary) {
         
         // Normalize usage type for consistency with field matrix
         let normalizedUsageType = normalizeUsageType(mapping.business_logic_type || 'STATIC');
+        console.log('mapping:', mapping.usageType, 'normalized to:', normalizedUsageType);
         
+         // Function to get badge class based on usage type
         row.innerHTML = `
             <td>
                 <div style="min-width: 150px;">
