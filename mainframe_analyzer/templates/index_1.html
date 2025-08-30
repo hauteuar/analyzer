@@ -1396,65 +1396,67 @@
                 </div>
 
                 
-    <!-- Field Mapping Analysis Tab -->
-    <div id="fieldMapping" class="tab-pane">
-        <h2>Field Mapping Analysis</h2>
-        <div class="field-mapping-controls">
-            <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-                <input type="text" id="targetFileInput" placeholder="Enter target file name (e.g., CUSTOMER-FILE)" style="flex: 1; min-width: 200px;">
-                <select id="recordLayoutSelector" onchange="updateTargetFileFromLayout()" style="min-width: 200px;">
-                    <option value="">Or select a record layout</option>
-                </select>
-                <button class="btn btn-primary" onclick="analyzeFieldMapping()">Analyze Field Mapping</button>
-                <button class="btn btn-secondary" onclick="exportFieldMappings()">Export to CSV</button>
-            </div>
-        </div>
+                <!-- Field Mapping Analysis Tab -->
+                <div id="fieldMapping" class="tab-pane">
+                    <h2>Field Mapping Analysis</h2>
+                    <div class="field-mapping-controls">
+                        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                            <input type="text" id="targetFileInput" placeholder="Enter target file name (e.g., CUSTOMER-FILE)" style="flex: 1; min-width: 200px;">
+                            <select id="recordLayoutSelector" onchange="updateTargetFileFromLayout()" style="min-width: 200px;">
+                                <option value="">Or select a record layout</option>
+                            </select>
+                            <button class="btn btn-primary" onclick="analyzeFieldMapping()">Analyze Field Mapping</button>
+                            <button class="btn btn-secondary" onclick="exportFieldMappings()">Export to CSV</button>
+                        </div>
+                    </div>
 
-        <!-- Layout Summary Section -->
-        <div id="layoutSummarySection" style="display: none; margin: 1rem 0; padding: 1rem; background: #f8f9fa; border-radius: 8px;">
-            <h4>Layout Summary</h4>
-            <div id="layoutSummaryContent"></div>
-        </div>
-        
-        <div id="fieldMappingResults">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Field Name</th>
-                        <th>Mainframe Type & Length</th>
-                        <th>Oracle Type & Length</th>
-                        <th>Population Source</th>
-                        <th>Business Logic</th>
-                        <th>Programs Involved</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="fieldMappingTableBody">
-                    <tr>
-                        <td colspan="7" class="text-center text-muted">Enter a target file name or select a layout and click Analyze</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
+                    <!-- Layout Summary Section -->
+                    <div id="layoutSummarySection" style="display: none; margin: 1rem 0; padding: 1rem; background: #f8f9fa; border-radius: 8px;">
+                        <h4>Layout Summary</h4>
+                        <div id="layoutSummaryContent"></div>
+                    </div>
+                    
+                    <div id="fieldMappingResults">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Field Name</th>
+                                    <th>Mainframe Type & Length</th>
+                                    <th>Oracle Type & Length</th>
+                                    <th>Population Source</th>
+                                    <th>Business Logic</th>
+                                    <th>Programs Involved</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fieldMappingTableBody">
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted">Enter a target file name or select a layout and click Analyze</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
 
-    <!-- Field Details Modal -->
-    <div id="fieldDetailsModal" class="modal">
-        <div class="modal-content" style="width: 80%; max-width: 900px;">
-            <div class="modal-header">
-                <h3 class="modal-title" id="fieldModalTitle">Field Details</h3>
-                <button class="close" onclick="closeFieldDetailsModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div id="fieldDetailsContent">
-                    <!-- Will be populated with field details -->
+                <!-- Field Details Modal -->
+                <div id="fieldDetailsModal" class="modal">
+                    <div class="modal-content" style="width: 80%; max-width: 900px;">
+                        <div class="modal-header">
+                            <h3 class="modal-title" id="fieldModalTitle">Field Details</h3>
+                            <button class="close" onclick="closeFieldDetailsModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="fieldDetailsContent">
+                                <!-- Will be populated with field details -->
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="closeFieldDetailsModal()">Close</button>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeFieldDetailsModal()">Close</button>
-            </div>
         </div>
-    </div>
 
         <!-- Right Panel - Chat -->
         <div class="right-panel" id="rightPanel">
@@ -2852,18 +2854,36 @@ function generateDependencyDisplayName(technicalName) {
     return name.replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-        function populateDependencyDropdown(components) {
-            const select = document.getElementById('dependencyComponentSelect');
-            select.innerHTML = '<option value="">Overall System View</option>';
-            
-            const programs = components.filter(c => c.component_type === 'PROGRAM');
-            programs.forEach(program => {
-                const option = document.createElement('option');
-                option.value = program.component_name;
-                option.textContent = program.component_name;
-                select.appendChild(option);
-            });
+        async function populateDependencyDropdown() {
+    const select = document.getElementById('dependencyComponentSelect');
+    if (!select) return;
+    
+    try {
+        // Get the current components data
+        const response = await fetch(`/api/components/${currentSessionId}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.components) {
+                const programs = data.components.filter(c => c.component_type === 'PROGRAM');
+                
+                // Clear existing options except the first one
+                select.innerHTML = '<option value="">Overall System View</option>';
+                
+                // Add program options
+                programs.forEach(program => {
+                    const option = document.createElement('option');
+                    option.value = program.component_name;
+                    option.textContent = `${program.component_name} (${program.friendly_name || program.component_name})`;
+                    select.appendChild(option);
+                });
+                
+                console.log(`Populated dependency dropdown with ${programs.length} programs`);
+            }
         }
+    } catch (error) {
+        console.error('Error populating dependency dropdown:', error);
+    }
+}
 
         function refreshDependencyFlow() {
             loadDependencyFlow();
@@ -3151,9 +3171,10 @@ function generateDependencyDisplayName(technicalName) {
         }
 
         async function refreshUI() {
-            await loadMetrics();
-            await loadComponentsList();
-        }
+    await loadMetrics();
+    await loadComponentsList();
+    await populateDependencyDropdown(); // Add this line
+}
 
         async function loadMetrics() {
             try {

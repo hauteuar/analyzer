@@ -183,6 +183,7 @@ class ChatManager:
             'record_layouts': [],
             'field_mappings': [],
             'dependencies': [],
+            'program_calls': [],
             'source_code_included': False
         }
         
@@ -244,16 +245,67 @@ class ChatManager:
                                         if c.get('source_strategy') == 'full'][:2]
                         context['components'] = small_components
                         context['source_code_included'] = len(small_components) > 0
+
+            # Get dependencies - especially important for program call questions
+            all_dependencies = self.db_manager.get_dependencies(session_id)
+            
+            # If user is asking about calls or programs, include relevant dependencies
+            if any(word in message.lower() for word in ['call', 'calls', 'program', 'programs', 'link', 'xctl', 'invoke', 'execute']):
+                if component_mentioned:
+                    # Get dependencies for specific component
+                    component_deps = [
+                        dep for dep in all_dependencies 
+                        if dep['source_component'] == component_mentioned or dep['target_component'] == component_mentioned
+                    ]
+                    context['dependencies'] = component_deps
+                    
+                    # Extract program calls specifically
+                    program_calls = [
+                        dep for dep in component_deps
+                        if dep['relationship_type'] in ['PROGRAM_CALL', 'CICS_LINK', 'CICS_XCTL', 'CICS_START']
+                    ]
+                    context['program_calls'] = program_calls
+                    
+                    logger.info(f"Found {len(program_calls)} program calls for {component_mentioned}")
+                else:
+                    # Include all dependencies for general program call questions
+                    context['dependencies'] = all_dependencies[:10]  # Limit to prevent overflow
+                    context['program_calls'] = [
+                        dep for dep in all_dependencies
+                        if dep['relationship_type'] in ['PROGRAM_CALL', 'CICS_LINK', 'CICS_XCTL', 'CICS_START']
+                    ][:10]
+            else:
+                # For non-program-call questions, include limited dependencies
+                context['dependencies'] = all_dependencies[:5]
             
             # Get other context as before
             context['record_layouts'] = self.db_manager.get_record_layouts(session_id)[:5]
-            # ... other context gathering ...
+            
+            # Get field mappings if relevant
+            if any(word in message.lower() for word in ['field', 'mapping', 'oracle', 'conversion']):
+                try:
+                    # Try to get field mappings for any mentioned layouts or files
+                    layouts = context['record_layouts']
+                    for layout in layouts[:3]:
+                        layout_name = layout.get('layout_name', '')
+                        if layout_name:
+                            mappings = self.db_manager.get_field_mappings(session_id, layout_name)
+                            context['field_mappings'].extend(mappings[:5])
+                except Exception as e:
+                    logger.debug(f"Error loading field mappings: {e}")
+            
+            # Log context summary
+            logger.info(f"Enhanced context for '{message[:50]}...': "
+                    f"Components: {len(context['components'])}, "
+                    f"Dependencies: {len(context['dependencies'])}, "
+                    f"Program calls: {len(context['program_calls'])}, "
+                    f"Source included: {context['source_code_included']}")
             
         except Exception as e:
             logger.error(f"Error getting enhanced context: {str(e)}")
         
         return context
-
+    
     def _extract_component_name_from_message(self, message: str) -> Optional[str]:
         """Extract a likely component or program name from a user message.
 
@@ -306,7 +358,7 @@ class ChatManager:
         return None
 
     def _build_enhanced_prompt(self, message: str, context: Dict) -> str:
-        """Build enhanced prompt with source code context"""
+        """Build enhanced prompt with program call context"""
         prompt_parts = [
             "You are a COBOL/mainframe analysis expert. Answer the user's question using the provided context.",
             "",
@@ -314,18 +366,29 @@ class ChatManager:
             ""
         ]
         
-        # Add source code if available
+        # Add program call information if available
+        if context.get('program_calls'):
+            prompt_parts.extend([
+                "=== PROGRAM CALLS AND DEPENDENCIES ===",
+                ""
+            ])
+            for call in context['program_calls']:
+                prompt_parts.append(
+                    f"- {call['relationship_type']}: {call['source_component']} → {call['target_component']}"
+                )
+            prompt_parts.append("")
+        
+        # Add source code context
         if context.get('source_code_included') and context.get('components'):
             prompt_parts.extend([
                 "=== SOURCE CODE CONTEXT ===",
                 ""
             ])
             
-            for component in context['components'][:2]:  # Limit to 2 components
+            for component in context['components'][:2]:
                 prompt_parts.extend([
                     f"COMPONENT: {component['component_name']} ({component['component_type']})",
                     f"LINES: {component.get('total_lines', 0)}",
-                    f"SOURCE STRATEGY: {component.get('source_strategy', 'unknown')}",
                     "",
                     "SOURCE CODE:",
                     component.get('source_for_chat', 'No source available'),
@@ -334,18 +397,9 @@ class ChatManager:
                     ""
                 ])
         
-        # Add other context...
-        if context.get('record_layouts'):
-            prompt_parts.extend([
-                "=== RECORD LAYOUTS ===",
-                ""
-            ])
-            for layout in context['record_layouts'][:3]:
-                prompt_parts.append(f"- {layout['layout_name']}: {layout.get('fields_count', 0)} fields")
-        
         prompt_parts.extend([
             "",
-            "Please provide a helpful, accurate response based on this context. If you reference source code, include specific line numbers or code snippets where relevant."
+            "Please provide a helpful, accurate response based on this context. If you reference program calls or dependencies, include the specific relationship types (CALL, CICS LINK, CICS XCTL)."
         ])
         
         return '\n'.join(prompt_parts)

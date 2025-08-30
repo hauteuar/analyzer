@@ -255,7 +255,7 @@ class COBOLParser:
         return operations
 
     def extract_program_calls(self, lines: List[str]) -> List[Dict]:
-        """Extract program calls with proper column handling"""
+        """Extract program calls with proper CICS command handling"""
         operations = []
         seen_operations = set()
         
@@ -282,42 +282,106 @@ class COBOLParser:
                             'relationship_type': 'PROGRAM_CALL'
                         })
             
-            # CICS program operations
-            cics_program_ops = [
-                (r'EXEC\s+CICS\s+LINK\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS_LINK'),
-                (r'EXEC\s+CICS\s+XCTL\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS_XCTL'),
-            ]
-            
-            for pattern, op_type in cics_program_ops:
-                matches = re.findall(pattern, program_upper)
-                for program_name in matches:
-                    if self._is_valid_cobol_filename(program_name):
-                        op_key = f"{op_type}_{program_name}"
+            # CICS program operations - use existing methods
+            if 'EXEC CICS' in program_upper and ('LINK' in program_upper or 'XCTL' in program_upper):
+                # Extract complete multi-line CICS command
+                cics_command = self._extract_complete_cics_command(lines, i)
+                if cics_command:
+                    # Parse CICS command for program calls
+                    cics_program_ops = self._parse_cics_program_calls(cics_command, i + 1)
+                    for cics_op in cics_program_ops:
+                        op_key = f"{cics_op['operation']}_{cics_op['program_name']}"
                         if op_key not in seen_operations:
                             seen_operations.add(op_key)
-                            operations.append({
-                                'operation': op_type,
-                                'program_name': program_name,
-                                'call_type': 'CICS',
-                                'line_number': i + 1,
-                                'line_content': program_area,
-                                'relationship_type': op_type
-                            })
+                            operations.append(cics_op)
         
         return operations
 
+    def _parse_cics_program_calls(self, cics_command: str, line_number: int) -> List[Dict]:
+        """Parse CICS LINK/XCTL program calls from complete CICS command"""
+        operations = []
+        cics_upper = cics_command.upper()
+        
+        # Enhanced patterns for CICS program calls (LINK/XCTL)
+        cics_program_patterns = [
+            # LINK patterns with various formats
+            (r'EXEC\s+CICS\s+LINK\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS_LINK'),
+            (r'EXEC\s+CICS\s+LINK\s+.*?PROGRAM\s*\(\s*[\'"]?\s*([A-Z0-9\-]{3,})\s*[\'"]?\s*\)', 'CICS_LINK'),
+            
+            # XCTL patterns with various formats  
+            (r'EXEC\s+CICS\s+XCTL\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS_XCTL'),
+            (r'EXEC\s+CICS\s+XCTL\s+.*?PROGRAM\s*\(\s*[\'"]?\s*([A-Z0-9\-]{3,})\s*[\'"]?\s*\)', 'CICS_XCTL'),
+            
+            # START patterns for started transactions
+            (r'EXEC\s+CICS\s+START\s+.*?TRANSID\s*\(\s*[\'"]?\s*([A-Z0-9\-]{3,})\s*[\'"]?\s*\)', 'CICS_START'),
+        ]
+        
+        for pattern, operation in cics_program_patterns:
+            matches = re.findall(pattern, cics_upper, re.DOTALL)
+            for program_name in matches:
+                if self._is_valid_cobol_filename(program_name):
+                    operations.append({
+                        'operation': operation,
+                        'program_name': program_name,
+                        'call_type': 'CICS',
+                        'line_number': line_number,
+                        'line_content': cics_command[:100],
+                        'relationship_type': operation
+                    })
+        
+        return operations
+    
+    def _extract_cics_programs(self, cics_command: str, line_number: int) -> List[Dict]:
+        """Extract program names from CICS LINK/XCTL commands"""
+        programs = []
+        cics_upper = cics_command.upper()
+        
+        # Enhanced patterns for CICS program calls
+        patterns = [
+            # LINK with various formats
+            (r'EXEC\s+CICS\s+LINK\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS_LINK'),
+            (r'EXEC\s+CICS\s+LINK\s+.*?PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS_LINK'),
+            
+            # XCTL with various formats  
+            (r'EXEC\s+CICS\s+XCTL\s+PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS_XCTL'),
+            (r'EXEC\s+CICS\s+XCTL\s+.*?PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)', 'CICS_XCTL'),
+            
+            # Handle spaces in parentheses: PROGRAM ( 'TMST9P4' )
+            (r'EXEC\s+CICS\s+LINK\s+.*?PROGRAM\s*\(\s*[\'"]?\s*([A-Z0-9\-]{3,})\s*[\'"]?\s*\)', 'CICS_LINK'),
+            (r'EXEC\s+CICS\s+XCTL\s+.*?PROGRAM\s*\(\s*[\'"]?\s*([A-Z0-9\-]{3,})\s*[\'"]?\s*\)', 'CICS_XCTL'),
+        ]
+        
+        for pattern, operation in patterns:
+            matches = re.findall(pattern, cics_upper, re.DOTALL)
+            for program_name in matches:
+                if self._is_valid_cobol_filename(program_name):
+                    programs.append({
+                        'operation': operation,
+                        'program_name': program_name,
+                        'call_type': 'CICS',
+                        'line_number': line_number,
+                        'line_content': cics_command[:100],
+                        'relationship_type': operation
+                    })
+        
+        return programs
     def _extract_complete_cics_command(self, lines: List[str], start: int) -> str:
-        """Extract complete CICS command with proper column handling"""
+        """Extract complete CICS command across multiple lines"""
         cics_command = ""
         
-        for i in range(start, min(len(lines), start + 10)):
+        for i in range(start, min(len(lines), start + 15)):  # Increased range
             program_area = self.extract_program_area_only(lines[i])
             if not program_area:
                 continue
             
-            cics_command += " " + program_area
+            cics_command += " " + program_area.strip()
             
+            # Check for command termination
             if 'END-EXEC' in cics_command.upper():
+                break
+            
+            # Also check for period termination (some CICS commands)
+            if cics_command.strip().endswith('.') and len(cics_command) > 20:
                 break
         
         return cics_command.strip()
