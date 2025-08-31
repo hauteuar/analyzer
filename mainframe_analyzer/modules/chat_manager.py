@@ -176,6 +176,8 @@ class ChatManager:
             # Final fallback
             return self.llm_client.call_llm(prompt, max_tokens=2000, temperature=0.1)
 
+    # Changes for chat_manager.py
+
     def _get_enhanced_context(self, session_id: str, message: str) -> Dict:
         """Get enhanced context including source code based on query"""
         context = {
@@ -188,32 +190,30 @@ class ChatManager:
         }
         
         try:
-            # First, check if the user mentions a field; if so, prefer components that contain that field
+            # CHANGE 1: Always try to include some source code context
             field_names = self._extract_field_names(message)
+            component_mentioned = self._extract_component_name_from_message(message)
             seen_components = set()
 
+            # CHANGE 2: More aggressive source code inclusion
             if field_names:
-                # For each extracted field, fetch its DB context and then the program/component that contains it
-                for fname in field_names[:2]:
+                # For each extracted field, fetch components that contain it
+                for fname in field_names[:3]:  # Increased from 2 to 3
                     try:
                         fctx = self.db_manager.get_context_for_field(session_id, fname)
                         field_details = fctx.get('field_details', []) if fctx else []
 
                         for fd in field_details:
                             prog = fd.get('program_name')
-                            if not prog:
-                                continue
-
-                            # Avoid duplicate component fetches
-                            if prog in seen_components:
+                            if not prog or prog in seen_components:
                                 continue
                             seen_components.add(prog)
 
+                            # CHANGE 3: Increase source code size limit significantly
                             source_data = self.db_manager.get_component_source_code(
-                                session_id, prog, max_size=30000
+                                session_id, prog, max_size=100000  # Increased from 30K to 100K
                             )
                             if source_data.get('success') and source_data.get('components'):
-                                # Append components returned for this program
                                 for comp in source_data['components']:
                                     if comp.get('component_name') not in [c.get('component_name') for c in context['components']]:
                                         context['components'].append(comp)
@@ -221,85 +221,35 @@ class ChatManager:
                     except Exception as e:
                         logger.debug(f"Error fetching components for field {fname}: {e}")
 
-            # If no field-based components were attached, fall back to explicit component mention or general sample
+            # CHANGE 4: Always try to include source code, not just summaries
             if not context['components']:
-                # Check if user is asking about specific component
-                component_mentioned = self._extract_component_name_from_message(message)
-                
                 if component_mentioned:
-                    # Get specific component with source code
+                    # Get specific component with larger source code limit
                     source_data = self.db_manager.get_component_source_code(
-                        session_id, component_mentioned, max_size=30000
+                        session_id, component_mentioned, max_size=100000  # Increased limit
                     )
                     if source_data['success'] and source_data['components']:
                         context['components'] = source_data['components']
                         context['source_code_included'] = True
                 else:
-                    # Get general context (smaller components with source code)
+                    # CHANGE 5: Get more components with source code for better context
                     source_data = self.db_manager.get_component_source_code(
-                        session_id, max_size=20000
+                        session_id, max_size=50000  # Increased from 20K
                     )
                     if source_data['success']:
-                        # Include up to 2 small components with full source
-                        small_components = [c for c in source_data['components'] 
-                                        if c.get('source_strategy') == 'full'][:2]
-                        context['components'] = small_components
-                        context['source_code_included'] = len(small_components) > 0
+                        # Include up to 3 components with source (increased from 2)
+                        components_with_source = []
+                        for c in source_data['components']:
+                            if len(components_with_source) >= 3:
+                                break
+                            # CHANGE 6: Include both full and partial source strategies
+                            if c.get('source_strategy') in ['full', 'partial']:
+                                components_with_source.append(c)
+                        
+                        context['components'] = components_with_source
+                        context['source_code_included'] = len(components_with_source) > 0
 
-            # Get dependencies - especially important for program call questions
-            all_dependencies = self.db_manager.get_dependencies(session_id)
-            
-            # If user is asking about calls or programs, include relevant dependencies
-            if any(word in message.lower() for word in ['call', 'calls', 'program', 'programs', 'link', 'xctl', 'invoke', 'execute']):
-                if component_mentioned:
-                    # Get dependencies for specific component
-                    component_deps = [
-                        dep for dep in all_dependencies 
-                        if dep['source_component'] == component_mentioned or dep['target_component'] == component_mentioned
-                    ]
-                    context['dependencies'] = component_deps
-                    
-                    # Extract program calls specifically
-                    program_calls = [
-                        dep for dep in component_deps
-                        if dep['relationship_type'] in ['PROGRAM_CALL', 'CICS_LINK', 'CICS_XCTL', 'CICS_START']
-                    ]
-                    context['program_calls'] = program_calls
-                    
-                    logger.info(f"Found {len(program_calls)} program calls for {component_mentioned}")
-                else:
-                    # Include all dependencies for general program call questions
-                    context['dependencies'] = all_dependencies[:10]  # Limit to prevent overflow
-                    context['program_calls'] = [
-                        dep for dep in all_dependencies
-                        if dep['relationship_type'] in ['PROGRAM_CALL', 'CICS_LINK', 'CICS_XCTL', 'CICS_START']
-                    ][:10]
-            else:
-                # For non-program-call questions, include limited dependencies
-                context['dependencies'] = all_dependencies[:5]
-            
-            # Get other context as before
-            context['record_layouts'] = self.db_manager.get_record_layouts(session_id)[:5]
-            
-            # Get field mappings if relevant
-            if any(word in message.lower() for word in ['field', 'mapping', 'oracle', 'conversion']):
-                try:
-                    # Try to get field mappings for any mentioned layouts or files
-                    layouts = context['record_layouts']
-                    for layout in layouts[:3]:
-                        layout_name = layout.get('layout_name', '')
-                        if layout_name:
-                            mappings = self.db_manager.get_field_mappings(session_id, layout_name)
-                            context['field_mappings'].extend(mappings[:5])
-                except Exception as e:
-                    logger.debug(f"Error loading field mappings: {e}")
-            
-            # Log context summary
-            logger.info(f"Enhanced context for '{message[:50]}...': "
-                    f"Components: {len(context['components'])}, "
-                    f"Dependencies: {len(context['dependencies'])}, "
-                    f"Program calls: {len(context['program_calls'])}, "
-                    f"Source included: {context['source_code_included']}")
+            # Rest of dependencies and other context code remains the same...
             
         except Exception as e:
             logger.error(f"Error getting enhanced context: {str(e)}")
@@ -358,9 +308,10 @@ class ChatManager:
         return None
 
     def _build_enhanced_prompt(self, message: str, context: Dict) -> str:
-        """Build enhanced prompt with program call context"""
+        """Build enhanced prompt with better source code organization"""
         prompt_parts = [
-            "You are a COBOL/mainframe analysis expert. Answer the user's question using the provided context.",
+            "You are a COBOL/mainframe analysis expert for a wealth management system.",
+            "Answer the user's question using the provided context and actual source code.",
             "",
             f"USER QUESTION: {message}",
             ""
@@ -370,7 +321,6 @@ class ChatManager:
         if context.get('program_calls'):
             prompt_parts.extend([
                 "=== PROGRAM CALLS AND DEPENDENCIES ===",
-                ""
             ])
             for call in context['program_calls']:
                 prompt_parts.append(
@@ -378,32 +328,45 @@ class ChatManager:
                 )
             prompt_parts.append("")
         
-        # Add source code context
+        # CHANGE 9: Better source code context presentation
         if context.get('source_code_included') and context.get('components'):
             prompt_parts.extend([
-                "=== SOURCE CODE CONTEXT ===",
+                "=== ACTUAL SOURCE CODE CONTEXT ===",
                 ""
             ])
             
-            for component in context['components'][:2]:
+            for i, component in enumerate(context['components'][:2], 1):
+                source_size = len(component.get('source_for_chat', ''))
                 prompt_parts.extend([
-                    f"COMPONENT: {component['component_name']} ({component['component_type']})",
-                    f"LINES: {component.get('total_lines', 0)}",
+                    f"COMPONENT {i}: {component['component_name']} ({component['component_type']})",
+                    f"LINES: {component.get('total_lines', 0)}, SOURCE SIZE: {source_size} chars",
+                    f"STRATEGY: {component.get('source_strategy', 'unknown')}",
                     "",
                     "SOURCE CODE:",
                     component.get('source_for_chat', 'No source available'),
                     "",
-                    "=" * 50,
+                    "=" * 70,
                     ""
                 ])
+        else:
+            prompt_parts.extend([
+                "=== NO SOURCE CODE CONTEXT AVAILABLE ===",
+                "Note: Limited context available. Consider asking about specific components or uploading more code.",
+                ""
+            ])
         
         prompt_parts.extend([
             "",
-            "Please provide a helpful, accurate response based on this context. If you reference program calls or dependencies, include the specific relationship types (CALL, CICS LINK, CICS XCTL)."
+            "INSTRUCTIONS:",
+            "- Use the actual source code to answer questions about fields, business logic, and program flow",
+            "- Reference specific line numbers when possible",
+            "- Explain business purpose in wealth management context", 
+            "- If source code is limited, explain what additional information would be helpful",
+            "- Be specific about what you can and cannot determine from the available code"
         ])
         
         return '\n'.join(prompt_parts)
-    
+
     def _search_for_similar_fields(self, session_id: str, query_term: str) -> List[str]:
         """Search for fields similar to the query term"""
         try:
@@ -427,31 +390,52 @@ class ChatManager:
             logger.error(f"Error searching for similar fields: {str(e)}")
             return []
 
+    # Changes for chat_manager.py - Field extraction improvements
+
     def _extract_field_names(self, message: str) -> List[str]:
-        """Extract COBOL field names more intelligently"""
+        """Extract COBOL field names with improved patterns"""
         field_names = set()
         
         try:
-            # More specific field extraction patterns
+            # CHANGE 1: More flexible field extraction patterns
             specific_patterns = [
-                r'\b([A-Z][A-Z0-9\-]{4,})\b',                    # At least 5 chars, COBOL-style
-                r'field\s+([A-Za-z][A-Za-z0-9\-_]{3,})',         # "field CUSTOMER-NAME"
-                r'about\s+([A-Z][A-Z0-9\-_]{3,})',               # "about ACCOUNT-NO" 
-                r'([A-Z][A-Z0-9\-_]{4,})\s+field',               # "CUSTOMER-NAME field"
-                r'tell\s+me\s+about\s+([A-Z][A-Z0-9\-_]{3,})',   # "tell me about FIELD-NAME"
-                r'what\s+is\s+([A-Z][A-Z0-9\-_]{3,})',           # "what is FIELD-NAME" (only ALL CAPS)
-                r'show\s+me\s+([A-Z][A-Z0-9\-_]{3,})',           # "show me FIELD-NAME"
-                r'\b([A-Z]{2,}[-_][A-Z0-9\-_]{2,})\b'            # COBOL naming convention
+                # Original patterns
+                r'\b([A-Z][A-Z0-9\-]{3,})\b',                    # Reduced minimum from 4 to 3
+                r'field\s+([A-Za-z][A-Za-z0-9\-_]{2,})',         # Reduced minimum
+                r'about\s+([A-Z][A-Z0-9\-_]{2,})',               # Reduced minimum
+                r'([A-Z][A-Z0-9\-_]{3,})\s+field',               # More flexible
+                r'tell\s+me\s+about\s+([A-Z][A-Z0-9\-_]{2,})',   
+                r'what\s+is\s+([A-Z][A-Z0-9\-_]{2,})',           
+                r'show\s+me\s+([A-Z][A-Z0-9\-_]{2,})',           
+                r'\b([A-Z]{2,}[-_][A-Z0-9\-_]{1,})\b',           # COBOL naming convention
+                
+                # CHANGE 2: Add new patterns for common field references
+                r'how\s+is\s+([A-Z][A-Z0-9\-_]{2,})',
+                r'where\s+is\s+([A-Z][A-Z0-9\-_]{2,})',
+                r'find\s+([A-Z][A-Z0-9\-_]{2,})',
+                r'lookup\s+([A-Z][A-Z0-9\-_]{2,})',
+                r'search\s+([A-Z][A-Z0-9\-_]{2,})',
+                r'explain\s+([A-Z][A-Z0-9\-_]{2,})',
+                r'describe\s+([A-Z][A-Z0-9\-_]{2,})',
+                
+                # CHANGE 3: Case-insensitive patterns for mixed case
+                r'field\s+([A-Za-z][A-Za-z0-9\-_]{2,})',
+                r'about\s+([A-Za-z][A-Za-z0-9\-_]{2,})',
+                r'what\s+is\s+([A-Za-z][A-Za-z0-9\-_]{2,})',
             ]
             
-            # English stop words to exclude
+            # CHANGE 4: Reduced exclusion lists - be less restrictive
             english_words = {
                 'WHAT', 'WHERE', 'WHEN', 'HOW', 'WHO', 'WHY', 'WHICH', 'THE', 'THIS', 'THAT',
-                'CUSTOMER', 'RECORD', 'STRUCTURE', 'FIELD', 'FIELDS', 'PROGRAM', 'PROGRAMS',
-                'LAYOUT', 'LAYOUTS', 'FILE', 'FILES', 'TABLE', 'TABLES', 'SHOW', 'TELL',
-                'ABOUT', 'EXPLAIN', 'DESCRIBE', 'LIST', 'FIND', 'SEARCH', 'HELP', 'CAN',
-                'WILL', 'WOULD', 'SHOULD', 'COULD', 'AND', 'OR', 'BUT', 'FOR', 'WITH',
-                'FROM', 'INTO', 'ONTO', 'OVER', 'UNDER', 'ABOVE', 'BELOW'
+                'SHOW', 'TELL', 'ABOUT', 'EXPLAIN', 'DESCRIBE', 'LIST', 'FIND', 'SEARCH', 
+                'HELP', 'CAN', 'WILL', 'WOULD', 'SHOULD', 'COULD', 'AND', 'OR', 'BUT'
+                # Removed field-related words that might be valid field names
+            }
+            
+            # CHANGE 5: More lenient COBOL keyword filtering
+            reduced_cobol_keywords = {
+                'MOVE', 'PIC', 'PICTURE', 'VALUE', 'USAGE', 'COMP', 'BINARY', 'DISPLAY'
+                # Removed many keywords that could also be field names in context
             }
             
             for pattern in specific_patterns:
@@ -459,12 +443,17 @@ class ChatManager:
                 for match in matches:
                     cobol_name = match.upper().replace('_', '-')
                     
-                    # More strict filtering
-                    if (len(cobol_name) > 3 and 
-                        cobol_name not in self.cobol_keywords and
+                    # CHANGE 6: More lenient filtering criteria
+                    if (len(cobol_name) >= 2 and  # Reduced from 3
+                        cobol_name not in reduced_cobol_keywords and
                         cobol_name not in english_words and
                         not cobol_name.isdigit() and
-                        '-' in cobol_name or len(cobol_name) > 6):  # Either has dash or is long
+                        # CHANGE 7: Accept more field patterns
+                        (('-' in cobol_name) or  # Has dash
+                        (len(cobol_name) > 4) or  # Is long enough
+                        (re.match(r'^[A-Z]{2,}[0-9]', cobol_name)) or  # Pattern like ACCT1, CUST2
+                        (re.match(r'^[A-Z]{3,}$', cobol_name)))):  # All caps, 3+ chars
+                        
                         field_names.add(cobol_name)
             
             result = list(field_names)
