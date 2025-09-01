@@ -408,6 +408,39 @@ class DatabaseManager:
                         ON llm_component_summaries(session_id, component_name, component_type)
                     ''')
 
+                    # Add these new tables for RAG system
+
+                    # NEW: RAG query metrics table
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS rag_query_metrics (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            query TEXT NOT NULL,
+                            query_type TEXT,
+                            entities_found INTEGER DEFAULT 0,
+                            contexts_retrieved INTEGER DEFAULT 0,
+                            confidence_score REAL DEFAULT 0.0,
+                            processing_time_ms INTEGER DEFAULT 0,
+                            response_length INTEGER DEFAULT 0,
+                            retrieval_methods TEXT,
+                            user_satisfaction INTEGER,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    ''')
+                    
+                    # NEW: Query patterns table
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS query_patterns (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            pattern_type TEXT,
+                            pattern_data TEXT,
+                            frequency INTEGER DEFAULT 1,
+                            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    ''')
+
+
                     # Create performance indexes (UPDATED with new classification indexes)
                     indexes = [
                         'CREATE INDEX idx_derived_components_parent ON derived_components(session_id, parent_component)',
@@ -686,24 +719,25 @@ class DatabaseManager:
                 analysis_json = json.dumps(clean_analysis, ensure_ascii=False, separators=(',', ':'))
                 
                 # CHANGE 4: If JSON is too large, keep only essential data
-                if len(analysis_json) > 500000:  # 500KB limit
-                    logger.warning(f"Analysis JSON too large ({len(analysis_json)} chars), keeping essentials...")
-                    essential_data = {
-                        'name': analysis_result.get('name'),
-                        'type': analysis_result.get('type'),
-                        'friendly_name': analysis_result.get('friendly_name'),
-                        'business_purpose': analysis_result.get('business_purpose'),
-                        'complexity_score': analysis_result.get('complexity_score'),
-                        'total_lines': analysis_result.get('total_lines'),
-                        'total_fields': len(analysis_result.get('fields', [])),
-                        'file_operations': analysis_result.get('file_operations', [])[:10],  # Limit arrays
-                        'cics_operations': analysis_result.get('cics_operations', [])[:10],
-                        'program_calls': analysis_result.get('program_calls', [])[:10],
-                        'derived_components': analysis_result.get('derived_components', []),
-                        'divisions': analysis_result.get('divisions', [])[:5],
-                        'copybooks': analysis_result.get('copybooks', [])[:10]
-                    }
-                    analysis_json = json.dumps(essential_data, ensure_ascii=False)
+                #if len(analysis_json) > 500000:  # 500KB limit
+                #    logger.warning(f"Analysis JSON too large ({len(analysis_json)} chars), keeping essentials...")
+                #    essential_data = {
+                #        'name': analysis_result.get('name'),
+                #        'type': analysis_result.get('type'),
+                #        'friendly_name': analysis_result.get('friendly_name'),
+                #        'business_purpose': analysis_result.get('business_purpose'),
+                #        'complexity_score': analysis_result.get('complexity_score'),
+                #        'total_lines': analysis_result.get('total_lines'),
+                #        'total_fields': len(analysis_result.get('fields', [])),
+                #        'file_operations': analysis_result.get('file_operations', [])[:10],  # Limit arrays
+                #        'cics_operations': analysis_result.get('cics_operations', [])[:10],
+                #        'program_calls': analysis_result.get('program_calls', [])[:10],
+                #        'derived_components': analysis_result.get('derived_components', []),
+                #        'divisions': analysis_result.get('divisions', [])[:5],
+                
+                #        'copybooks': analysis_result.get('copybooks', [])[:10]
+                #    }
+                #    analysis_json = json.dumps(essential_data, ensure_ascii=False)
                 
                 # Check if component exists
                 cursor.execute('''
@@ -902,10 +936,10 @@ class DatabaseManager:
                     field_data.get('business_purpose', f"Field definition for {field_name}")[:500],
                     float(field_data.get('confidence', 0.8)),
                     field_data.get('definition_line_number', 0),
-                    field_data.get('definition_code', '')[:500],
-                    field_data.get('program_source_content', '')[:10000],
-                    field_data.get('field_references_json', '[]')[:2000],
-                    field_data.get('usage_summary_json', '{}')[:1000],
+                    field_data.get('definition_code', '')[:5000],
+                    field_data.get('program_source_content', '')[:100000],
+                    field_data.get('field_references_json', '[]')[:50000],
+                    field_data.get('usage_summary_json', '{}')[:100000],
                     field_data.get('total_program_references', 0),
                     field_data.get('move_source_count', 0),
                     field_data.get('move_target_count', 0),
@@ -1611,6 +1645,24 @@ class DatabaseManager:
                             source_content, row_dict.get('analysis_result_json', '{}')
                         )
                     
+                    if len(source_content) <= max_size:
+            # Send full source
+                        row_dict['source_strategy'] = 'full'
+                        row_dict['source_for_chat'] = source_content
+                    elif len(source_content) <= max_size * 2:
+                        # Send substantial portion with key sections
+                        row_dict['source_strategy'] = 'substantial'
+                        row_dict['source_for_chat'] = self._create_substantial_source_summary(
+                            source_content, row_dict.get('analysis_result_json', '{}'), max_size
+                        )
+                    else:
+                        # Send enhanced summary with more content
+                        row_dict['source_strategy'] = 'enhanced_summary'
+                        row_dict['source_for_chat'] = self._create_enhanced_source_summary(
+                            source_content, row_dict.get('analysis_result_json', '{}')
+                        )
+
+
                     results.append(row_dict)
                 
                 return {

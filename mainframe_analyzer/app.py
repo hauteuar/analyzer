@@ -20,7 +20,16 @@ from modules.database_manager import DatabaseManager
 from modules.cobol_parser import COBOLParser
 from modules.field_analyzer import FieldAnalyzer
 from modules.component_extractor import ComponentExtractor
-from modules.chat_manager import ChatManager
+logger = logging.getLogger(__name__)
+# CHANGE 1: Import the Agentic RAG system instead of regular chat
+try:
+    from modules.agentic_rag_chat import AgenticRAGOrchestrator, create_agentic_rag_system
+    AGENTIC_RAG_AVAILABLE = True
+    logger.info("Agentic RAG system imported successfully")
+except ImportError as e:
+    logger.warning(f"Agentic RAG not available, falling back to basic chat: {e}")
+    from modules.chat_manager import ChatManager
+    AGENTIC_RAG_AVAILABLE = False
 
 app = Flask(__name__)
 CORS(app)
@@ -52,10 +61,78 @@ class MainframeAnalyzer:
         self.cobol_parser = COBOLParser()
         self.field_analyzer = FieldAnalyzer(self.llm_client, self.token_manager, self.db_manager)
         self.component_extractor = ComponentExtractor(self.llm_client, self.token_manager, self.db_manager)
-        self.chat_manager = ChatManager(self.llm_client, self.token_manager, self.db_manager)
+        
+        # CHANGE 2: Initialize RAG or fallback chat system
+        self.chat_system_type = "unknown"
+        try:
+            if AGENTIC_RAG_AVAILABLE:
+                self.chat_manager = AgenticRAGOrchestrator(
+                    self.llm_client, 
+                    self.db_manager, 
+                    enable_vector_search=True
+                )
+                self.chat_system_type = "agentic_rag"
+                logger.info("Initialized Agentic RAG chat system")
+            else:
+                self.chat_manager = ChatManager(self.llm_client, self.token_manager, self.db_manager)
+                self.chat_system_type = "basic_chat"
+                logger.info("Initialized basic chat system")
+        except Exception as e:
+            logger.error(f"Failed to initialize chat system: {e}")
+            # Ultimate fallback
+            self.chat_manager = ChatManager(self.llm_client, self.token_manager, self.db_manager)
+            self.chat_system_type = "fallback_chat"
         
         # Initialize database
         self.db_manager.initialize_database()
+        
+        # CHANGE 3: Update database for RAG if using Agentic system
+        if self.chat_system_type == "agentic_rag":
+            try:
+                self._update_database_for_rag()
+                logger.info("Database updated for RAG system")
+            except Exception as e:
+                logger.warning(f"Could not update database for RAG: {e}")
+    
+    def _update_database_for_rag(self):
+        """Update database schema for RAG system"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Add RAG-specific tables
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS rag_query_metrics (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT NOT NULL,
+                        query TEXT NOT NULL,
+                        query_type TEXT,
+                        entities_found INTEGER DEFAULT 0,
+                        contexts_retrieved INTEGER DEFAULT 0,
+                        confidence_score REAL DEFAULT 0.0,
+                        processing_time_ms INTEGER DEFAULT 0,
+                        response_length INTEGER DEFAULT 0,
+                        retrieval_methods TEXT,
+                        user_satisfaction INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS query_patterns (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT NOT NULL,
+                        pattern_type TEXT,
+                        pattern_data TEXT,
+                        frequency INTEGER DEFAULT 1,
+                        last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                logger.info("RAG database schema updated successfully")
+                
+        except Exception as e:
+            logger.error(f"Error updating database for RAG: {str(e)}")
     
     def update_llm_config(self, config: Dict) -> bool:
         """Update LLM client configuration"""
@@ -220,6 +297,17 @@ class MainframeAnalyzer:
             storage_time = time.time() - storage_start
             logger.info(f"💾 Database storage completed in {storage_time:.2f}s")
             
+            # CHANGE 4: Initialize RAG system for this session after upload
+            if self.chat_system_type == "agentic_rag":
+                try:
+                    logger.info("🤖 Initializing RAG system for session...")
+                    rag_start = time.time()
+                    self.chat_manager.initialize_session(session_id)
+                    rag_time = time.time() - rag_start
+                    logger.info(f"🤖 RAG system initialized in {rag_time:.2f}s")
+                except Exception as e:
+                    logger.error(f"Error initializing RAG system: {e}")
+            
             total_time = time.time() - start_time
             logger.info(f"🎉 Analysis of {file_name} completed successfully in {total_time:.2f}s")
             
@@ -228,7 +316,8 @@ class MainframeAnalyzer:
                 'components': components,
                 'message': f'Successfully analyzed {len(components)} components from {file_name}',
                 'processing_time': total_time,
-                'component_breakdown': component_types
+                'component_breakdown': component_types,
+                'chat_system_ready': self.chat_system_type == "agentic_rag"
             }
             
         except Exception as e:
@@ -311,18 +400,86 @@ class MainframeAnalyzer:
                 'error': str(e)
             }
     
+    # CHANGE 5: Enhanced chat query processing for RAG system
     def chat_query(self, session_id: str, message: str, conversation_id: str) -> Dict:
-        """Process chat query with context"""
+        """Process chat query with enhanced RAG support"""
         try:
-            response = self.chat_manager.process_query(session_id, message, conversation_id)
-            return {
-                'success': True,
-                'response': response
-            }
+            if self.chat_system_type == "agentic_rag":
+                # Use enhanced RAG processing
+                result = self.chat_manager.process_query_with_full_features(
+                    session_id, message, conversation_id
+                )
+                
+                # Handle RAG result format
+                if isinstance(result, dict):
+                    return {
+                        'success': True,
+                        'response': result.get('response', 'No response generated'),
+                        'query_plan': result.get('query_plan', {}),
+                        'contexts_used': result.get('contexts_used', 0),
+                        'processing_time': result.get('processing_time', 0),
+                        'cached': result.get('cached', False),
+                        'routed': result.get('routed', False),
+                        'system_type': 'agentic_rag'
+                    }
+                else:
+                    # Fallback for string response
+                    return {
+                        'success': True,
+                        'response': str(result),
+                        'system_type': 'agentic_rag'
+                    }
+            else:
+                # Use basic chat processing
+                response = self.chat_manager.process_query(session_id, message, conversation_id)
+                return {
+                    'success': True,
+                    'response': response,
+                    'system_type': self.chat_system_type
+                }
+                
         except Exception as e:
             logger.error(f"Error processing chat query: {str(e)}")
             return {
                 'success': False,
+                'error': str(e),
+                'system_type': self.chat_system_type
+            }
+    
+    # CHANGE 6: Add method to get chat system health
+    def get_chat_system_health(self) -> Dict:
+        """Get chat system health and performance metrics"""
+        try:
+            health = {
+                'system_type': self.chat_system_type,
+                'status': 'healthy',
+                'features': []
+            }
+            
+            if self.chat_system_type == "agentic_rag":
+                # Get RAG system health
+                if hasattr(self.chat_manager, 'get_system_health'):
+                    rag_health = self.chat_manager.get_system_health()
+                    health.update(rag_health)
+                    health['features'] = [
+                        'Vector Search',
+                        'Query Analysis',
+                        'Context Retrieval',
+                        'Adaptive Responses',
+                        'Performance Caching'
+                    ]
+                else:
+                    health['features'] = ['Basic RAG']
+            else:
+                health['features'] = ['Basic Chat', 'Field Analysis', 'Source Code Context']
+            
+            return health
+            
+        except Exception as e:
+            logger.error(f"Error getting chat system health: {e}")
+            return {
+                'system_type': self.chat_system_type,
+                'status': 'error',
                 'error': str(e)
             }
 
@@ -343,7 +500,101 @@ def create_session():
     session_id = analyzer.create_session(project_name)
     return jsonify({'session_id': session_id, 'project_name': project_name})
 
-# Add this to your main.py Flask routes:
+# CHANGE 7: Add chat system status endpoint
+@app.route('/api/chat/status', methods=['GET'])
+def get_chat_status():
+    """Get chat system status and capabilities"""
+    try:
+        health = analyzer.get_chat_system_health()
+        return jsonify({
+            'success': True,
+            'chat_system': health
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+# CHANGE 8: Enhanced chat endpoint with better error handling
+@app.route('/api/chat', methods=['POST'])
+def chat_query():
+    """Enhanced chat endpoint with RAG support"""
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        message = data.get('message')
+        conversation_id = data.get('conversation_id', str(uuid.uuid4()))
+        
+        if not session_id or not message:
+            return jsonify({
+                'success': False,
+                'error': 'Missing session_id or message',
+                'response': 'Please provide both session_id and message'
+            })
+        
+        # Process with enhanced chat system
+        start_time = time.time()
+        result = analyzer.chat_query(session_id, message, conversation_id)
+        processing_time = time.time() - start_time
+        
+        # Add processing time if not already included
+        if 'processing_time' not in result:
+            result['processing_time'] = processing_time
+        
+        # Ensure consistent response format
+        if result.get('success'):
+            return jsonify({
+                'success': True,
+                'response': result.get('response', 'No response generated'),
+                'conversation_id': conversation_id,
+                'system_type': result.get('system_type', 'unknown'),
+                'processing_time': result.get('processing_time', processing_time),
+                'query_plan': result.get('query_plan'),
+                'contexts_used': result.get('contexts_used'),
+                'cached': result.get('cached', False),
+                'routed': result.get('routed', False)
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'response': f"I encountered an error: {result.get('error', 'Unknown error')}",
+                'error': result.get('error'),
+                'system_type': result.get('system_type', 'unknown')
+            })
+        
+    except Exception as e:
+        logger.error(f"Chat endpoint error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'response': 'Chat service encountered an error'
+        })
+
+# CHANGE 9: Add RAG analytics endpoint
+@app.route('/api/chat/analytics/<session_id>', methods=['GET'])
+def get_chat_analytics(session_id):
+    """Get chat analytics for RAG system"""
+    try:
+        if analyzer.chat_system_type == "agentic_rag" and hasattr(analyzer.chat_manager, 'analytics'):
+            analytics = analyzer.chat_manager.analytics.generate_session_analytics(session_id)
+            return jsonify({
+                'success': True,
+                'analytics': analytics
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'analytics': {'message': 'Analytics not available for current chat system'},
+                'system_type': analyzer.chat_system_type
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+# Add this to your Flask routes:
 # Add this route to reset database if needed
 @app.route('/api/reset-database', methods=['POST'])
 def reset_database():
@@ -357,15 +608,22 @@ def reset_database():
         analyzer.db_manager.init_executed = False
         analyzer.db_manager.initialize_database()
         
+        # CHANGE 10: Re-update database for RAG after reset
+        if analyzer.chat_system_type == "agentic_rag":
+            analyzer._update_database_for_rag()
+        
         return jsonify({
             'success': True,
-            'message': 'Database reset successfully'
+            'message': 'Database reset successfully',
+            'chat_system': analyzer.chat_system_type
         })
     except Exception as e:
         return jsonify({
             'success': False,
             'error': str(e)
         })
+
+# Keep all your existing routes unchanged - they will work with both systems
 
 # Add to main.py
 @app.route('/api/debug-storage/<session_id>')
@@ -394,10 +652,14 @@ def debug_storage(session_id):
             
             return jsonify({
                 'success': True,
-                'stored_components': results
+                'stored_components': results,
+                'chat_system': analyzer.chat_system_type
             })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+# [Keep all your existing routes - they remain unchanged]
+# ... (all your existing routes from @app.route('/api/derived-components/<session_id>') onwards)
 
 @app.route('/api/derived-components/<session_id>')
 def get_derived_components_api(session_id):
@@ -633,7 +895,6 @@ def analyze_field_mapping():
             'error': str(e)
         })
 
-    
 @app.route('/api/field-matrix', methods=['GET'])
 def get_field_matrix():
     """Get field matrix data"""
@@ -644,30 +905,6 @@ def get_field_matrix():
     result = analyzer.get_field_matrix(session_id, record_layout, program_name)
     return jsonify(result)
 
-@app.route('/api/chat', methods=['POST'])
-def chat_query():
-    try:
-        data = request.json
-        session_id = data.get('session_id')
-        message = data.get('message')
-        conversation_id = data.get('conversation_id', str(uuid.uuid4()))
-        
-        # Process query - returns string now
-        chat_response = analyzer.chat_manager.process_query(session_id, message, conversation_id)
-        
-        return jsonify({
-            'success': True,
-            'response': chat_response,
-            'content': chat_response
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'response': 'Chat service error'
-        })
-    
 @app.route('/api/record-layouts/<session_id>')
 def get_record_layouts_api(session_id):
     """Get record layouts with friendly names - FIXED VERSION"""
@@ -684,7 +921,6 @@ def get_record_layouts_api(session_id):
         logger.error(f"Error getting record layouts: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
 
-    
 @app.route('/api/field-source-code/<session_id>/<field_name>')
 def get_field_source_code(session_id, field_name):
     """Get source code context for a field"""
@@ -725,6 +961,7 @@ def get_field_source_code(session_id, field_name):
             'error': str(e),
             'source_code': 'Error loading source code'
         })
+
 @app.route('/api/components/<session_id>')
 def get_components(session_id):
     """Fixed component retrieval with proper LLM summary extraction and friendly names"""
@@ -1046,10 +1283,6 @@ def get_layout_summary(session_id, layout_name):
             'error': str(e)
         })
 
-# ====================
-# 6. ADD FIELD DETAILS API FOR MODAL
-# ====================
-
 @app.route('/api/field-details/<session_id>/<field_name>')
 def get_field_details(session_id, field_name):
     """Get complete field details including operations and source code - FIXED VERSION"""
@@ -1152,6 +1385,8 @@ def get_field_details(session_id, field_name):
             'success': False,
             'error': f'Error retrieving field details: {str(e)}'
         })
+
+# Keep all remaining routes...
 
 @app.route('/api/db-health', methods=['GET'])
 def check_database_health():
@@ -1292,11 +1527,11 @@ def update_llm_config():
             'error': str(e) 
         }), 500
 
-# Add to your Flask app
 @app.route('/api/llm-summaries/<session_id>', methods=['GET'])
 def get_llm_summaries(session_id):
+    """Get all LLM summaries for a session"""
     try:
-        summaries = db_manager.get_all_llm_summaries(session_id)
+        summaries = analyzer.db_manager.get_all_llm_summaries(session_id)
         return jsonify({
             'success': True,
             'summaries': summaries,
@@ -1310,8 +1545,9 @@ def get_llm_summaries(session_id):
 
 @app.route('/api/llm-summary/<session_id>/<component_name>', methods=['GET'])
 def get_component_llm_summary(session_id, component_name):
+    """Get LLM summary for specific component"""
     try:
-        summary = db_manager.get_llm_summary(session_id, component_name)
+        summary = analyzer.db_manager.get_llm_summary(session_id, component_name)
         return jsonify({
             'success': True,
             'summary': summary
@@ -1323,4 +1559,14 @@ def get_component_llm_summary(session_id, component_name):
         }), 500
 
 if __name__ == '__main__':
+    print(f"\n{'='*60}")
+    print(f"🚀 Mainframe Analyzer Starting")
+    print(f"📡 Chat System: {analyzer.chat_system_type.upper()}")
+    if analyzer.chat_system_type == "agentic_rag":
+        print(f"🧠 Features: Vector Search, Query Analysis, Smart Context Retrieval")
+    else:
+        print(f"💬 Features: Basic Chat, Field Analysis")
+    print(f"🌐 Server: http://localhost:5000")
+    print(f"{'='*60}\n")
+    
     app.run(host='0.0.0.0', port=5000, debug=True)
