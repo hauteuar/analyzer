@@ -1,462 +1,806 @@
 """
-Advanced RAG Features: Caching, Optimization, and Intelligent Routing
+Complete Agentic RAG Chat Manager with Vector Store and Caching
+Integrates all RAG capabilities with fallback to basic chat manager
 """
 
+import re
+import json
+import logging
+import traceback
 import time
 import hashlib
-from functools import lru_cache
-from typing import Dict, List, Optional, Any
-import threading
-from collections import defaultdict, deque
+import pickle
+from typing import Dict, List, Optional, Any, Tuple
+from datetime import datetime
+from dataclasses import dataclass
+from enum import Enum
+from collections import defaultdict
 
-class IntelligentContextCache:
-    """Smart caching system for frequently accessed contexts"""
-    
-    def __init__(self, max_size: int = 200, ttl_seconds: int = 3600):
-        self.cache = {}
-        self.access_times = {}
-        self.access_counts = defaultdict(int)
-        self.max_size = max_size
-        self.ttl_seconds = ttl_seconds
-        self.lock = threading.RLock()
-        
-    def get(self, cache_key: str) -> Optional[RetrievedContext]:
-        """Get context from cache with LRU and TTL"""
-        with self.lock:
-            if cache_key not in self.cache:
-                return None
-                
-            # Check TTL
-            if time.time() - self.access_times[cache_key] > self.ttl_seconds:
-                self._remove_key(cache_key)
-                return None
-            
-            # Update access
-            self.access_times[cache_key] = time.time()
-            self.access_counts[cache_key] += 1
-            
-            return self.cache[cache_key]
-    
-    def put(self, cache_key: str, context: RetrievedContext):
-        """Store context in cache with intelligent eviction"""
-        with self.lock:
-            # Evict if cache is full
-            if len(self.cache) >= self.max_size:
-                self._evict_least_valuable()
-            
-            self.cache[cache_key] = context
-            self.access_times[cache_key] = time.time()
-            self.access_counts[cache_key] = 1
-    
-    def _evict_least_valuable(self):
-        """Evict least valuable items based on access patterns"""
-        if not self.cache:
-            return
-            
-        # Calculate value scores (access_count / age)
-        current_time = time.time()
-        value_scores = {}
-        
-        for key in self.cache:
-            age = current_time - self.access_times[key]
-            access_count = self.access_counts[key]
-            value_scores[key] = access_count / (age + 1)  # +1 to avoid division by zero
-        
-        # Remove lowest value items
-        sorted_items = sorted(value_scores.items(), key=lambda x: x[1])
-        items_to_remove = max(1, len(self.cache) // 10)  # Remove 10% or at least 1
-        
-        for key, _ in sorted_items[:items_to_remove]:
-            self._remove_key(key)
-    
-    def _remove_key(self, key: str):
-        """Remove key from all data structures"""
-        self.cache.pop(key, None)
-        self.access_times.pop(key, None)
-        self.access_counts.pop(key, None)
-    
-    def get_stats(self) -> Dict:
-        """Get cache statistics"""
-        with self.lock:
-            return {
-                'size': len(self.cache),
-                'max_size': self.max_size,
-                'total_accesses': sum(self.access_counts.values()),
-                'unique_keys': len(self.access_counts),
-                'avg_access_count': sum(self.access_counts.values()) / len(self.access_counts) if self.access_counts else 0
-            }
+# Attempt to import vector search dependencies
+try:
+    import numpy as np
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    VECTOR_SEARCH_AVAILABLE = True
+except ImportError:
+    VECTOR_SEARCH_AVAILABLE = False
+    logging.warning("Vector search libraries not available - falling back to keyword search")
 
-class QueryRouterAgent:
-    """Intelligent agent that routes queries to specialized handlers"""
-    
-    def __init__(self, llm_client, db_manager):
-        self.llm_client = llm_client
-        self.db_manager = db_manager
-        self.specialized_handlers = {}
-        self.query_history = deque(maxlen=100)  # Track recent queries
-        
-    def register_handler(self, query_pattern: str, handler_class):
-        """Register specialized handler for specific query patterns"""
-        self.specialized_handlers[query_pattern] = handler_class
-    
-    def route_query(self, session_id: str, message: str, query_plan: QueryPlan) -> Optional[str]:
-        """Route query to specialized handler if applicable"""
-        
-        try:
-            # Check for specialized routing patterns
-            message_lower = message.lower()
-            
-            # Field calculation queries
-            if any(term in message_lower for term in ['calculate', 'computed', 'derived', 'formula']):
-                if query_plan.query_type == QueryType.FIELD_ANALYSIS:
-                    return self._handle_field_calculation_query(session_id, message, query_plan)
-            
-            # Performance analysis queries
-            elif any(term in message_lower for term in ['performance', 'slow', 'optimize', 'bottleneck']):
-                return self._handle_performance_query(session_id, message, query_plan)
-            
-            # Migration-specific queries
-            elif any(term in message_lower for term in ['migrate', 'convert', 'modernize', 'oracle']):
-                return self._handle_migration_query(session_id, message, query_plan)
-            
-            # Business process queries
-            elif any(term in message_lower for term in ['process', 'workflow', 'business', 'what does']):
-                return self._handle_business_process_query(session_id, message, query_plan)
-            
-            return None  # No specialized routing needed
-            
-        except Exception as e:
-            logger.error(f"Error in query routing: {str(e)}")
-            return None
-    
-    def _handle_field_calculation_query(self, session_id: str, message: str, query_plan: QueryPlan) -> str:
-        """Specialized handler for field calculation queries"""
-        
-        try:
-            # Get field calculation contexts
-            calculation_contexts = []
-            
-            for entity in query_plan.entities:
-                # Get field with arithmetic operations
-                with self.db_manager.get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        SELECT field_name, program_name, field_references_json, 
-                               arithmetic_count, definition_code, business_purpose
-                        FROM field_analysis_details 
-                        WHERE session_id = ? AND field_name LIKE ? AND arithmetic_count > 0
-                        ORDER BY arithmetic_count DESC
-                    ''', (session_id, f'%{entity}%'))
-                    
-                    calc_fields = cursor.fetchall()
-                    
-                    for field_row in calc_fields:
-                        field_data = dict(field_row)
-                        
-                        # Get source code with calculation logic
-                        source_data = self.db_manager.get_component_source_code(
-                            session_id, field_data['program_name'], max_size=100000
-                        )
-                        
-                        if source_data.get('success'):
-                            for comp in source_data['components']:
-                                source_code = comp.get('source_for_chat', '')
-                                
-                                # Extract calculation-specific sections
-                                calc_sections = self._extract_calculation_sections(source_code, entity)
-                                
-                                calculation_contexts.append({
-                                    'field_name': field_data['field_name'],
-                                    'program_name': field_data['program_name'],
-                                    'calculation_sections': calc_sections,
-                                    'arithmetic_count': field_data['arithmetic_count'],
-                                    'definition_code': field_data['definition_code'],
-                                    'business_purpose': field_data['business_purpose']
-                                })
-            
-            # Generate specialized calculation response
-            if calculation_contexts:
-                return self._generate_calculation_response(message, calculation_contexts)
-            else:
-                return None  # Fall back to standard processing
-                
-        except Exception as e:
-            logger.error(f"Error in field calculation handler: {str(e)}")
-            return None
-    
-    def _extract_calculation_sections(self, source_code: str, field_name: str) -> List[str]:
-        """Extract sections of code that show field calculations"""
-        calc_sections = []
-        lines = source_code.split('\n')
-        field_upper = field_name.upper()
-        
-        for i, line in enumerate(lines):
-            line_upper = line.strip().upper()
-            
-            # Look for calculation patterns involving the field
-            if (field_upper in line_upper and 
-                any(calc_word in line_upper for calc_word in ['COMPUTE', 'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE'])):
-                
-                # Get context around calculation
-                start_idx = max(0, i - 2)
-                end_idx = min(len(lines), i + 3)
-                
-                context_block = '\n'.join([
-                    f"{start_idx + j + 1:4d}: {lines[start_idx + j]}"
-                    for j in range(end_idx - start_idx)
-                ])
-                
-                calc_sections.append(context_block)
-        
-        return calc_sections
-    
-    def _generate_calculation_response(self, message: str, calc_contexts: List[Dict]) -> str:
-        """Generate specialized response for calculation queries"""
-        
-        prompt = f"""
-You are a COBOL calculation analysis expert. The user asked: "{message}"
+logger = logging.getLogger(__name__)
 
-Analyze these field calculations and provide a detailed explanation:
+# Query Analysis Classes
+class QueryType(Enum):
+    FIELD_ANALYSIS = "field_analysis"
+    PROGRAM_STRUCTURE = "program_structure"
+    BUSINESS_LOGIC = "business_logic"
+    DATA_FLOW = "data_flow"
+    DEPENDENCIES = "dependencies"
+    CODE_SEARCH = "code_search"
+    GENERAL = "general"
 
-"""
-        
-        for i, ctx in enumerate(calc_contexts, 1):
-            prompt += f"""
-CALCULATION CONTEXT {i}:
-Field: {ctx['field_name']}
-Program: {ctx['program_name']}
-Arithmetic Operations: {ctx['arithmetic_count']}
-Definition: {ctx['definition_code']}
-Business Purpose: {ctx['business_purpose']}
+class RetrievalStrategy(Enum):
+    PRECISE_FIELD = "precise_field"
+    SEMANTIC_CODE = "semantic_code"
+    STRUCTURAL = "structural"
+    DEPENDENCY = "dependency"
+    BUSINESS_CONTEXT = "business_context"
+    VECTOR_SEARCH = "vector_search"
 
-Calculation Code Sections:
-{chr(10).join(ctx['calculation_sections'])}
+@dataclass
+class QueryPlan:
+    query_type: QueryType
+    entities: List[str]
+    retrieval_strategies: List[RetrievalStrategy]
+    context_requirements: Dict[str, Any]
+    confidence: float
 
-"""
-        
-        prompt += """
-Please provide:
-1. Detailed explanation of how the field is calculated
-2. Business logic behind the calculations
-3. Input fields and their sources
-4. Step-by-step calculation process
-5. Any business rules or validations applied
+@dataclass
+class RetrievedContext:
+    source_code: str
+    metadata: Dict[str, Any]
+    relevance_score: float
+    retrieval_method: str
 
-Focus on the mathematical and business logic aspects.
-"""
-        
-        try:
-            response = self.llm_client.call_llm(prompt, max_tokens=1500, temperature=0.1)
-            if response.success:
-                return response.content
-        except Exception as e:
-            logger.error(f"Error generating calculation response: {str(e)}")
-        
-        return None
-
-class ContextQualityAnalyzer:
-    """Analyze and improve the quality of retrieved contexts"""
+class VectorStore:
+    """Vector store for semantic search of COBOL code"""
     
     def __init__(self, db_manager):
         self.db_manager = db_manager
+        self.vectorizer = None
+        self.vectors = None
+        self.documents = []
+        self.metadata = []
+        self.index_built = False
         
-    def analyze_context_quality(self, contexts: List[RetrievedContext], query_plan: QueryPlan) -> Dict:
-        """Analyze the quality of retrieved contexts"""
+        if VECTOR_SEARCH_AVAILABLE:
+            self.vectorizer = TfidfVectorizer(
+                max_features=5000,
+                stop_words='english',
+                ngram_range=(1, 2),
+                max_df=0.8,
+                min_df=2
+            )
+            logger.info("Vector store initialized with TF-IDF")
+        else:
+            logger.warning("Vector store initialized without vector search capabilities")
+    
+    def build_index(self, session_id: str):
+        """Build vector index from all source code in session"""
+        try:
+            logger.info("Building vector index for semantic search...")
+            
+            # Get all components with source code
+            components = self.db_manager.get_session_components(session_id)
+            documents = []
+            metadata = []
+            
+            for comp in components:
+                try:
+                    source_data = self.db_manager.get_component_source_code(
+                        session_id, comp['component_name'], max_size=200000
+                    )
+                    
+                    if source_data.get('success') and source_data.get('components'):
+                        for source_comp in source_data['components']:
+                            source_code = source_comp.get('source_for_chat', '')
+                            if len(source_code) > 100:
+                                processed_code = self._preprocess_cobol_code(source_code)
+                                documents.append(processed_code)
+                                metadata.append({
+                                    'component_name': source_comp.get('component_name'),
+                                    'component_type': source_comp.get('component_type'),
+                                    'source_strategy': source_comp.get('source_strategy'),
+                                    'total_lines': source_comp.get('total_lines', 0),
+                                    'original_source': source_code
+                                })
+                except Exception as e:
+                    logger.error(f"Error processing component {comp['component_name']}: {e}")
+                    continue
+            
+            if documents and VECTOR_SEARCH_AVAILABLE:
+                self.vectors = self.vectorizer.fit_transform(documents)
+                self.documents = documents
+                self.metadata = metadata
+                self.index_built = True
+                logger.info(f"Built vector index with {len(documents)} documents")
+            else:
+                # Fallback to simple keyword indexing
+                self.documents = documents
+                self.metadata = metadata
+                self.index_built = True
+                logger.info(f"Built keyword index with {len(documents)} documents")
+                
+        except Exception as e:
+            logger.error(f"Error building vector index: {str(e)}")
+    
+    def _preprocess_cobol_code(self, source_code: str) -> str:
+        """Preprocess COBOL code for better semantic search"""
+        lines = source_code.split('\n')
+        processed_lines = []
         
-        analysis = {
-            'total_contexts': len(contexts),
-            'avg_relevance': sum(ctx.relevance_score for ctx in contexts) / len(contexts) if contexts else 0,
-            'context_coverage': {},
-            'missing_elements': [],
-            'quality_score': 0.0
-        }
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith('*'):
+                continue
+            
+            line = line.upper()
+            
+            # Normalize COBOL constructs
+            replacements = {
+                'PIC X(': 'TEXT_FIELD ',
+                'PIC 9(': 'NUMERIC_FIELD ',
+                'PIC S9(': 'SIGNED_NUMERIC_FIELD ',
+                'MOVE ': 'ASSIGN ',
+                'COMPUTE ': 'CALCULATE ',
+                'EXEC CICS': 'TRANSACTION ',
+                'CALL ': 'INVOKE ',
+                'PERFORM ': 'EXECUTE ',
+            }
+            
+            for old, new in replacements.items():
+                line = line.replace(old, new)
+            
+            processed_lines.append(line)
+        
+        return ' '.join(processed_lines)
+    
+    def semantic_search(self, query: str, top_k: int = 5, min_similarity: float = 0.1) -> List[Dict]:
+        """Perform semantic search on the code base"""
+        if not self.index_built:
+            return []
         
         try:
-            # Analyze coverage for query requirements
-            requirements = query_plan.context_requirements
+            processed_query = self._preprocess_cobol_code(query)
             
-            # Check if we have enough contexts
-            min_contexts = requirements.get('min_contexts', 1)
-            max_contexts = requirements.get('max_contexts', 5)
-            
-            if len(contexts) < min_contexts:
-                analysis['missing_elements'].append(f"Insufficient contexts: {len(contexts)} < {min_contexts}")
-            
-            # Check relevance threshold
-            min_relevance = requirements.get('min_relevance', 0.3)
-            low_relevance_count = sum(1 for ctx in contexts if ctx.relevance_score < min_relevance)
-            
-            if low_relevance_count > 0:
-                analysis['missing_elements'].append(f"{low_relevance_count} contexts below relevance threshold")
-            
-            # Analyze source code coverage
-            total_source_length = sum(len(ctx.source_code) for ctx in contexts)
-            analysis['context_coverage']['total_source_length'] = total_source_length
-            
-            if total_source_length < 1000:
-                analysis['missing_elements'].append("Limited source code content")
-            
-            # Check for entity coverage
-            entities_covered = set()
-            for ctx in contexts:
-                for entity in query_plan.entities:
-                    if entity.upper() in ctx.source_code.upper():
-                        entities_covered.add(entity)
-            
-            entity_coverage_rate = len(entities_covered) / len(query_plan.entities) if query_plan.entities else 1.0
-            analysis['context_coverage']['entity_coverage_rate'] = entity_coverage_rate
-            
-            if entity_coverage_rate < 0.5:
-                analysis['missing_elements'].append(f"Low entity coverage: {entity_coverage_rate:.1%}")
-            
-            # Calculate overall quality score
-            quality_factors = [
-                min(len(contexts) / max_contexts, 1.0),  # Context count factor
-                analysis['avg_relevance'],  # Relevance factor
-                entity_coverage_rate,  # Entity coverage factor
-                min(total_source_length / 10000, 1.0)  # Source code factor
-            ]
-            
-            analysis['quality_score'] = sum(quality_factors) / len(quality_factors)
-            
+            if VECTOR_SEARCH_AVAILABLE and self.vectors is not None:
+                # Use TF-IDF vector similarity
+                query_vector = self.vectorizer.transform([processed_query])
+                similarities = cosine_similarity(query_vector, self.vectors)[0]
+                top_indices = np.argsort(similarities)[::-1][:top_k]
+                
+                results = []
+                for idx in top_indices:
+                    similarity = similarities[idx]
+                    if similarity >= min_similarity:
+                        results.append({
+                            'similarity': float(similarity),
+                            'metadata': self.metadata[idx],
+                            'document': self.documents[idx],
+                            'source_code': self.metadata[idx]['original_source']
+                        })
+                return results
+            else:
+                # Fallback to keyword matching
+                return self._keyword_search(query, top_k)
+                
         except Exception as e:
-            logger.error(f"Error analyzing context quality: {str(e)}")
-            analysis['error'] = str(e)
+            logger.error(f"Error in semantic search: {str(e)}")
+            return self._keyword_search(query, top_k)
+    
+    def _keyword_search(self, query: str, top_k: int) -> List[Dict]:
+        """Fallback keyword-based search"""
+        keywords = query.upper().split()
+        results = []
         
-        return analysis
+        for i, doc in enumerate(self.documents):
+            score = 0.0
+            doc_upper = doc.upper()
+            
+            for keyword in keywords:
+                if keyword in doc_upper:
+                    score += doc_upper.count(keyword) / len(doc_upper)
+            
+            if score > 0:
+                results.append({
+                    'similarity': score,
+                    'metadata': self.metadata[i],
+                    'document': doc,
+                    'source_code': self.metadata[i]['original_source']
+                })
+        
+        results.sort(key=lambda x: x['similarity'], reverse=True)
+        return results[:top_k]
 
-class AdaptiveResponseGenerator(ResponseGenerator):
-    """Response generator that adapts based on context quality and user feedback"""
+class QueryAnalyzer:
+    """Analyzes user queries to determine retrieval strategy"""
     
     def __init__(self, llm_client):
-        super().__init__(llm_client)
-        self.response_patterns = {}
-        self.user_feedback = {}
+        self.llm_client = llm_client
         
+        # Field name extraction patterns
+        self.field_patterns = [
+            r'\b([A-Z][A-Z0-9\-]{2,20})\b',
+            r'field\s+([A-Za-z][A-Za-z0-9\-_]{2,})',
+            r'about\s+([A-Z][A-Z0-9\-_]{2,})',
+            r'([A-Z][A-Z0-9\-_]{3,})\s+field',
+            r'tell\s+me\s+about\s+([A-Z][A-Z0-9\-_]{2,})',
+            r'what\s+is\s+([A-Z][A-Z0-9\-_]{2,})',
+            r'how\s+is\s+([A-Z][A-Z0-9\-_]{2,})',
+            r'show\s+([A-Z][A-Z0-9\-_]{2,})'
+        ]
+        
+        self.cobol_keywords = {
+            'MOVE', 'TO', 'FROM', 'PIC', 'PICTURE', 'VALUE', 'OCCURS',
+            'USAGE', 'COMP', 'BINARY', 'DISPLAY', 'COMPUTE', 'ADD',
+            'SUBTRACT', 'MULTIPLY', 'DIVIDE', 'IF', 'THEN', 'ELSE',
+            'PERFORM', 'UNTIL', 'VARYING', 'WHEN', 'EVALUATE'
+        }
+    
+    def analyze_query(self, message: str, session_id: str) -> QueryPlan:
+        """Analyze user query and determine retrieval strategy"""
+        entities = self._extract_entities(message)
+        query_type = self._classify_query_type(message, entities)
+        retrieval_strategies = self._determine_retrieval_strategies(query_type, message, entities)
+        context_requirements = self._determine_context_requirements(query_type, message, entities)
+        confidence = self._calculate_confidence(query_type, entities, message)
+        
+        return QueryPlan(
+            query_type=query_type,
+            entities=entities,
+            retrieval_strategies=retrieval_strategies,
+            context_requirements=context_requirements,
+            confidence=confidence
+        )
+    
+    def _extract_entities(self, message: str) -> List[str]:
+        """Extract COBOL entities from message"""
+        entities = set()
+        
+        for pattern in self.field_patterns:
+            matches = re.findall(pattern, message, re.IGNORECASE)
+            for match in matches:
+                clean_name = match.upper().replace('_', '-')
+                if self._is_likely_cobol_entity(clean_name):
+                    entities.add(clean_name)
+        
+        return list(entities)
+    
+    def _is_likely_cobol_entity(self, name: str) -> bool:
+        """Determine if a name is likely a COBOL entity"""
+        if len(name) < 3 or len(name) > 30:
+            return False
+        
+        english_words = {'THE', 'AND', 'FOR', 'WITH', 'FROM', 'WHAT', 'WHERE', 'HOW', 'WHEN'}
+        if name in english_words or name in self.cobol_keywords:
+            return False
+        
+        return (
+            '-' in name or
+            len(name) >= 6 or
+            re.match(r'^[A-Z]{2,}[0-9]', name) or
+            any(pattern in name for pattern in ['CUST', 'ACCT', 'TXN', 'BAL', 'FEE'])
+        )
+    
+    def _classify_query_type(self, message: str, entities: List[str]) -> QueryType:
+        """Classify the type of query"""
+        message_lower = message.lower()
+        
+        if any(pattern in message_lower for pattern in [
+            'field', 'what is', 'tell me about', 'how is', 'where is', 'show me'
+        ]) and entities:
+            return QueryType.FIELD_ANALYSIS
+        elif any(pattern in message_lower for pattern in [
+            'program structure', 'layout', 'record', 'data structure', 'working storage'
+        ]):
+            return QueryType.PROGRAM_STRUCTURE
+        elif any(pattern in message_lower for pattern in [
+            'business logic', 'calculation', 'compute', 'rule', 'process', 'workflow'
+        ]):
+            return QueryType.BUSINESS_LOGIC
+        elif any(pattern in message_lower for pattern in [
+            'data flow', 'move', 'copy', 'transfer', 'populate', 'source', 'target'
+        ]):
+            return QueryType.DATA_FLOW
+        elif any(pattern in message_lower for pattern in [
+            'call', 'calls', 'depend', 'link', 'relationship', 'connect'
+        ]):
+            return QueryType.DEPENDENCIES
+        elif any(pattern in message_lower for pattern in [
+            'find', 'search', 'locate', 'contains', 'uses'
+        ]):
+            return QueryType.CODE_SEARCH
+        else:
+            return QueryType.GENERAL
+    
+    def _determine_retrieval_strategies(self, query_type: QueryType, message: str, entities: List[str]) -> List[RetrievalStrategy]:
+        """Determine which retrieval strategies to use"""
+        strategies = []
+        
+        if query_type == QueryType.FIELD_ANALYSIS:
+            strategies = [RetrievalStrategy.PRECISE_FIELD, RetrievalStrategy.SEMANTIC_CODE]
+        elif query_type == QueryType.PROGRAM_STRUCTURE:
+            strategies = [RetrievalStrategy.STRUCTURAL, RetrievalStrategy.SEMANTIC_CODE]
+        elif query_type == QueryType.BUSINESS_LOGIC:
+            strategies = [RetrievalStrategy.SEMANTIC_CODE, RetrievalStrategy.BUSINESS_CONTEXT]
+        elif query_type == QueryType.DATA_FLOW:
+            strategies = [RetrievalStrategy.SEMANTIC_CODE, RetrievalStrategy.DEPENDENCY]
+        elif query_type == QueryType.DEPENDENCIES:
+            strategies = [RetrievalStrategy.DEPENDENCY, RetrievalStrategy.STRUCTURAL]
+        elif query_type == QueryType.CODE_SEARCH:
+            strategies = [RetrievalStrategy.VECTOR_SEARCH, RetrievalStrategy.SEMANTIC_CODE]
+        else:  # GENERAL
+            strategies = [RetrievalStrategy.BUSINESS_CONTEXT, RetrievalStrategy.STRUCTURAL]
+        
+        # Always add vector search if available and relevant
+        if VECTOR_SEARCH_AVAILABLE and RetrievalStrategy.VECTOR_SEARCH not in strategies:
+            if any(word in message.lower() for word in ['find', 'search', 'how', 'calculate']):
+                strategies.insert(0, RetrievalStrategy.VECTOR_SEARCH)
+        
+        return strategies
+    
+    def _determine_context_requirements(self, query_type: QueryType, message: str, entities: List[str]) -> Dict[str, Any]:
+        """Determine what context is needed"""
+        requirements = {
+            'source_code_needed': True,
+            'metadata_needed': True,
+            'max_contexts': 3,
+            'min_relevance': 0.3
+        }
+        
+        if query_type == QueryType.FIELD_ANALYSIS:
+            requirements.update({
+                'field_definitions_needed': True,
+                'field_usage_needed': True,
+                'max_contexts': 2,
+                'min_relevance': 0.5
+            })
+        elif query_type == QueryType.PROGRAM_STRUCTURE:
+            requirements.update({
+                'record_layouts_needed': True,
+                'divisions_needed': True,
+                'max_contexts': 3,
+                'min_relevance': 0.4
+            })
+        elif query_type == QueryType.BUSINESS_LOGIC:
+            requirements.update({
+                'procedure_division_needed': True,
+                'calculations_needed': True,
+                'max_contexts': 4,
+                'min_relevance': 0.3
+            })
+        
+        return requirements
+    
+    def _calculate_confidence(self, query_type: QueryType, entities: List[str], message: str) -> float:
+        """Calculate confidence in the query analysis"""
+        confidence = 0.5
+        
+        if entities:
+            confidence += 0.2 * min(len(entities), 3)
+        
+        if query_type != QueryType.GENERAL:
+            confidence += 0.2
+        
+        if len(message.split()) > 5:
+            confidence += 0.1
+            
+        return min(confidence, 1.0)
+
+class ContextRetriever:
+    """Retrieves relevant context based on query plan"""
+    
+    def __init__(self, db_manager, vector_store=None):
+        self.db_manager = db_manager
+        self.vector_store = vector_store
+    
+    def retrieve_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
+        """Execute retrieval strategies to gather context"""
+        all_contexts = []
+        
+        for strategy in query_plan.retrieval_strategies:
+            try:
+                contexts = self._execute_strategy(session_id, strategy, query_plan)
+                all_contexts.extend(contexts)
+            except Exception as e:
+                logger.error(f"Error executing strategy {strategy}: {str(e)}")
+                continue
+        
+        # Deduplicate and rank contexts
+        unique_contexts = self._deduplicate_contexts(all_contexts)
+        ranked_contexts = self._rank_contexts(unique_contexts, query_plan)
+        
+        max_contexts = query_plan.context_requirements.get('max_contexts', 3)
+        min_relevance = query_plan.context_requirements.get('min_relevance', 0.3)
+        
+        filtered_contexts = [
+            ctx for ctx in ranked_contexts 
+            if ctx.relevance_score >= min_relevance
+        ][:max_contexts]
+        
+        return filtered_contexts
+    
+    def _execute_strategy(self, session_id: str, strategy: RetrievalStrategy, query_plan: QueryPlan) -> List[RetrievedContext]:
+        """Execute a specific retrieval strategy"""
+        contexts = []
+        
+        if strategy == RetrievalStrategy.PRECISE_FIELD:
+            contexts = self._retrieve_field_contexts(session_id, query_plan.entities)
+        elif strategy == RetrievalStrategy.SEMANTIC_CODE:
+            contexts = self._retrieve_semantic_code_contexts(session_id, query_plan)
+        elif strategy == RetrievalStrategy.STRUCTURAL:
+            contexts = self._retrieve_structural_contexts(session_id, query_plan)
+        elif strategy == RetrievalStrategy.DEPENDENCY:
+            contexts = self._retrieve_dependency_contexts(session_id, query_plan.entities)
+        elif strategy == RetrievalStrategy.BUSINESS_CONTEXT:
+            contexts = self._retrieve_business_contexts(session_id, query_plan)
+        elif strategy == RetrievalStrategy.VECTOR_SEARCH:
+            contexts = self._retrieve_vector_contexts(session_id, query_plan)
+        
+        return contexts
+    
+    def _retrieve_vector_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
+        """Use vector store for semantic search"""
+        contexts = []
+        
+        if not self.vector_store or not self.vector_store.index_built:
+            return contexts
+        
+        try:
+            # Build search query from entities and query type
+            search_terms = list(query_plan.entities)
+            
+            type_terms = {
+                QueryType.FIELD_ANALYSIS: ['field', 'picture', 'definition', 'data'],
+                QueryType.BUSINESS_LOGIC: ['compute', 'calculate', 'if', 'logic', 'rule'],
+                QueryType.DATA_FLOW: ['move', 'copy', 'transfer', 'read', 'write'],
+                QueryType.DEPENDENCIES: ['call', 'invoke', 'link', 'program'],
+                QueryType.PROGRAM_STRUCTURE: ['section', 'division', 'layout', 'structure']
+            }
+            
+            search_terms.extend(type_terms.get(query_plan.query_type, []))
+            search_query = ' '.join(search_terms)
+            
+            results = self.vector_store.semantic_search(search_query, top_k=5, min_similarity=0.15)
+            
+            for result in results:
+                contexts.append(RetrievedContext(
+                    source_code=result['source_code'],
+                    metadata=result['metadata'],
+                    relevance_score=result['similarity'],
+                    retrieval_method="vector_search"
+                ))
+        
+        except Exception as e:
+            logger.error(f"Error in vector search: {str(e)}")
+        
+        return contexts
+    
+    def _retrieve_field_contexts(self, session_id: str, entities: List[str]) -> List[RetrievedContext]:
+        """Retrieve contexts for specific fields"""
+        contexts = []
+        
+        for entity in entities:
+            try:
+                field_context = self.db_manager.get_context_for_field(session_id, entity)
+                field_details = field_context.get('field_details', [])
+                
+                if field_details:
+                    program_name = field_details[0].get('program_name')
+                    if program_name:
+                        source_data = self.db_manager.get_component_source_code(
+                            session_id, program_name, max_size=150000
+                        )
+                        
+                        if source_data.get('success') and source_data.get('components'):
+                            for comp in source_data['components']:
+                                source_code = comp.get('source_for_chat', '')
+                                if entity.upper() in source_code.upper():
+                                    contexts.append(RetrievedContext(
+                                        source_code=source_code,
+                                        metadata={
+                                            'component_name': comp.get('component_name'),
+                                            'component_type': comp.get('component_type'),
+                                            'field_name': entity,
+                                            'field_details': field_details[0],
+                                            'source_strategy': comp.get('source_strategy')
+                                        },
+                                        relevance_score=0.9,
+                                        retrieval_method=f"precise_field_{entity}"
+                                    ))
+            except Exception as e:
+                logger.error(f"Error retrieving field context for {entity}: {str(e)}")
+                continue
+        
+        return contexts
+    
+    def _retrieve_semantic_code_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
+        """Retrieve code contexts using semantic search"""
+        contexts = []
+        
+        try:
+            components = self.db_manager.get_session_components(session_id)
+            
+            for comp in components[:5]:
+                source_data = self.db_manager.get_component_source_code(
+                    session_id, comp.get('component_name'), max_size=100000
+                )
+                
+                if source_data.get('success') and source_data.get('components'):
+                    for source_comp in source_data['components']:
+                        source_code = source_comp.get('source_for_chat', '')
+                        if source_code:
+                            relevance = self._calculate_semantic_relevance(
+                                source_code, query_plan.entities, query_plan.query_type
+                            )
+                            
+                            if relevance > 0.3:
+                                contexts.append(RetrievedContext(
+                                    source_code=source_code,
+                                    metadata={
+                                        'component_name': source_comp.get('component_name'),
+                                        'component_type': source_comp.get('component_type'),
+                                        'total_lines': source_comp.get('total_lines', 0),
+                                        'source_strategy': source_comp.get('source_strategy')
+                                    },
+                                    relevance_score=relevance,
+                                    retrieval_method="semantic_code"
+                                ))
+        except Exception as e:
+            logger.error(f"Error in semantic code retrieval: {str(e)}")
+        
+        return contexts
+    
+    def _retrieve_structural_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
+        """Retrieve structural information (layouts, divisions, etc.)"""
+        contexts = []
+        
+        try:
+            layouts = self.db_manager.get_record_layouts(session_id)
+            
+            for layout in layouts[:3]:
+                program_name = layout.get('program_name')
+                if program_name:
+                    source_data = self.db_manager.get_component_source_code(
+                        session_id, program_name, max_size=80000
+                    )
+                    
+                    if source_data.get('success') and source_data.get('components'):
+                        for comp in source_data['components']:
+                            contexts.append(RetrievedContext(
+                                source_code=comp.get('source_for_chat', ''),
+                                metadata={
+                                    'component_name': comp.get('component_name'),
+                                    'component_type': comp.get('component_type'),
+                                    'layout_name': layout.get('layout_name'),
+                                    'layout_fields': layout.get('fields_count', 0),
+                                    'business_purpose': layout.get('business_purpose')
+                                },
+                                relevance_score=0.6,
+                                retrieval_method="structural"
+                            ))
+                            
+        except Exception as e:
+            logger.error(f"Error in structural retrieval: {str(e)}")
+        
+        return contexts
+    
+    def _retrieve_dependency_contexts(self, session_id: str, entities: List[str]) -> List[RetrievedContext]:
+        """Retrieve dependency-related contexts"""
+        contexts = []
+        
+        try:
+            dependencies = self.db_manager.get_dependencies(session_id)
+            
+            relevant_deps = []
+            for entity in entities:
+                relevant_deps.extend([
+                    dep for dep in dependencies 
+                    if entity.upper() in dep.get('source_component', '').upper() or 
+                       entity.upper() in dep.get('target_component', '').upper()
+                ])
+            
+            involved_programs = set()
+            for dep in relevant_deps[:5]:
+                involved_programs.add(dep.get('source_component'))
+                involved_programs.add(dep.get('target_component'))
+            
+            for program in list(involved_programs)[:3]:
+                source_data = self.db_manager.get_component_source_code(
+                    session_id, program, max_size=60000
+                )
+                
+                if source_data.get('success') and source_data.get('components'):
+                    for comp in source_data['components']:
+                        contexts.append(RetrievedContext(
+                            source_code=comp.get('source_for_chat', ''),
+                            metadata={
+                                'component_name': comp.get('component_name'),
+                                'component_type': comp.get('component_type'),
+                                'dependencies': relevant_deps
+                            },
+                            relevance_score=0.7,
+                            retrieval_method="dependency"
+                        ))
+                        
+        except Exception as e:
+            logger.error(f"Error in dependency retrieval: {str(e)}")
+        
+        return contexts
+    
+    def _retrieve_business_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
+        """Retrieve business context information"""
+        contexts = []
+        
+        try:
+            components = self.db_manager.get_session_components(session_id)
+            business_components = [
+                comp for comp in components 
+                if comp.get('business_purpose') and len(comp.get('business_purpose', '')) > 20
+            ][:3]
+            
+            for comp in business_components:
+                source_data = self.db_manager.get_component_source_code(
+                    session_id, comp.get('component_name'), max_size=70000
+                )
+                
+                if source_data.get('success') and source_data.get('components'):
+                    for source_comp in source_data['components']:
+                        contexts.append(RetrievedContext(
+                            source_code=source_comp.get('source_for_chat', ''),
+                            metadata={
+                                'component_name': source_comp.get('component_name'),
+                                'component_type': source_comp.get('component_type'),
+                                'business_purpose': comp.get('business_purpose')
+                            },
+                            relevance_score=0.5,
+                            retrieval_method="business_context"
+                        ))
+                        
+        except Exception as e:
+            logger.error(f"Error in business context retrieval: {str(e)}")
+        
+        return contexts
+    
+    def _calculate_semantic_relevance(self, source_code: str, entities: List[str], query_type: QueryType) -> float:
+        """Calculate semantic relevance of source code to query"""
+        relevance = 0.0
+        source_upper = source_code.upper()
+        
+        for entity in entities:
+            if entity.upper() in source_upper:
+                relevance += 0.3
+        
+        if query_type == QueryType.FIELD_ANALYSIS:
+            if any(pattern in source_upper for pattern in ['PIC ', 'MOVE ', 'COMPUTE ']):
+                relevance += 0.2
+        elif query_type == QueryType.BUSINESS_LOGIC:
+            if any(pattern in source_upper for pattern in ['IF ', 'EVALUATE ', 'PERFORM ']):
+                relevance += 0.2
+        elif query_type == QueryType.DATA_FLOW:
+            if any(pattern in source_upper for pattern in ['MOVE ', 'READ ', 'WRITE ']):
+                relevance += 0.2
+        elif query_type == QueryType.DEPENDENCIES:
+            if any(pattern in source_upper for pattern in ['CALL ', 'EXEC CICS']):
+                relevance += 0.2
+        
+        return min(relevance, 1.0)
+    
+    def _deduplicate_contexts(self, contexts: List[RetrievedContext]) -> List[RetrievedContext]:
+        """Remove duplicate contexts"""
+        seen_sources = set()
+        unique_contexts = []
+        
+        for context in contexts:
+            source_hash = hash(context.source_code[:1000])
+            if source_hash not in seen_sources:
+                seen_sources.add(source_hash)
+                unique_contexts.append(context)
+        
+        return unique_contexts
+    
+    def _rank_contexts(self, contexts: List[RetrievedContext], query_plan: QueryPlan) -> List[RetrievedContext]:
+        """Rank contexts by relevance"""
+        return sorted(contexts, key=lambda x: x.relevance_score, reverse=True)
+
+class ResponseGenerator:
+    """Generates responses using retrieved context"""
+    
+    def __init__(self, llm_client):
+        self.llm_client = llm_client
+    
     def generate_response(self, message: str, query_plan: QueryPlan, contexts: List[RetrievedContext]) -> str:
-        """Generate adaptive response based on context quality"""
+        """Generate response using query plan and retrieved contexts"""
         
-        # Analyze context quality
-        quality_analyzer = ContextQualityAnalyzer(None)
-        quality_analysis = quality_analyzer.analyze_context_quality(contexts, query_plan)
+        if not contexts:
+            return self._generate_fallback_response(message, query_plan)
         
-        # Adapt response strategy based on quality
-        if quality_analysis['quality_score'] < 0.4:
-            return self._generate_low_quality_response(message, query_plan, contexts, quality_analysis)
-        elif quality_analysis['quality_score'] > 0.8:
-            return self._generate_high_quality_response(message, query_plan, contexts)
-        else:
-            return self._generate_standard_response(message, query_plan, contexts)
-    
-    def _generate_low_quality_response(self, message: str, query_plan: QueryPlan, 
-                                     contexts: List[RetrievedContext], quality_analysis: Dict) -> str:
-        """Generate response when context quality is low"""
+        # Build context-aware prompt
+        prompt = self._build_context_prompt(message, query_plan, contexts)
         
-        missing_elements = quality_analysis.get('missing_elements', [])
-        
-        if contexts:
-            # Try to answer with available context but acknowledge limitations
-            response = super().generate_response(message, query_plan, contexts)
-            
-            # Add quality disclaimer
-            response += f"\n\n**Note**: This analysis is based on limited context. "
-            response += f"Missing elements: {', '.join(missing_elements)}"
-            response += f"\n\nFor a more complete analysis, consider:"
-            response += f"\n• Uploading additional related COBOL files"
-            response += f"\n• Providing more specific field or program names"
-            response += f"\n• Asking about components that have been fully analyzed"
-            
-            return response
-        else:
-            return self._generate_no_context_response(message, query_plan)
-    
-    def _generate_high_quality_response(self, message: str, query_plan: QueryPlan, contexts: List[RetrievedContext]) -> str:
-        """Generate comprehensive response when context quality is high"""
-        
-        # Build enhanced prompt with more detailed instructions
-        prompt = self._build_comprehensive_prompt(message, query_plan, contexts)
-        
-        # Use higher token limit for detailed response
-        max_tokens = 2500
-        temperature = 0.1 if query_plan.query_type == QueryType.FIELD_ANALYSIS else 0.2
+        # Call LLM with appropriate parameters
+        max_tokens, temperature = self._get_generation_parameters(query_plan.query_type)
         
         response = self.llm_client.call_llm(prompt, max_tokens=max_tokens, temperature=temperature)
         
         if response.success:
-            # Add confidence indicator for high-quality responses
-            result = response.content
-            result += f"\n\n**High Confidence Analysis** based on {len(contexts)} comprehensive code contexts"
-            return result
+            return self._post_process_response(response.content, query_plan, contexts)
         else:
-            return super().generate_response(message, query_plan, contexts)
+            return f"I encountered an error generating the response: {response.error_message}"
     
-    def _build_comprehensive_prompt(self, message: str, query_plan: QueryPlan, contexts: List[RetrievedContext]) -> str:
-        """Build comprehensive prompt for high-quality responses"""
+    def _build_context_prompt(self, message: str, query_plan: QueryPlan, contexts: List[RetrievedContext]) -> str:
+        """Build a context-aware prompt for the LLM"""
         
         prompt_parts = [
-            "You are a senior COBOL architect and business analyst for a wealth management system.",
-            "The user has a detailed question and you have comprehensive source code context.",
+            "You are an expert COBOL analyst for a wealth management system.",
+            f"Query Type: {query_plan.query_type.value}",
+            f"Confidence: {query_plan.confidence:.2f}",
+            f"Entities: {', '.join(query_plan.entities) if query_plan.entities else 'None'}",
             "",
             f"USER QUESTION: {message}",
-            f"QUERY TYPE: {query_plan.query_type.value}",
-            f"ENTITIES: {', '.join(query_plan.entities)}",
-            f"CONFIDENCE: {query_plan.confidence:.1%}",
             ""
         ]
         
-        # Add detailed analysis instructions based on query type
+        # Add context-specific instructions
         if query_plan.query_type == QueryType.FIELD_ANALYSIS:
             prompt_parts.extend([
-                "ANALYSIS REQUIREMENTS:",
-                "1. Field Definition Analysis:",
-                "   - Exact PIC clause and storage requirements",
-                "   - Data type and length implications",
-                "   - Business meaning and purpose",
-                "",
-                "2. Usage Pattern Analysis:",
-                "   - How the field receives data (input sources)",
-                "   - How the field provides data (output targets)",
-                "   - Calculation logic if applicable",
-                "   - Business rules and validations",
-                "",
-                "3. Context Analysis:",
-                "   - Position in record layout",
-                "   - Relationship to other fields",
-                "   - Integration points with other systems",
-                "",
-                "4. Migration Implications:",
-                "   - Oracle data type mapping",
-                "   - Potential data conversion issues",
-                "   - Business logic preservation requirements",
+                "INSTRUCTIONS:",
+                "- Analyze the specific field(s) mentioned in the user's question",
+                "- Explain the field's definition, usage, and business purpose",
+                "- Reference specific line numbers from the source code",
+                "- Describe how the field fits into the business process",
+                ""
+            ])
+        elif query_plan.query_type == QueryType.BUSINESS_LOGIC:
+            prompt_parts.extend([
+                "INSTRUCTIONS:",
+                "- Focus on the business rules and logic in the code",
+                "- Explain the decision-making processes and calculations",
+                "- Describe the business impact and purpose",
+                ""
+            ])
+        elif query_plan.query_type == QueryType.DATA_FLOW:
+            prompt_parts.extend([
+                "INSTRUCTIONS:",
+                "- Trace how data moves through the system",
+                "- Identify input sources and output destinations",
+                "- Explain data transformations and processing",
                 ""
             ])
         
-        # Add all available source code contexts
-        prompt_parts.append("COMPREHENSIVE SOURCE CODE CONTEXTS:")
+        # Add retrieved contexts
+        prompt_parts.append("RELEVANT SOURCE CODE CONTEXTS:")
         prompt_parts.append("")
         
         for i, context in enumerate(contexts, 1):
             metadata = context.metadata
             prompt_parts.extend([
-                f"=== SOURCE CONTEXT {i} (Relevance: {context.relevance_score:.2f}) ===",
-                f"Component: {metadata.get('component_name')} ({metadata.get('component_type')})",
-                f"Lines: {metadata.get('total_lines', 0)}",
-                f"Retrieval Method: {context.retrieval_method}",
+                f"=== CONTEXT {i} ===",
+                f"Component: {metadata.get('component_name', 'Unknown')}",
+                f"Relevance: {context.relevance_score:.2f}",
+                f"Method: {context.retrieval_method}",
+                f"Strategy: {metadata.get('source_strategy', 'unknown')}",
                 ""
             ])
             
-            if metadata.get('field_details'):
-                field_details = metadata['field_details']
-                prompt_parts.extend([
-                    "FIELD DETAILS:",
-                    f"  Definition: {field_details.get('definition_code', 'N/A')}",
-                    f"  Usage Type: {field_details.get('usage_type', 'N/A')}",
-                    f"  References: {field_details.get('total_program_references', 0)}",
-                    ""
-                ])
+            # Add metadata-specific info
+            if 'field_name' in metadata:
+                prompt_parts.append(f"Field: {metadata['field_name']}")
+            if 'business_purpose' in metadata:
+                prompt_parts.append(f"Business Purpose: {metadata['business_purpose']}")
             
             prompt_parts.extend([
-                "FULL SOURCE CODE:",
+                "",
+                "SOURCE CODE:",
                 context.source_code,
                 "",
                 "=" * 80,
@@ -465,360 +809,478 @@ class AdaptiveResponseGenerator(ResponseGenerator):
         
         prompt_parts.extend([
             "",
-            "INSTRUCTIONS:",
-            "- Provide a comprehensive, detailed analysis using ALL available source code",
-            "- Reference specific line numbers and code examples",
-            "- Explain business impact and technical implications",
-            "- Include concrete code snippets that demonstrate your points",
-            "- Structure your response with clear sections",
-            "- Focus on actionable insights for modernization efforts"
+            "Generate a comprehensive, accurate response that directly answers the user's question.",
+            "Use specific code references and line numbers when possible.",
+            "Focus on business meaning and practical implications.",
+            "If the context is insufficient, clearly state what information is missing."
         ])
         
         return '\n'.join(prompt_parts)
     
-    def _generate_no_context_response(self, message: str, query_plan: QueryPlan) -> str:
-        """Generate helpful response when no context is available"""
+    def _get_generation_parameters(self, query_type: QueryType) -> Tuple[int, float]:
+        """Get appropriate generation parameters for query type"""
+        if query_type == QueryType.FIELD_ANALYSIS:
+            return 1200, 0.1  # Detailed, factual
+        elif query_type == QueryType.BUSINESS_LOGIC:
+            return 1500, 0.2  # Explanatory
+        elif query_type == QueryType.DEPENDENCIES:
+            return 1000, 0.1  # Structured
+        else:
+            return 1200, 0.3  # More creative for general queries
+    
+    def _post_process_response(self, response: str, query_plan: QueryPlan, contexts: List[RetrievedContext]) -> str:
+        """Post-process the generated response"""
         
-        entity_hint = ""
-        if query_plan.entities:
-            entity_hint = f" for '{', '.join(query_plan.entities)}'"
+        # Add confidence indicator if low
+        if query_plan.confidence < 0.6:
+            response += f"\n\n*Note: This analysis is based on limited context (confidence: {query_plan.confidence:.0%}). " \
+                       f"Consider providing more specific information for a more detailed analysis.*"
         
+        # Add context summary
+        if contexts:
+            response += f"\n\n**Analysis based on {len(contexts)} code context(s)**"
+        
+        return response
+    
+    def _generate_fallback_response(self, message: str, query_plan: QueryPlan) -> str:
+        """Generate fallback response when no contexts are found"""
         return (
-            f"I couldn't find specific code context{entity_hint} to answer your question.\n\n"
+            f"I couldn't find specific code contexts to answer your question about: {message}\n\n"
             f"This might be because:\n"
-            f"• The mentioned components haven't been analyzed yet\n"
-            f"• The field/program names might be slightly different\n"
-            f"• More COBOL files need to be uploaded\n\n"
-            f"Suggestions:\n"
-            f"• Try asking 'What components are available?'\n"
-            f"• Upload more related COBOL files\n"
-            f"• Be more specific with exact field/program names\n"
-            f"• Ask about general program structure first"
+            f"- The mentioned fields/programs haven't been analyzed yet\n"
+            f"- The code doesn't contain the specific elements you're asking about\n"
+            f"- More context is needed to understand your question\n\n"
+            f"Try:\n"
+            f"- Uploading more COBOL files for analysis\n"
+            f"- Being more specific about field names or program names\n"
+            f"- Asking about general program structure or available components"
         )
 
-class SmartContextPrioritizer:
-    """Prioritize contexts based on user intent and historical patterns"""
+class AgenticRAGChatManager:
+    """Main Agentic RAG Chat Manager with all advanced features"""
     
-    def __init__(self, db_manager):
+    def __init__(self, llm_client, db_manager, fallback_chat_manager=None):
+        self.llm_client = llm_client
         self.db_manager = db_manager
-        self.priority_weights = {
-            'recency': 0.2,
-            'relevance': 0.4,
-            'completeness': 0.2,
-            'user_preference': 0.2
-        }
-    
-    def prioritize_contexts(self, contexts: List[RetrievedContext], 
-                          query_plan: QueryPlan, session_history: List[Dict]) -> List[RetrievedContext]:
-        """Intelligently prioritize contexts based on multiple factors"""
+        self.fallback_chat_manager = fallback_chat_manager
         
-        scored_contexts = []
-        
-        for context in contexts:
-            score = self._calculate_priority_score(context, query_plan, session_history)
-            scored_contexts.append((score, context))
-        
-        # Sort by score and return contexts
-        scored_contexts.sort(key=lambda x: x[0], reverse=True)
-        return [context for score, context in scored_contexts]
-    
-    def _calculate_priority_score(self, context: RetrievedContext, 
-                                query_plan: QueryPlan, session_history: List[Dict]) -> float:
-        """Calculate priority score for a context"""
-        
-        score = 0.0
-        
-        # Base relevance score
-        score += context.relevance_score * self.priority_weights['relevance']
-        
-        # Completeness score (more complete source code is better)
-        source_length = len(context.source_code)
-        completeness = min(source_length / 10000, 1.0)  # Normalize to 10KB
-        score += completeness * self.priority_weights['completeness']
-        
-        # User preference (favor components user has asked about before)
-        component_name = context.metadata.get('component_name', '')
-        historical_interest = self._get_historical_interest(component_name, session_history)
-        score += historical_interest * self.priority_weights['user_preference']
-        
-        # Recency (favor recently accessed contexts)
-        recency = self._get_recency_score(context, session_history)
-        score += recency * self.priority_weights['recency']
-        
-        return score
-    
-    def _get_historical_interest(self, component_name: str, session_history: List[Dict]) -> float:
-        """Calculate historical user interest in a component"""
-        if not component_name or not session_history:
-            return 0.0
-        
-        mentions = sum(1 for chat in session_history 
-                      if component_name.lower() in chat.get('message', '').lower())
-        
-        return min(mentions / 10, 1.0)  # Normalize to max 10 mentions
-    
-    def _get_recency_score(self, context: RetrievedContext, session_history: List[Dict]) -> float:
-        """Calculate recency score based on last access"""
-        # Implementation depends on how you track context access
-        return 0.5  # Default neutral score
-
-class RAGSystemAnalytics:
-    """Analytics and monitoring for the RAG system"""
-    
-    def __init__(self, db_manager):
-        self.db_manager = db_manager
-        
-    def generate_session_analytics(self, session_id: str) -> Dict:
-        """Generate comprehensive analytics for a session"""
-        
-        analytics = {
-            'session_overview': {},
-            'query_patterns': {},
-            'context_effectiveness': {},
-            'user_satisfaction': {},
-            'optimization_suggestions': []
-        }
-        
-        try:
-            with self.db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                
-                # Session overview
-                cursor.execute('''
-                    SELECT COUNT(*) as total_queries, 
-                           AVG(processing_time_ms) as avg_processing_time,
-                           AVG(confidence_score) as avg_confidence,
-                           AVG(contexts_retrieved) as avg_contexts
-                    FROM rag_query_metrics 
-                    WHERE session_id = ?
-                ''', (session_id,))
-                
-                overview = cursor.fetchone()
-                if overview:
-                    analytics['session_overview'] = dict(overview)
-                
-                # Query type distribution
-                cursor.execute('''
-                    SELECT query_type, COUNT(*) as count
-                    FROM rag_query_metrics 
-                    WHERE session_id = ?
-                    GROUP BY query_type
-                    ORDER BY count DESC
-                ''', (session_id,))
-                
-                analytics['query_patterns']['type_distribution'] = dict(cursor.fetchall())
-                
-                # Context effectiveness
-                cursor.execute('''
-                    SELECT retrieval_methods, AVG(confidence_score) as effectiveness
-                    FROM rag_query_metrics 
-                    WHERE session_id = ? AND retrieval_methods IS NOT NULL
-                    GROUP BY retrieval_methods
-                ''', (session_id,))
-                
-                analytics['context_effectiveness'] = dict(cursor.fetchall())
-                
-                # Generate optimization suggestions
-                analytics['optimization_suggestions'] = self._generate_optimization_suggestions(analytics)
-                
-        except Exception as e:
-            logger.error(f"Error generating session analytics: {str(e)}")
-            analytics['error'] = str(e)
-        
-        return analytics
-    
-    def _generate_optimization_suggestions(self, analytics: Dict) -> List[str]:
-        """Generate optimization suggestions based on analytics"""
-        suggestions = []
-        
-        overview = analytics.get('session_overview', {})
-        query_patterns = analytics.get('query_patterns', {})
-        
-        # Processing time suggestions
-        avg_time = overview.get('avg_processing_time', 0)
-        if avg_time > 5000:  # > 5 seconds
-            suggestions.append("Consider reducing context size or enabling caching for faster responses")
-        
-        # Confidence suggestions
-        avg_confidence = overview.get('avg_confidence', 0)
-        if avg_confidence < 0.6:
-            suggestions.append("Low confidence scores suggest more source code context is needed")
-        
-        # Query pattern suggestions
-        type_dist = query_patterns.get('type_distribution', {})
-        if type_dist.get('field_analysis', 0) > 10:
-            suggestions.append("Many field queries detected - consider pre-indexing field definitions")
-        
-        if not suggestions:
-            suggestions.append("System performance is optimal")
-        
-        return suggestions
-
-# Complete implementation example
-class ProductionRAGSystem:
-    """Production-ready RAG system with all features"""
-    
-    def __init__(self, llm_client, db_manager, config=None):
-        self.config = config or RAGConfig()
-        
-        # Core components
-        self.vector_store = VectorStore(db_manager) if self.config.ENABLE_VECTOR_SEARCH else None
-        self.query_analyzer = AdvancedQueryAnalyzer(llm_client)
-        self.context_retriever = EnhancedContextRetriever(db_manager, self.vector_store)
-        self.response_generator = AdaptiveResponseGenerator(llm_client)
-        self.query_router = QueryRouterAgent(llm_client, db_manager)
-        self.context_cache = IntelligentContextCache()
-        self.analytics = RAGSystemAnalytics(db_manager)
+        # Initialize components
+        self.vector_store = VectorStore(db_manager)
+        self.query_analyzer = QueryAnalyzer(llm_client)
+        self.context_retriever = ContextRetriever(db_manager, self.vector_store)
+        self.response_generator = ResponseGenerator(llm_client)
         
         # Performance tracking
-        self.start_time = time.time()
-        self.total_queries = 0
-        self.successful_queries = 0
+        self.performance_metrics = {
+            'queries_processed': 0,
+            'avg_response_time': 0,
+            'context_hit_rate': 0,
+            'user_satisfaction': 0
+        }
         
-    def process_query_with_full_features(self, session_id: str, message: str, conversation_id: str) -> Dict:
-        """Process query with all RAG features enabled"""
+        # Cache and session tracking
+        self._response_cache = {}
+        self._initialized_sessions = set()
+        self._query_patterns = {}
         
-        query_start = time.time()
-        self.total_queries += 1
-        
+        logger.info(f"Agentic RAG Chat Manager initialized with vector search: {VECTOR_SEARCH_AVAILABLE}")
+    
+    def initialize_session(self, session_id: str):
+        """Initialize the RAG system for a new session"""
         try:
-            # Step 1: Query Analysis
-            query_plan = self.query_analyzer.analyze_query(message, session_id)
+            logger.info(f"Initializing Agentic RAG for session {session_id}")
             
-            # Step 2: Check cache first
-            cache_key = self._generate_cache_key(message, query_plan)
-            cached_response = self.context_cache.get(cache_key)
+            # Build vector index if enabled
+            if self.vector_store:
+                self.vector_store.build_index(session_id)
             
-            if cached_response and self.config.ENABLE_QUERY_CACHING:
-                return {
-                    "response": cached_response.source_code,  # Assuming cached response format
-                    "cached": True,
-                    "processing_time": time.time() - query_start
-                }
+            # Pre-warm caches and analyze session content
+            self._analyze_session_content(session_id)
             
-            # Step 3: Check for specialized routing
-            specialized_response = self.query_router.route_query(session_id, message, query_plan)
+            # Initialize query pattern tracking
+            if session_id not in self._query_patterns:
+                self._query_patterns[session_id] = []
             
-            if specialized_response:
-                self.successful_queries += 1
-                return {
-                    "response": specialized_response,
-                    "routed": True,
-                    "processing_time": time.time() - query_start
-                }
-            
-            # Step 4: Standard RAG pipeline
-            retrieved_contexts = self.context_retriever.retrieve_contexts(session_id, query_plan)
-            
-            # Step 5: Generate response
-            response = self.response_generator.generate_response(message, query_plan, retrieved_contexts)
-            
-            # Step 6: Cache if appropriate
-            if self.config.ENABLE_QUERY_CACHING and query_plan.confidence > 0.7:
-                self.context_cache.put(cache_key, RetrievedContext(
-                    source_code=response,
-                    metadata={'cached_at': time.time()},
-                    relevance_score=query_plan.confidence,
-                    retrieval_method="cached"
-                ))
-            
-            self.successful_queries += 1
-            processing_time = time.time() - query_start
-            
-            return {
-                "response": response,
-                "query_plan": {
-                    "type": query_plan.query_type.value,
-                    "entities": query_plan.entities,
-                    "confidence": query_plan.confidence
-                },
-                "contexts_used": len(retrieved_contexts),
-                "processing_time": processing_time,
-                "cached": False,
-                "routed": False
-            }
+            self._initialized_sessions.add(session_id)
+            logger.info("Agentic RAG system initialized successfully")
             
         except Exception as e:
-            logger.error(f"Error in full-featured query processing: {str(e)}")
+            logger.error(f"Error initializing RAG system: {str(e)}")
+    
+    def process_query_with_full_features(self, session_id: str, message: str, conversation_id: str) -> Dict:
+        """Main entry point for enhanced RAG processing with full feature set"""
+        start_time = time.time()
+        
+        try:
+            # Ensure session is initialized
+            if session_id not in self._initialized_sessions:
+                self.initialize_session(session_id)
+            
+            # Step 1: Analyze query and create retrieval plan
+            query_plan = self.query_analyzer.analyze_query(message, session_id)
+            logger.info(f"Query analysis: {query_plan.query_type.value}, entities: {query_plan.entities}, confidence: {query_plan.confidence:.2f}")
+            
+            # Step 2: Check for cached responses
+            cached_response = self._check_response_cache(session_id, message, query_plan)
+            if cached_response:
+                logger.info("Returning cached response")
+                return self._format_rag_response(
+                    cached_response['response'], 
+                    query_plan, 
+                    [], 
+                    time.time() - start_time, 
+                    cached=True
+                )
+            
+            # Step 3: Execute retrieval plan
+            retrieved_contexts = self.context_retriever.retrieve_contexts(session_id, query_plan)
+            logger.info(f"Retrieved {len(retrieved_contexts)} contexts using strategies: {[ctx.retrieval_method for ctx in retrieved_contexts]}")
+            
+            # Step 4: Route to specialized handler if needed
+            routed_response = self._route_specialized_query(session_id, message, query_plan, retrieved_contexts)
+            if routed_response:
+                return self._format_rag_response(
+                    routed_response, 
+                    query_plan, 
+                    retrieved_contexts, 
+                    time.time() - start_time, 
+                    routed=True
+                )
+            
+            # Step 5: Generate response using retrieved context
+            response = self.response_generator.generate_response(message, query_plan, retrieved_contexts)
+            
+            # Step 6: Post-process and cache
+            processing_time = time.time() - start_time
+            self._cache_response(session_id, message, query_plan, response)
+            self._log_conversation_with_metrics(session_id, conversation_id, message, response, query_plan, retrieved_contexts, processing_time)
+            
+            return self._format_rag_response(response, query_plan, retrieved_contexts, processing_time)
+            
+        except Exception as e:
+            logger.error(f"Error in RAG pipeline: {str(e)}")
+            
+            # Fallback to basic chat manager if available
+            if self.fallback_chat_manager:
+                try:
+                    logger.info("Falling back to basic chat manager")
+                    fallback_response = self.fallback_chat_manager.process_query(session_id, message, conversation_id)
+                    return {
+                        'response': fallback_response,
+                        'query_plan': {'query_type': 'fallback'},
+                        'contexts_used': 0,
+                        'processing_time': time.time() - start_time,
+                        'cached': False,
+                        'routed': False,
+                        'fallback_used': True
+                    }
+                except Exception as fallback_error:
+                    logger.error(f"Fallback chat manager also failed: {str(fallback_error)}")
+            
             return {
-                "response": f"I encountered an error: {str(e)}",
-                "error": True,
-                "processing_time": time.time() - query_start
+                'response': f"I encountered an error analyzing your request: {str(e)}",
+                'query_plan': {},
+                'contexts_used': 0,
+                'processing_time': time.time() - start_time,
+                'cached': False,
+                'routed': False,
+                'error': str(e)
             }
     
-    def _generate_cache_key(self, message: str, query_plan: QueryPlan) -> str:
-        """Generate cache key for query"""
-        content = f"{message}_{query_plan.query_type.value}_{sorted(query_plan.entities)}"
-        return hashlib.md5(content.encode()).hexdigest()
+    def process_query(self, session_id: str, message: str, conversation_id: str) -> str:
+        """Backward compatibility method that returns just the response string"""
+        result = self.process_query_with_full_features(session_id, message, conversation_id)
+        return result.get('response', 'No response generated')
     
     def get_system_health(self) -> Dict:
-        """Get comprehensive system health metrics"""
-        
-        uptime = time.time() - self.start_time
-        success_rate = self.successful_queries / self.total_queries if self.total_queries > 0 else 0
-        
-        return {
-            'uptime_seconds': uptime,
-            'total_queries': self.total_queries,
-            'successful_queries': self.successful_queries,
-            'success_rate': success_rate,
-            'cache_stats': self.context_cache.get_stats() if self.context_cache else {},
-            'vector_store_ready': self.vector_store is not None,
-            'config': {
-                'vector_search_enabled': self.config.ENABLE_VECTOR_SEARCH,
-                'caching_enabled': self.config.ENABLE_QUERY_CACHING,
-                'max_contexts': self.config.MAX_CONTEXTS_PER_QUERY
+        """Get comprehensive system health information"""
+        try:
+            health = {
+                'system_type': 'agentic_rag',
+                'status': 'healthy',
+                'vector_search': VECTOR_SEARCH_AVAILABLE,
+                'features': [
+                    'Query Analysis',
+                    'Context Retrieval', 
+                    'Response Generation',
+                    'Performance Caching',
+                    'Specialized Query Routing'
+                ],
+                'performance_metrics': self.performance_metrics,
+                'initialized_sessions': len(self._initialized_sessions),
+                'query_cache_size': sum(len(cache) for cache in self._response_cache.values())
             }
-        }
-
-# Complete usage example with error handling
-def deploy_rag_system():
-    """Complete deployment script for RAG system"""
+            
+            if VECTOR_SEARCH_AVAILABLE and self.vector_store and self.vector_store.index_built:
+                health['features'].append('Vector Search')
+                health['vector_documents'] = len(self.vector_store.documents)
+            
+            return health
+            
+        except Exception as e:
+            return {
+                'system_type': 'agentic_rag',
+                'status': 'error',
+                'error': str(e)
+            }
     
-    try:
-        # 1. Setup environment
-        if not setup_rag_environment():
-            logger.error("Failed to setup RAG environment")
-            return None
+    def _format_rag_response(self, response: str, query_plan: QueryPlan, 
+                            contexts: List, processing_time: float, 
+                            cached: bool = False, routed: bool = False) -> Dict:
+        """Format RAG response in consistent structure"""
+        return {
+            'response': response,
+            'query_plan': {
+                'query_type': query_plan.query_type.value,
+                'entities': query_plan.entities,
+                'confidence': query_plan.confidence,
+                'strategies': [s.value for s in query_plan.retrieval_strategies]
+            },
+            'contexts_used': len(contexts),
+            'processing_time': processing_time,
+            'cached': cached,
+            'routed': routed,
+            'retrieval_methods': [ctx.retrieval_method for ctx in contexts] if contexts else []
+        }
+    
+    def _check_response_cache(self, session_id: str, message: str, query_plan: QueryPlan) -> Optional[Dict]:
+        """Check for cached responses to similar queries"""
+        cache_key = hashlib.md5(f"{message.lower()}_{sorted(query_plan.entities)}".encode()).hexdigest()
         
-        # 2. Initialize components
-        llm_client = LLMClient()
-        db_manager = DatabaseManager()
-        db_manager.initialize_database()
+        session_cache = self._response_cache.get(session_id, {})
+        if cache_key in session_cache:
+            cached_item = session_cache[cache_key]
+            # Check if cache is still fresh (within 1 hour)
+            if time.time() - cached_item['timestamp'] < 3600:
+                return cached_item
         
-        # 3. Update database for RAG
-        update_database_for_rag(db_manager)
-        
-        # 4. Create production RAG system
-        rag_system = ProductionRAGSystem(llm_client, db_manager, RAGConfig())
-        
-        # 5. Test system
-        logger.info("Testing RAG system...")
-        # Run basic health check
-        health = rag_system.get_system_health()
-        logger.info(f"System health: {health}")
-        
-        logger.info("RAG system deployed successfully")
-        return rag_system
-        
-    except Exception as e:
-        logger.error(f"Failed to deploy RAG system: {str(e)}")
         return None
+    
+    def _cache_response(self, session_id: str, message: str, query_plan: QueryPlan, response: str):
+        """Cache response for future use"""
+        if session_id not in self._response_cache:
+            self._response_cache[session_id] = {}
+        
+        cache_key = hashlib.md5(f"{message.lower()}_{sorted(query_plan.entities)}".encode()).hexdigest()
+        
+        # Limit cache size per session
+        if len(self._response_cache[session_id]) > 50:
+            # Remove oldest entries
+            sorted_items = sorted(
+                self._response_cache[session_id].items(),
+                key=lambda x: x[1]['timestamp']
+            )
+            for key, _ in sorted_items[:10]:  # Remove oldest 10
+                del self._response_cache[session_id][key]
+        
+        self._response_cache[session_id][cache_key] = {
+            'response': response,
+            'query_plan': query_plan,
+            'timestamp': time.time()
+        }
+    
+    def _route_specialized_query(self, session_id: str, message: str, 
+                               query_plan: QueryPlan, contexts: List) -> Optional[str]:
+        """Route specialized queries to dedicated handlers"""
+        
+        # Field definition queries
+        if (query_plan.query_type == QueryType.FIELD_ANALYSIS and 
+            len(query_plan.entities) == 1 and 
+            query_plan.confidence > 0.7):
+            
+            return self._handle_field_definition_query(
+                session_id, query_plan.entities[0], contexts
+            )
+        
+        # Business logic queries  
+        elif (query_plan.query_type == QueryType.BUSINESS_LOGIC and
+              'how' in message.lower() and 'calculate' in message.lower()):
+            
+            return self._handle_calculation_query(session_id, message, contexts)
+        
+        return None
+    
+    def _handle_field_definition_query(self, session_id: str, field_name: str, contexts: List) -> str:
+        """Specialized handler for field definition queries"""
+        try:
+            field_context = self.db_manager.get_context_for_field(session_id, field_name)
+            field_details = field_context.get('field_details', [])
+            
+            if not field_details:
+                return f"I couldn't find detailed information about field '{field_name}' in the analyzed code."
+            
+            primary_detail = field_details[0]
+            
+            response_parts = [
+                f"**Field Analysis: {field_name}**",
+                "",
+                f"**Definition**: {primary_detail.get('definition_code', 'Not found')}",
+                f"**Data Type**: {primary_detail.get('mainframe_data_type', 'Unknown')}",
+                f"**Length**: {primary_detail.get('mainframe_length', 'Unknown')} characters",
+                f"**Program**: {primary_detail.get('program_name', 'Unknown')}",
+                f"**Usage**: {primary_detail.get('usage_type', 'Unknown')}",
+                ""
+            ]
+            
+            if primary_detail.get('business_purpose'):
+                response_parts.extend([
+                    f"**Business Purpose**: {primary_detail['business_purpose']}",
+                    ""
+                ])
+            
+            ref_count = primary_detail.get('total_program_references', 0)
+            if ref_count > 0:
+                response_parts.append(f"**Usage**: Referenced {ref_count} times across programs")
+            
+            return '\n'.join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error in field definition handler: {str(e)}")
+            return f"Error analyzing field '{field_name}': {str(e)}"
+    
+    def _handle_calculation_query(self, session_id: str, message: str, contexts: List) -> str:
+        """Specialized handler for calculation/business logic queries"""
+        
+        calculation_sections = []
+        
+        for context in contexts:
+            source_code = context.source_code
+            
+            # Find calculation patterns
+            calc_patterns = [
+                r'COMPUTE\s+[\w\-]+.*',
+                r'ADD\s+[\w\-]+\s+TO\s+[\w\-]+.*',
+                r'MULTIPLY\s+[\w\-]+\s+BY\s+[\w\-]+.*',
+                r'IF\s+.*\s+THEN.*'
+            ]
+            
+            found_calculations = []
+            for line_num, line in enumerate(source_code.split('\n'), 1):
+                for pattern in calc_patterns:
+                    if re.search(pattern, line.upper()):
+                        found_calculations.append(f"Line {line_num}: {line.strip()}")
+            
+            if found_calculations:
+                calculation_sections.append({
+                    'component': context.metadata.get('component_name', 'Unknown'),
+                    'calculations': found_calculations[:5]
+                })
+        
+        if not calculation_sections:
+            return "I couldn't find specific calculation logic in the analyzed code. The business logic might be implemented differently or require additional context."
+        
+        response_parts = [
+            "**Business Logic Analysis**",
+            ""
+        ]
+        
+        for section in calculation_sections:
+            response_parts.extend([
+                f"**In {section['component']}:**",
+                ""
+            ])
+            
+            for calc in section['calculations']:
+                response_parts.append(f"• {calc}")
+            
+            response_parts.append("")
+        
+        return '\n'.join(response_parts)
+    
+    def _log_conversation_with_metrics(self, session_id: str, conversation_id: str, 
+                                     message: str, response: str, query_plan: QueryPlan,
+                                     contexts: List, processing_time: float):
+        """Enhanced conversation logging with RAG metrics"""
+        try:
+            # Update performance metrics
+            self.performance_metrics['queries_processed'] += 1
+            
+            # Update averages
+            current_avg = self.performance_metrics['avg_response_time']
+            new_avg = ((current_avg * (self.performance_metrics['queries_processed'] - 1)) + processing_time) / self.performance_metrics['queries_processed']
+            self.performance_metrics['avg_response_time'] = new_avg
+            
+            # Update context hit rate
+            context_found = len(contexts) > 0
+            hit_rate = self.performance_metrics['context_hit_rate']
+            new_hit_rate = ((hit_rate * (self.performance_metrics['queries_processed'] - 1)) + (1 if context_found else 0)) / self.performance_metrics['queries_processed']
+            self.performance_metrics['context_hit_rate'] = new_hit_rate
+            
+            # Store basic conversation
+            self.db_manager.store_chat_message(
+                session_id, conversation_id, 'user', message,
+                tokens_used=0, processing_time_ms=int(processing_time * 1000)
+            )
+            
+            self.db_manager.store_chat_message(
+                session_id, conversation_id, 'assistant', response,
+                context_used={
+                    'query_type': query_plan.query_type.value,
+                    'entities': query_plan.entities,
+                    'contexts_count': len(contexts),
+                    'retrieval_methods': [ctx.retrieval_method for ctx in contexts]
+                },
+                tokens_used=0, processing_time_ms=int(processing_time * 1000)
+            )
+            
+            # Store RAG-specific metrics if table exists
+            try:
+                with self.db_manager.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT INTO rag_query_metrics 
+                        (session_id, query, query_type, entities_found, contexts_retrieved,
+                         confidence_score, processing_time_ms, response_length, retrieval_methods)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        session_id, message, query_plan.query_type.value,
+                        len(query_plan.entities), len(contexts), query_plan.confidence,
+                        int(processing_time * 1000), len(response),
+                        json.dumps([ctx.retrieval_method for ctx in contexts])
+                    ))
+            except Exception as e:
+                logger.debug(f"Could not store RAG metrics: {e}")
+            
+        except Exception as e:
+            logger.error(f"Error logging conversation with metrics: {str(e)}")
+    
+    def _analyze_session_content(self, session_id: str):
+        """Analyze session content to optimize retrieval"""
+        try:
+            metrics = self.db_manager.get_session_metrics(session_id)
+            components = self.db_manager.get_session_components(session_id)
+            
+            logger.info(f"Session content: {metrics.get('total_components', 0)} components, "
+                       f"{metrics.get('total_fields', 0)} fields, "
+                       f"{metrics.get('total_lines', 0)} lines")
+            
+            # Identify high-value components for priority retrieval
+            self._high_value_components = []
+            for comp in components:
+                if (comp.get('business_purpose') and 
+                    len(comp.get('business_purpose', '')) > 50 and
+                    comp.get('total_lines', 0) > 100):
+                    self._high_value_components.append(comp['component_name'])
+            
+            logger.info(f"High-value components identified: {len(self._high_value_components)}")
+            
+        except Exception as e:
+            logger.error(f"Error analyzing session content: {str(e)}")
+    
+    def get_performance_metrics(self) -> Dict:
+        """Get current performance metrics"""
+        return self.performance_metrics.copy()
+    
+    def clear_cache(self, session_id: str = None):
+        """Clear response cache"""
+        if session_id:
+            self._response_cache.pop(session_id, None)
+            logger.info(f"Cleared cache for session {session_id}")
+        else:
+            self._response_cache.clear()
+            logger.info("Cleared all caches")
 
-# Usage in your main application
-"""
-# Initialize once at startup
-rag_system = deploy_rag_system()
-
-# For each file upload
-rag_system.initialize_session(session_id)
-
-# For each chat query
-result = rag_system.process_query_with_full_features(
-    session_id, user_message, conversation_id
-)
-
-# Monitor performance
-health = rag_system.get_system_health()
-analytics = rag_system.analytics.generate_session_analytics(session_id)
-"""
+# Factory function for easy integration
+def create_agentic_rag_chat_manager(llm_client, db_manager, fallback_chat_manager=None):
+    """Factory function to create Agentic RAG Chat Manager"""
+    return AgenticRAGChatManager(llm_client, db_manager, fallback_chat_manager)

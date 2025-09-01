@@ -23,7 +23,7 @@ from modules.component_extractor import ComponentExtractor
 logger = logging.getLogger(__name__)
 # CHANGE 1: Import the Agentic RAG system instead of regular chat
 try:
-    from modules.agentic_rag_chat import AgenticRAGOrchestrator, create_agentic_rag_system
+    from modules.agentic_rag_chat import AgenticRAGChatManager, create_agentic_rag_chat_manager
     AGENTIC_RAG_AVAILABLE = True
     logger.info("Agentic RAG system imported successfully")
 except ImportError as e:
@@ -66,14 +66,19 @@ class MainframeAnalyzer:
         self.chat_system_type = "unknown"
         try:
             if AGENTIC_RAG_AVAILABLE:
-                self.chat_manager = AgenticRAGOrchestrator(
+                    # Import both RAG and basic chat manager
+                from modules.chat_manager import ChatManager
+                fallback_chat = ChatManager(self.llm_client, self.token_manager, self.db_manager)
+                
+                self.chat_manager = AgenticRAGChatManager(
                     self.llm_client, 
-                    self.db_manager, 
-                    enable_vector_search=True
+                    self.db_manager,
+                    fallback_chat_manager=fallback_chat
                 )
                 self.chat_system_type = "agentic_rag"
-                logger.info("Initialized Agentic RAG chat system")
+                logger.info("Initialized Agentic RAG chat system with fallback")
             else:
+                from modules.chat_manager import ChatManager
                 self.chat_manager = ChatManager(self.llm_client, self.token_manager, self.db_manager)
                 self.chat_system_type = "basic_chat"
                 logger.info("Initialized basic chat system")
