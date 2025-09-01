@@ -694,7 +694,7 @@ class DatabaseManager:
                         component_type: str, file_path: str, analysis_result: Dict):
         """Store component analysis with improved source code handling"""
         try:
-            with self.db_manager.get_connection() as conn:
+            with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 # CHANGE 1: Ensure source content is preserved properly
