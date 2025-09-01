@@ -859,6 +859,7 @@ def analyze_field_mapping():
                 'oracle_length': oracle_length,
                 'population_source': row[6] or 'Program logic',
                 'source_record_layout': row[10] or 'Unknown',
+                'usage_type': row[8] or 'STATIC',
                 'business_logic_type': business_logic_type,
                 'business_logic_description': row[7] or f'Field {row[0]} processing',
                 'derivation_logic': f"Populated from {row[6] or 'program logic'}",
