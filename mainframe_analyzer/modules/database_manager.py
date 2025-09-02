@@ -1664,13 +1664,14 @@ class DatabaseManager:
     # Changes for database_manager.py
 
     def get_component_source_code(self, session_id: str, component_name: str = None, 
-                            component_type: str = None, max_size: int = 200000) -> Dict:  # Increased default
-        """Get source code for chat with better size handling"""
+                                                  entities: List[str] = None, max_size: int = 500000) -> Dict:
+        """Enhanced component source retrieval with entity-specific matching"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 if component_name:
+                    # Get specific component
                     cursor.execute('''
                         SELECT component_name, component_type, source_content, 
                             total_lines, analysis_result_json, file_path
@@ -1678,16 +1679,38 @@ class DatabaseManager:
                         WHERE session_id = ? AND component_name = ?
                         ORDER BY created_at DESC LIMIT 1
                     ''', (session_id, component_name))
+                elif entities:
+                    # Get components that likely contain the entities
+                    entity_conditions = []
+                    params = [session_id]
+                    
+                    for entity in entities[:3]:  # Limit to first 3 entities
+                        entity_conditions.append("(component_name LIKE ? OR source_content LIKE ?)")
+                        params.extend([f"%{entity}%", f"%{entity}%"])
+                    
+                    entity_clause = " OR ".join(entity_conditions)
+                    
+                    cursor.execute(f'''
+                        SELECT component_name, component_type, source_content, 
+                            total_lines, analysis_result_json, file_path
+                        FROM component_analysis 
+                        WHERE session_id = ? AND ({entity_clause})
+                            AND source_content IS NOT NULL 
+                            AND LENGTH(source_content) > 100
+                        ORDER BY 
+                            CASE WHEN component_type = 'PROGRAM' THEN 1 ELSE 2 END,
+                            total_lines DESC
+                        LIMIT 5
+                    ''', params)
                 else:
+                    # Fallback to general query
                     cursor.execute('''
                         SELECT component_name, component_type, source_content, 
                             total_lines, analysis_result_json, file_path
                         FROM component_analysis 
                         WHERE session_id = ? AND source_content IS NOT NULL 
                             AND LENGTH(source_content) > 100
-                        ORDER BY 
-                            CASE WHEN component_type = 'PROGRAM' THEN 1 ELSE 2 END,
-                            total_lines ASC, created_at DESC
+                        ORDER BY total_lines DESC
                         LIMIT 5
                     ''', (session_id,))
                 
@@ -1696,39 +1719,39 @@ class DatabaseManager:
                     row_dict = dict(row)
                     source_content = row_dict.get('source_content', '')
                     
-                    # CHANGE 3: Better source strategy with more content
+                    # Enhanced source strategy with entity matching
                     if len(source_content) <= max_size:
-                        # Send full source
                         row_dict['source_strategy'] = 'full'
                         row_dict['source_for_chat'] = source_content
-                    elif len(source_content) <= max_size * 3:  # Increased multiplier
-                        # Send substantial portion
-                        row_dict['source_strategy'] = 'substantial'  
+                    else:
+                        row_dict['source_strategy'] = 'substantial'
                         row_dict['source_for_chat'] = self._create_substantial_source_summary(
                             source_content, row_dict.get('analysis_result_json', '{}'), max_size
                         )
-                    else:
-                        # Enhanced summary with more actual code
-                        row_dict['source_strategy'] = 'enhanced_summary'
-                        row_dict['source_for_chat'] = self._create_enhanced_source_summary_with_more_code(
-                            source_content, row_dict.get('analysis_result_json', '{}')
-                        )
+                    
+                    # Add entity matching information
+                    if entities:
+                        matching_entities = []
+                        for entity in entities:
+                            if entity.upper() in source_content.upper():
+                                matching_entities.append(entity)
+                        row_dict['entity_matches'] = matching_entities
                     
                     results.append(row_dict)
                 
                 return {
                     'success': True,
                     'components': results,
-                    'source_available': len(results) > 0 and any(len(r.get('source_for_chat', '')) > 100 for r in results)
+                    'source_available': len(results) > 0,
+                    'entity_matched': bool(entities and any(r.get('entity_matches') for r in results))
                 }
                 
         except Exception as e:
-            logger.error(f"Error getting component source code: {str(e)}")
+            logger.error(f"Error getting component source with entity matching: {str(e)}")
             return {
                 'success': False,
                 'error': str(e),
-                'components': [],
-                'source_available': False
+                'components': []
             }
         
     def _create_substantial_source_summary(self, source_content: str, analysis_json: str, max_size: int) -> str:

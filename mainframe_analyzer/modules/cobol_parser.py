@@ -1237,3 +1237,158 @@ Rules:
         """Calculate field lengths from PIC clause - called by ComponentExtractor"""
         # Use the existing _calculate_field_lengths_fixed method
         return self._calculate_field_lengths_fixed(picture, usage)
+    
+    def should_include_filler(self, line: str, level: str) -> bool:
+        """
+        Determine if a FILLER field should be included in analysis
+        Include fillers that have VALUE clauses as they represent constants/literals
+        """
+        line_upper = line.upper().strip()
+        
+        # Always include fillers with VALUE clauses
+        if 'FILLER' in line_upper and 'VALUE' in line_upper:
+            return True
+        
+        # Exclude fillers without VALUE (just spacing/padding)
+        if 'FILLER' in line_upper and 'VALUE' not in line_upper:
+            return False
+        
+        return True
+    
+    def _extract_fields_from_lines(self, lines: List[str], start_idx: int = 0, end_idx: int = None) -> List:
+        """Enhanced field extraction with proper filler handling"""
+        if end_idx is None:
+            end_idx = len(lines)
+        
+        fields = []
+        i = start_idx
+        
+        while i < end_idx:
+            line = lines[i].strip()
+            if not line or line.startswith('*'):
+                i += 1
+                continue
+            
+            # Check for field definition (level number)
+            level_match = re.match(r'^\s*(\d{2})\s+(.+)', line)
+            if level_match:
+                level = level_match.group(1)
+                field_content = level_match.group(2).strip()
+                
+                # Skip if it's a filler without value (unless it has VALUE)
+                if not self.should_include_filler(line, level):
+                    i += 1
+                    continue
+                
+                try:
+                    field_info = self._parse_field_line(line, i + 1)  # +1 for 1-based line numbers
+                    
+                    # Enhanced filler processing
+                    if 'FILLER' in field_content.upper():
+                        # Extract VALUE if present for meaningful filler names
+                        value_match = re.search(r"VALUE\s+['\"]([^'\"]*)['\"]", field_content, re.IGNORECASE)
+                        if value_match:
+                            value_content = value_match.group(1)
+                            # Create meaningful name from value
+                            field_info.name = f"FILLER-{value_content[:10].replace(' ', '-')}-{level}"
+                            field_info.friendly_name = f"Constant: {value_content}"
+                            field_info.business_purpose = f"Constant literal value: '{value_content}'"
+                            field_info.value = value_content
+                            field_info.usage_type = 'CONSTANT'
+                        else:
+                            field_info.name = f"FILLER-{level}-LINE-{i+1}"
+                            field_info.friendly_name = f"Filler Field Level {level}"
+                    
+                    if field_info:
+                        fields.append(field_info)
+                        
+                except Exception as e:
+                    logger.warning(f"Error parsing field at line {i+1}: {e}")
+            
+            i += 1
+        
+        return fields
+
+    def _parse_field_line(self, line: str, line_number: int):
+        """Enhanced field line parsing with better filler support"""
+        try:
+            # Extract level number
+            level_match = re.match(r'^\s*(\d{2})\s+(.+)', line.strip())
+            if not level_match:
+                return None
+            
+            level = int(level_match.group(1))
+            field_content = level_match.group(2).strip()
+            
+            # Initialize field info
+            field_info = type('FieldInfo', (), {})()
+            field_info.level = level
+            field_info.line_number = line_number
+            field_info.usage_type = 'STATIC'
+            
+            # Handle FILLER fields
+            if field_content.upper().startswith('FILLER'):
+                field_info.name = 'FILLER'
+                field_info.friendly_name = 'Filler Field'
+                field_info.business_purpose = 'Spacing or constant field'
+                remaining_content = field_content[6:].strip()  # Remove 'FILLER'
+            else:
+                # Extract field name
+                name_match = re.match(r'^([A-Za-z][A-Za-z0-9\-_]*)', field_content)
+                if name_match:
+                    field_info.name = name_match.group(1)
+                    field_info.friendly_name = self.generate_friendly_name(field_info.name, 'Field')
+                    remaining_content = field_content[len(field_info.name):].strip()
+                else:
+                    return None
+            
+            # Extract PIC clause
+            pic_match = re.search(r'PIC(?:TURE)?\s+([X9SVP\(\),\.\+\-\*\$Z]+)', remaining_content, re.IGNORECASE)
+            if pic_match:
+                field_info.picture = pic_match.group(1)
+            else:
+                field_info.picture = ''
+            
+            # Extract VALUE clause (especially important for fillers)
+            value_match = re.search(r"VALUE\s+(['\"][^'\"]*['\"]|[A-Za-z0-9\-]+)", remaining_content, re.IGNORECASE)
+            if value_match:
+                value_str = value_match.group(1)
+                # Remove quotes if present
+                if value_str.startswith('"') or value_str.startswith("'"):
+                    field_info.value = value_str[1:-1]
+                else:
+                    field_info.value = value_str
+                
+                # For fillers with values, update the field info
+                if field_info.name == 'FILLER' and field_info.value:
+                    field_info.usage_type = 'CONSTANT'
+                    field_info.business_purpose = f'Constant value: {field_info.value}'
+            else:
+                field_info.value = ''
+            
+            # Extract USAGE clause
+            usage_match = re.search(r'USAGE\s+(COMP|COMP-3|DISPLAY|BINARY|PACKED-DECIMAL)', remaining_content, re.IGNORECASE)
+            if usage_match:
+                field_info.usage = usage_match.group(1)
+            else:
+                field_info.usage = ''
+            
+            # Extract OCCURS clause
+            occurs_match = re.search(r'OCCURS\s+(\d+)', remaining_content, re.IGNORECASE)
+            if occurs_match:
+                field_info.occurs = int(occurs_match.group(1))
+            else:
+                field_info.occurs = 0
+            
+            # Extract REDEFINES clause
+            redefines_match = re.search(r'REDEFINES\s+([A-Za-z][A-Za-z0-9\-_]*)', remaining_content, re.IGNORECASE)
+            if redefines_match:
+                field_info.redefines = redefines_match.group(1)
+            else:
+                field_info.redefines = ''
+            
+            return field_info
+            
+        except Exception as e:
+            logger.error(f"Error parsing field line '{line}': {e}")
+            return None

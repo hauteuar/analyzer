@@ -378,17 +378,85 @@ class ComponentExtractor:
         return ''
 
     def _field_to_dict_with_lengths(self, field, program_content: str, program_name: str = "PROGRAM") -> Dict:
-        """Enhanced field conversion with proper length calculation using parser"""
+        """
+        MAIN field conversion method - handles all field types including valuable fillers
+        Converts a field object to a detailed dictionary with proper length calculations
+        """
         try:
             field_name = field.name
             
-            # Use parser's length calculation method
+            # Special handling for valuable fillers (fillers with VALUE clause)
+            if field_name.startswith('FILLER') and hasattr(field, 'value') and field.value:
+                return self._process_valuable_filler(field, program_name)
+            
+            # Regular field processing
+            return self._process_regular_field(field, program_content, program_name)
+            
+        except Exception as e:
+            logger.error(f"Error processing field {getattr(field, 'name', 'UNKNOWN')}: {str(e)}")
+            return self._create_fallback_field_dict(field, str(e))
+
+    def _process_valuable_filler(self, field, program_name: str) -> Dict:
+        """Process fillers that have VALUE clauses (constants)"""
+        try:
+            # Create meaningful name from value content
+            value_content = field.value[:10].replace(' ', '-').replace("'", "").replace('"', '')
+            meaningful_name = f"FILLER-{value_content}-L{field.level}"
+            
+            # Calculate length from value
+            value_length = len(field.value) if field.value else 1
+            
+            return {
+                'name': meaningful_name,
+                'friendly_name': f"Constant: {field.value}",
+                'level': field.level,
+                'picture': field.picture or f"X({value_length})",
+                'usage': field.usage or '',
+                'value': field.value,
+                'line_number': field.line_number,
+                'code_snippet': f"{field.level:02d} FILLER PIC {field.picture or f'X({value_length})'} VALUE '{field.value}'",
+                'usage_type': 'CONSTANT',
+                'operation_type': 'CONSTANT_DEFINITION',
+                'business_purpose': f"Constant literal value: '{field.value}'",
+                'confidence': 1.0,
+                'source_field': '',
+                'target_field': '',
+                
+                # Proper field lengths for constants
+                'mainframe_length': value_length,
+                'oracle_length': value_length,
+                'oracle_data_type': f"VARCHAR2({value_length})",
+                'mainframe_data_type': f"PIC X({value_length}) VALUE '{field.value}'",
+                
+                # Minimal source analysis for constants
+                'definition_line_number': field.line_number,
+                'definition_code': f"{field.level:02d} FILLER VALUE '{field.value}'",
+                'program_source_content': '',  # Not needed for constants
+                'field_references_json': '[]',
+                'usage_summary_json': '{"type": "constant", "value": "' + field.value + '"}',
+                'total_program_references': 0,  # Constants aren't referenced
+                'move_source_count': 0,
+                'move_target_count': 0,
+                'arithmetic_count': 0,
+                'conditional_count': 0,
+                'cics_count': 0
+            }
+        except Exception as e:
+            logger.error(f"Error processing valuable filler: {str(e)}")
+            return self._create_fallback_field_dict(field, str(e))
+
+    def _process_regular_field(self, field, program_content: str, program_name: str) -> Dict:
+        """Process regular fields with full source analysis"""
+        try:
+            field_name = field.name
+            
+            # Perform comprehensive source analysis
+            source_analysis = self._complete_field_source_analysis(field_name, program_content, program_name)
+            
+            # Calculate proper field lengths
             mainframe_length, oracle_length, oracle_type = self.cobol_parser._calculate_field_lengths_fixed(
                 field.picture, field.usage
             )
-            
-            # Perform complete source analysis
-            source_analysis = self._complete_field_source_analysis(field_name, program_content, program_name)
             
             return {
                 'name': field_name,
@@ -398,7 +466,7 @@ class ComponentExtractor:
                 'usage': field.usage,
                 'occurs': field.occurs,
                 'redefines': field.redefines,
-                'value': field.value,
+                'value': getattr(field, 'value', ''),
                 'line_number': field.line_number,
                 'code_snippet': f"{field.level:02d} {field_name}" + (f" PIC {field.picture}" if field.picture else ""),
                 'usage_type': source_analysis['primary_usage'],
@@ -408,13 +476,13 @@ class ComponentExtractor:
                 'source_field': source_analysis.get('primary_source_field', ''),
                 'target_field': field_name if source_analysis.get('receives_data', False) else '',
                 
-                # FIXED: Proper field length calculation using parser
+                # Proper field length calculation
                 'mainframe_length': mainframe_length,
                 'oracle_length': oracle_length,
                 'oracle_data_type': oracle_type,
                 'mainframe_data_type': f"PIC {field.picture}" if field.picture else "UNKNOWN",
                 
-                # Complete source code storage
+                # Complete source code analysis
                 'definition_line_number': source_analysis.get('definition_line', field.line_number),
                 'definition_code': source_analysis.get('definition_code', ''),
                 'program_source_content': program_content,
@@ -427,18 +495,35 @@ class ComponentExtractor:
                 'conditional_count': source_analysis['counts']['conditional'],
                 'cics_count': source_analysis['counts']['cics']
             }
-            
         except Exception as e:
-            logger.error(f"Error enhancing field {field.name}: {str(e)}")
-            return {
-                'name': field.name,
-                'level': field.level,
-                'picture': getattr(field, 'picture', ''),
-                'line_number': getattr(field, 'line_number', 0),
-                'mainframe_length': 1,  # Minimum valid length
-                'oracle_length': 50,
-                'error': str(e)
-            }
+            logger.error(f"Error processing regular field {field.name}: {str(e)}")
+            return self._create_fallback_field_dict(field, str(e))
+
+    def _create_fallback_field_dict(self, field, error_msg: str) -> Dict:
+        """Create fallback field dictionary when processing fails"""
+        return {
+            'name': getattr(field, 'name', 'UNKNOWN_FIELD'),
+            'friendly_name': getattr(field, 'friendly_name', 'Unknown Field'),
+            'level': getattr(field, 'level', 5),
+            'picture': getattr(field, 'picture', ''),
+            'usage': getattr(field, 'usage', ''),
+            'line_number': getattr(field, 'line_number', 0),
+            'usage_type': 'UNKNOWN',
+            'business_purpose': 'Field processing failed',
+            'mainframe_length': 1,  # Minimum valid length
+            'oracle_length': 50,    # Safe default
+            'oracle_data_type': 'VARCHAR2(50)',
+            'mainframe_data_type': 'UNKNOWN',
+            'confidence': 0.1,
+            'error': error_msg,
+            'field_references_json': '[]',
+            'total_program_references': 0,
+            'move_source_count': 0,
+            'move_target_count': 0,
+            'arithmetic_count': 0,
+            'conditional_count': 0,
+            'cics_count': 0
+        }
 
     def generate_friendly_names_batch(self, session_id: str, items: List[Dict], context: str) -> Dict[str, str]:
         """Generate friendly names for multiple items efficiently"""
@@ -1606,81 +1691,7 @@ Return only the business purpose description (1-2 sentences).
         
         return components
     
-    def _field_to_dict(self, field) -> Dict:
-        """Convert CobolField to dictionary"""
-        return {
-            'name': field.name,
-            'friendly_name': field.friendly_name,
-            'level': field.level,
-            'picture': field.picture,
-            'usage': field.usage,
-            'occurs': field.occurs,
-            'redefines': field.redefines,
-            'value': field.value,
-            'line_number': field.line_number
-        }
     
-    def _field_to_dict_enhanced(self, field, program_content: str, program_name: str = "PROGRAM") -> Dict:
-        """Convert field with complete source code analysis and proper length calculation"""
-        try:
-            field_name = field.name
-            
-            # Perform complete source analysis
-            source_analysis = self._complete_field_source_analysis(field_name, program_content, program_name)
-            
-            # Calculate field lengths from PIC clause
-            mainframe_length, oracle_length, oracle_type = self._calculate_field_lengths(field.picture, field.usage)
-            
-            return {
-                'name': field_name,
-                'friendly_name': field.friendly_name or field_name.replace('-', ' ').title(),
-                'level': field.level,
-                'picture': field.picture,
-                'usage': field.usage,
-                'occurs': field.occurs,
-                'redefines': field.redefines,
-                'value': field.value,
-                'line_number': field.line_number,
-                'code_snippet': f"{field.level:02d} {field_name}" + (f" PIC {field.picture}" if field.picture else ""),
-                'usage_type': source_analysis['primary_usage'],
-                'operation_type': 'COMPREHENSIVE_DEFINITION',
-                'business_purpose': source_analysis['business_purpose'],
-                'confidence': 0.95,
-                'source_field': source_analysis.get('primary_source_field', ''),
-                'target_field': field_name if source_analysis.get('receives_data', False) else '',
-                
-                # FIXED: Proper field length calculation
-                'mainframe_length': mainframe_length,
-                'oracle_length': oracle_length,
-                'oracle_data_type': oracle_type,
-                'mainframe_data_type': f"PIC {field.picture}" if field.picture else "UNKNOWN",
-                
-                # Complete source code storage
-                'definition_line_number': source_analysis.get('definition_line', field.line_number),
-                'definition_code': source_analysis.get('definition_code', ''),
-                'program_source_content': program_content,
-                'field_references_json': json.dumps(source_analysis['all_references']),
-                'usage_summary_json': json.dumps(source_analysis['usage_summary']),
-                'total_program_references': len(source_analysis['all_references']),
-                'move_source_count': source_analysis['counts']['move_source'],
-                'move_target_count': source_analysis['counts']['move_target'],
-                'arithmetic_count': source_analysis['counts']['arithmetic'],
-                'conditional_count': source_analysis['counts']['conditional'],
-                'cics_count': source_analysis['counts']['cics']
-            }
-            
-        except Exception as e:
-            logger.error(f"Error enhancing field {field.name}: {str(e)}")
-            return {
-                'name': field.name,
-                'level': field.level,
-                'picture': getattr(field, 'picture', ''),
-                'line_number': getattr(field, 'line_number', 0),
-                'mainframe_length': 0,
-                'oracle_length': 50,  # Default
-                'error': str(e)
-            }
-
     def _calculate_field_lengths(self, picture: str, usage: str = "") -> Tuple[int, int, str]:
         """Fixed field length calculation from PIC clause"""
         if not picture:
@@ -1983,7 +1994,7 @@ File Content ({filename}):
         return components
     
     def _extract_and_store_dependencies(self, session_id: str, components: List[Dict], filename: str):
-        """Enhanced dependency extraction with proper I/O classification"""
+        """Enhanced dependency extraction with improved validation"""
         try:
             main_program = None
             for component in components:
@@ -1996,25 +2007,95 @@ File Content ({filename}):
             
             dependencies = []
             program_name = main_program['name']
+
+            def _is_valid_dependency_target(target_name: Optional[str], source_program: str) -> bool:
+                """Enhanced validation for dependency targets"""
+                if not target_name:
+                    return False
+                
+                t = str(target_name).strip()
+                if not t or len(t) < 3:
+                    return False
+
+                t_upper = t.upper()
+
+                # Ignore self-references
+                if t_upper == str(source_program).upper():
+                    return False
+
+                # Enhanced COBOL keywords and operators to ignore
+                INVALID_KEYWORDS = {
+                    # Comparison operators
+                    'EQUAL', 'NOT', 'GREATER', 'LESS', 'THAN', 'OR', 'AND',
+                    # COBOL reserved words
+                    'VALUE', 'VALUES', 'PIC', 'PICTURE', 'USAGE', 'REDEFINES', 'OCCURS',
+                    'COMP', 'COMP-3', 'BINARY', 'DISPLAY', 'PACKED-DECIMAL',
+                    # Control flow
+                    'IF', 'THEN', 'ELSE', 'END-IF', 'WHEN', 'OTHER', 'ALSO',
+                    'PERFORM', 'UNTIL', 'VARYING', 'TIMES', 'THRU', 'THROUGH',
+                    # Data movement
+                    'MOVE', 'TO', 'FROM', 'INTO', 'GIVING',
+                    # Arithmetic
+                    'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE', 'COMPUTE',
+                    # File operations  
+                    'READ', 'WRITE', 'OPEN', 'CLOSE', 'REWRITE', 'DELETE',
+                    # Common literals
+                    'SPACES', 'ZEROS', 'HIGH-VALUES', 'LOW-VALUES', 'QUOTES',
+                    # Program structure
+                    'SECTION', 'PARAGRAPH', 'DIVISION', 'END', 'EXIT',
+                    # Common single words that aren't dependencies
+                    'THIS', 'THE', 'A', 'AN', 'IS', 'ARE', 'WAS', 'WERE',
+                    'ON', 'OFF', 'YES', 'NO', 'TRUE', 'FALSE',
+                    # Common COBOL suffixes that indicate keywords
+                    'SIZE', 'LENGTH', 'COUNT', 'ERROR', 'STATUS'
+                }
+
+                # Check if it's an invalid keyword
+                if t_upper in INVALID_KEYWORDS:
+                    return False
+
+                # Check if it contains only operators/punctuation
+                if re.match(r'^[=<>!&|+\-*/\(\)\.,;:\[\]{}]+$', t):
+                    return False
+
+                # Check if it's a numeric literal
+                if re.match(r'^\d+(\.\d+)?$', t):
+                    return False
+
+                # Check if it's a quoted string
+                if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
+                    return False
+
+                # Must contain at least one letter (not just numbers and symbols)
+                if not re.search(r'[A-Za-z]', t):
+                    return False
+
+                # Should look like a valid COBOL identifier
+                if not re.match(r'^[A-Za-z][A-Za-z0-9\-_]*[A-Za-z0-9]?$', t):
+                    return False
+
+                # Additional length checks for realistic program/file names
+                if len(t) > 30:  # COBOL names typically <= 30 chars
+                    return False
+
+                return True
             
-            # Get file operations and classify I/O direction
+            # Extract FILE dependencies with enhanced I/O classification
             file_operations = main_program.get('file_operations', [])
-            file_classifications = self._classify_file_io_direction(file_operations)
-            
-            # Extract FILE dependencies with proper I/O classification
-            processed_files = set()  # Avoid duplicates
+            file_classifications = self._classify_file_io_direction_enhanced(file_operations)
+            processed_files = set()
             
             for file_op in file_operations:
                 file_name = file_op.get('file_name')
                 if not file_name or file_name in processed_files:
                     continue
-                
-                if self.cobol_parser._is_valid_cobol_filename(file_name):
+                    
+                if _is_valid_dependency_target(file_name, program_name):
                     processed_files.add(file_name)
                     
-                    # Determine relationship type based on I/O classification
                     io_direction = file_classifications.get(file_name, file_op.get('io_direction', 'UNKNOWN'))
                     
+                    # Enhanced relationship type mapping
                     if io_direction == 'INPUT':
                         relationship_type = 'INPUT_FILE'
                     elif io_direction == 'OUTPUT':
@@ -2024,38 +2105,20 @@ File Content ({filename}):
                     else:
                         relationship_type = 'FILE_ACCESS'
                     
-                    # Determine interface type
-                    if file_op.get('file_type') == 'CICS_FILE':
-                        interface_type = 'CICS'
-                    elif file_op.get('operation') == 'FD':
-                        interface_type = 'FILE_SYSTEM'
-                    else:
-                        interface_type = 'FILE_SYSTEM'
-                    
                     dependencies.append({
                         'source_component': program_name,
                         'target_component': file_name,
                         'relationship_type': relationship_type,
-                        'interface_type': interface_type,
+                        'interface_type': 'FILE_SYSTEM',
                         'confidence_score': 0.95,
                         'analysis_details_json': json.dumps({
                             'io_direction': io_direction,
-                            'file_operations': [
-                                {
-                                    'operation': op.get('operation'),
-                                    'line_number': op.get('line_number'),
-                                    'io_direction': op.get('io_direction')
-                                }
-                                for op in file_operations if op.get('file_name') == file_name
-                            ]
-                        }),
-                        'source_code_evidence': '; '.join([
-                            f"Line {op.get('line_number')}: {op.get('operation')} {file_name}"
-                            for op in file_operations if op.get('file_name') == file_name
-                        ][:3])  # First 3 operations as evidence
+                            'operations': [op.get('operation') for op in file_operations 
+                                        if op.get('file_name') == file_name]
+                        })
                     })
             
-            # Extract CICS dependencies with enhanced I/O classification
+            # Extract CICS dependencies with proper I/O classification
             cics_operations = main_program.get('cics_operations', [])
             processed_cics_files = set()
             
@@ -2063,50 +2126,31 @@ File Content ({filename}):
                 file_name = cics_op.get('file_name')
                 if not file_name or file_name in processed_cics_files:
                     continue
-                
-                if self.cobol_parser._is_valid_cobol_filename(file_name):
+                    
+                if _is_valid_dependency_target(file_name, program_name):
                     processed_cics_files.add(file_name)
                     
-                    # Classify CICS file based on all operations on this file
+                    # Classify CICS operations for this file
                     cics_file_ops = [op for op in cics_operations if op.get('file_name') == file_name]
-                    io_directions = set(op.get('io_direction', 'UNKNOWN') for op in cics_file_ops)
-                    
-                    if 'INPUT' in io_directions and 'OUTPUT' in io_directions:
-                        relationship_type = 'CICS_INPUT_OUTPUT_FILE'
-                    elif 'INPUT' in io_directions:
-                        relationship_type = 'CICS_INPUT_FILE'
-                    elif 'OUTPUT' in io_directions:
-                        relationship_type = 'CICS_OUTPUT_FILE'
-                    else:
-                        relationship_type = 'CICS_FILE'
+                    io_classification = self._classify_cics_io_operations(cics_file_ops)
                     
                     dependencies.append({
                         'source_component': program_name,
                         'target_component': file_name,
-                        'relationship_type': relationship_type,
+                        'relationship_type': io_classification['relationship_type'],
                         'interface_type': 'CICS',
                         'confidence_score': 0.95,
                         'analysis_details_json': json.dumps({
-                            'cics_operations': [
-                                {
-                                    'operation': op.get('operation'),
-                                    'line_number': op.get('line_number'),
-                                    'io_direction': op.get('io_direction')
-                                }
-                                for op in cics_file_ops
-                            ]
-                        }),
-                        'source_code_evidence': '; '.join([
-                            f"Line {op.get('line_number')}: {op.get('operation')} {file_name}"
-                            for op in cics_file_ops
-                        ][:3])
+                            'io_direction': io_classification['io_direction'],
+                            'operations': [op.get('operation') for op in cics_file_ops]
+                        })
                     })
             
             # Extract PROGRAM CALL dependencies
             program_calls = main_program.get('program_calls', [])
             for call in program_calls:
                 target_prog = call.get('program_name')
-                if target_prog and self.cobol_parser._is_valid_cobol_filename(target_prog):
+                if target_prog and _is_valid_dependency_target(target_prog, program_name):
                     dependencies.append({
                         'source_component': program_name,
                         'target_component': target_prog,
@@ -2114,37 +2158,83 @@ File Content ({filename}):
                         'interface_type': 'COBOL',
                         'confidence_score': 0.98,
                         'analysis_details_json': json.dumps({
-                            'line_number': call.get('line_number', 0),
-                            'parameters': call.get('parameters', '')
-                        }),
-                        'source_code_evidence': f"Line {call.get('line_number')}: CALL '{target_prog}'"
+                            'line_number': call.get('line_number', 0)
+                        })
                     })
             
-            # Extract COPYBOOK dependencies
-            copybooks = main_program.get('copybooks', [])
-            for copybook in copybooks:
-                copybook_name = copybook.get('copybook_name')
-                if copybook_name and self.cobol_parser._is_valid_cobol_filename(copybook_name):
-                    dependencies.append({
-                        'source_component': program_name,
-                        'target_component': copybook_name,
-                        'relationship_type': 'COPYBOOK_INCLUDE',
-                        'interface_type': 'COBOL',
-                        'confidence_score': 0.99,
-                        'analysis_details_json': json.dumps({
-                            'line_number': copybook.get('line_number', 0)
-                        }),
-                        'source_code_evidence': f"Line {copybook.get('line_number')}: COPY {copybook_name}"
-                    })
-            
-            # Store dependencies with enhanced deduplication
+            # Store dependencies
             if dependencies:
                 self._store_dependencies_with_deduplication(session_id, dependencies)
-                logger.info(f"Stored {len(dependencies)} unique dependencies for {program_name}")
-        
+                logger.info(f"Stored {len(dependencies)} validated dependencies for {program_name}")
+                
         except Exception as e:
             logger.error(f"Error extracting dependencies: {str(e)}")
-            traceback.print_exc()
+
+    def _classify_cics_io_operations(self, cics_ops: List[Dict]) -> Dict:
+        """Classify CICS operations to determine I/O direction"""
+        operations = [op.get('operation', '').upper() for op in cics_ops]
+        
+        has_read = any('READ' in op for op in operations)
+        has_write = any('WRITE' in op for op in operations)
+        has_rewrite = any('REWRITE' in op for op in operations)
+        has_delete = any('DELETE' in op for op in operations)
+        
+        if has_rewrite or (has_read and has_write):
+            return {
+                'relationship_type': 'CICS_INPUT_OUTPUT_FILE',
+                'io_direction': 'INPUT_OUTPUT'
+            }
+        elif has_read or has_delete:  # DELETE typically reads first
+            return {
+                'relationship_type': 'CICS_INPUT_FILE', 
+                'io_direction': 'INPUT'
+            }
+        elif has_write:
+            return {
+                'relationship_type': 'CICS_OUTPUT_FILE',
+                'io_direction': 'OUTPUT'
+            }
+        else:
+            return {
+                'relationship_type': 'CICS_FILE',
+                'io_direction': 'UNKNOWN'
+            }
+        
+    def _classify_file_io_direction_enhanced(self, file_operations: List[Dict]) -> Dict[str, str]:
+        """Enhanced file I/O direction classification"""
+        file_directions = {}
+        
+        for op in file_operations:
+            file_name = op.get('file_name')
+            operation = op.get('operation', '').upper()
+            
+            if not file_name:
+                continue
+                
+            if file_name not in file_directions:
+                file_directions[file_name] = set()
+            
+            # More precise operation mapping
+            if operation in ['READ', 'OPEN INPUT', 'SELECT INPUT']:
+                file_directions[file_name].add('INPUT')
+            elif operation in ['WRITE', 'REWRITE', 'OPEN OUTPUT', 'OPEN EXTEND']:
+                file_directions[file_name].add('OUTPUT')
+            elif operation in ['OPEN I-O', 'OPEN IO']:
+                file_directions[file_name].add('INPUT_OUTPUT')
+        
+        # Determine final classification
+        classifications = {}
+        for file_name, directions in file_directions.items():
+            if 'INPUT_OUTPUT' in directions or ('INPUT' in directions and 'OUTPUT' in directions):
+                classifications[file_name] = 'INPUT_OUTPUT'
+            elif 'INPUT' in directions:
+                classifications[file_name] = 'INPUT'
+            elif 'OUTPUT' in directions:
+                classifications[file_name] = 'OUTPUT'
+            else:
+                classifications[file_name] = 'UNKNOWN'
+        
+        return classifications
 
     def _classify_file_io_direction(self, file_operations: List[Dict]) -> Dict[str, str]:
         """Classify files as INPUT, OUTPUT, or INPUT_OUTPUT based on all operations"""
@@ -2353,7 +2443,7 @@ File Content ({filename}):
         else:
             return f"Static field - defined but not actively processed"
         
-    def _extract_and_store_dependencies(self, session_id: str, components: List[Dict], filename: str):
+    def _extract_and_store_dependencies_upd(self, session_id: str, components: List[Dict], filename: str):
         """Enhanced dependency extraction including file operations"""
         try:
             main_program = None

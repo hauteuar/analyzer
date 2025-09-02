@@ -97,7 +97,7 @@ class VectorStore:
             for comp in components:
                 try:
                     source_data = self.db_manager.get_component_source_code(
-                        session_id, comp['component_name'], max_size=200000
+                        session_id, comp['component_name'], max_size=500000
                     )
                     
                     if source_data.get('success') and source_data.get('components'):
@@ -499,7 +499,7 @@ class ContextRetriever:
         return contexts
     
     def _retrieve_field_contexts(self, session_id: str, entities: List[str]) -> List[RetrievedContext]:
-        """Retrieve contexts for specific fields with more source code"""
+        """Enhanced field context retrieval with better program matching"""
         contexts = []
         
         for entity in entities:
@@ -508,44 +508,51 @@ class ContextRetriever:
                 field_details = field_context.get('field_details', [])
                 
                 if field_details:
-                    program_name = field_details[0].get('program_name')
-                    if program_name:
-                        # CHANGE 4: Request more source code
-                        source_data = self.db_manager.get_component_source_code(
-                            session_id, program_name, max_size=300000  # Increased significantly
-                        )
-                        
-                        if source_data.get('success') and source_data.get('components'):
-                            for comp in source_data['components']:
-                                source_code = comp.get('source_for_chat', '')
-                                
-                                # Verify field is actually in the source
-                                if source_code and entity.upper() in source_code.upper():
-                                    # Extract field-specific context from full source
-                                    field_specific_context = self._extract_field_specific_context(
-                                        source_code, entity, field_details[0]
-                                    )
+                    # Get contexts from ALL programs that have this field, not just the first one
+                    programs_with_field = set(detail.get('program_name') for detail in field_details)
+                    
+                    for program_name in programs_with_field:
+                        if program_name:
+                            source_data = self.db_manager.get_component_source_code(
+                                session_id, program_name, max_size=500000
+                            )
+                            
+                            if source_data.get('success') and source_data.get('components'):
+                                for comp in source_data['components']:
+                                    source_code = comp.get('source_for_chat', '')
                                     
-                                    contexts.append(RetrievedContext(
-                                        source_code=field_specific_context,
-                                        metadata={
-                                            'component_name': comp.get('component_name'),
-                                            'component_type': comp.get('component_type'),
-                                            'field_name': entity,
-                                            'field_details': field_details[0],
-                                            'source_strategy': comp.get('source_strategy'),
-                                            'total_source_lines': len(source_code.split('\n'))
-                                        },
-                                        relevance_score=0.95,  # High relevance for direct field match
-                                        retrieval_method=f"precise_field_{entity}_with_context"
-                                    ))
-                                else:
-                                    logger.warning(f"Field {entity} not found in source code for {program_name}")
+                                    if source_code and entity.upper() in source_code.upper():
+                                        # Get field details specific to this program
+                                        program_field_details = [
+                                            detail for detail in field_details 
+                                            if detail.get('program_name') == program_name
+                                        ]
+                                        
+                                        if program_field_details:
+                                            field_specific_context = self._extract_field_specific_context(
+                                                source_code, entity, program_field_details[0]
+                                            )
+                                            
+                                            contexts.append(RetrievedContext(
+                                                source_code=field_specific_context,
+                                                metadata={
+                                                    'component_name': comp.get('component_name'),
+                                                    'component_type': comp.get('component_type'),
+                                                    'field_name': entity,
+                                                    'field_details': program_field_details[0],
+                                                    'source_strategy': comp.get('source_strategy'),
+                                                    'program_match': program_name,  # Track which program this is for
+                                                    'total_source_lines': len(source_code.split('\n'))
+                                                },
+                                                relevance_score=0.95,
+                                                retrieval_method=f"precise_field_{entity}_in_{program_name}"
+                                            ))
             except Exception as e:
                 logger.error(f"Error retrieving field context for {entity}: {str(e)}")
                 continue
         
         return contexts
+
     
     def _extract_field_specific_context(self, source_code: str, field_name: str, field_details: Dict) -> str:
         """Extract field-specific context with surrounding code"""
@@ -609,23 +616,45 @@ class ContextRetriever:
         return '\n'.join(context_parts)
     
     def _retrieve_semantic_code_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
-        """Retrieve code contexts using semantic search"""
+        """Enhanced semantic code context retrieval with entity-specific matching"""
         contexts = []
         
         try:
             components = self.db_manager.get_session_components(session_id)
             
-            for comp in components[:5]:
+            # If query has specific entities, prioritize components that contain those entities
+            if query_plan.entities:
+                scored_components = []
+                for comp in components:
+                    score = 0
+                    comp_name = comp.get('component_name', '').upper()
+                    
+                    # Higher score for components mentioned in query entities
+                    for entity in query_plan.entities:
+                        entity_upper = entity.upper()
+                        if entity_upper in comp_name:
+                            score += 10
+                        elif any(part in comp_name for part in entity_upper.split('-')):
+                            score += 5
+                    
+                    scored_components.append((comp, score))
+                
+                # Sort by score and take top components
+                scored_components.sort(key=lambda x: x[1], reverse=True)
+                components = [comp for comp, score in scored_components[:8]]  # Top 8 components
+            
+            for comp in components:
                 source_data = self.db_manager.get_component_source_code(
-                    session_id, comp.get('component_name'), max_size=100000
+                    session_id, comp.get('component_name'), max_size=500000
                 )
                 
                 if source_data.get('success') and source_data.get('components'):
                     for source_comp in source_data['components']:
                         source_code = source_comp.get('source_for_chat', '')
                         if source_code:
-                            relevance = self._calculate_semantic_relevance(
-                                source_code, query_plan.entities, query_plan.query_type
+                            # Enhanced relevance calculation
+                            relevance = self._calculate_enhanced_semantic_relevance(
+                                source_code, query_plan.entities, query_plan.query_type, source_comp
                             )
                             
                             if relevance > 0.3:
@@ -635,16 +664,75 @@ class ContextRetriever:
                                         'component_name': source_comp.get('component_name'),
                                         'component_type': source_comp.get('component_type'),
                                         'total_lines': source_comp.get('total_lines', 0),
-                                        'source_strategy': source_comp.get('source_strategy')
+                                        'source_strategy': source_comp.get('source_strategy'),
+                                        'entity_matches': [e for e in query_plan.entities 
+                                                        if e.upper() in source_code.upper()]
                                     },
                                     relevance_score=relevance,
-                                    retrieval_method="semantic_code"
+                                    retrieval_method="semantic_code_enhanced"
                                 ))
+                                
+                            # Break after finding sufficient contexts to avoid overwhelming
+                            if len(contexts) >= 5:
+                                break
+                
+                if len(contexts) >= 5:
+                    break
+                    
         except Exception as e:
-            logger.error(f"Error in semantic code retrieval: {str(e)}")
+            logger.error(f"Error in enhanced semantic code retrieval: {str(e)}")
         
         return contexts
-    
+
+    def _calculate_enhanced_semantic_relevance(self, source_code: str, entities: List[str], 
+                                         query_type: QueryType, source_comp: Dict) -> float:
+        """Enhanced semantic relevance calculation with entity-specific matching"""
+        relevance = 0.0
+        source_upper = source_code.upper()
+        comp_name = source_comp.get('component_name', '').upper()
+        
+        # Higher weight for entity matches
+        entity_matches = 0
+        for entity in entities:
+            entity_upper = entity.upper()
+            
+            # Exact match in source code
+            if entity_upper in source_upper:
+                entity_matches += 1
+                relevance += 0.4
+                
+            # Partial match in component name
+            if entity_upper in comp_name or any(part in comp_name for part in entity_upper.split('-')):
+                relevance += 0.3
+        
+        # Boost relevance for components with multiple entity matches
+        if entity_matches > 1:
+            relevance += 0.2
+        
+        # Query type specific relevance
+        if query_type == QueryType.FIELD_ANALYSIS:
+            if any(pattern in source_upper for pattern in ['PIC ', 'MOVE ', 'COMPUTE ']):
+                relevance += 0.2
+        elif query_type == QueryType.BUSINESS_LOGIC:
+            if any(pattern in source_upper for pattern in ['IF ', 'EVALUATE ', 'PERFORM ']):
+                relevance += 0.2
+        elif query_type == QueryType.DATA_FLOW:
+            if any(pattern in source_upper for pattern in ['MOVE ', 'READ ', 'WRITE ']):
+                relevance += 0.2
+        elif query_type == QueryType.DEPENDENCIES:
+            if any(pattern in source_upper for pattern in ['CALL ', 'EXEC CICS']):
+                relevance += 0.2
+        
+        # Component type relevance
+        comp_type = source_comp.get('component_type', '')
+        if comp_type == 'PROGRAM' and query_type != QueryType.FIELD_ANALYSIS:
+            relevance += 0.1
+        elif comp_type == 'RECORD_LAYOUT' and query_type == QueryType.FIELD_ANALYSIS:
+            relevance += 0.2
+        
+        return min(relevance, 1.0)
+
+
     def _retrieve_structural_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
         """Retrieve structural information (layouts, divisions, etc.)"""
         contexts = []
@@ -656,7 +744,7 @@ class ContextRetriever:
                 program_name = layout.get('program_name')
                 if program_name:
                     source_data = self.db_manager.get_component_source_code(
-                        session_id, program_name, max_size=80000
+                        session_id, program_name, max_size=500000
                     )
                     
                     if source_data.get('success') and source_data.get('components'):
@@ -730,7 +818,7 @@ class ContextRetriever:
             for program in list(involved_programs)[:5]:  # Top 5 programs
                 try:
                     source_data = self.db_manager.get_component_source_code(
-                        session_id, program, max_size=200000
+                        session_id, program, max_size=500000
                     )
                     
                     if source_data.get('success') and source_data.get('components'):
@@ -1307,14 +1395,14 @@ class AgenticRAGChatManager:
 
     def _route_specialized_query(self, session_id: str, message: str, 
                             query_plan: QueryPlan, contexts: List) -> Optional[str]:
-        """LLM-based intelligent query routing"""
+        """Enhanced query routing with better program-specific context matching"""
         
         if not contexts:
-            return None  # No context to work with
+            return None
         
         try:
-            # Use LLM to determine the best response strategy
-            routing_decision = self._llm_determine_response_strategy(message, query_plan, contexts)
+            # Enhanced LLM routing with program-specific context
+            routing_decision = self._llm_determine_response_strategy_enhanced(message, query_plan, contexts)
             
             if routing_decision.get('route_to_specialized'):
                 handler_type = routing_decision.get('handler_type')
@@ -1322,7 +1410,7 @@ class AgenticRAGChatManager:
                 if handler_type == 'field_analysis':
                     return self._handle_field_analysis_query(session_id, message, query_plan, contexts)
                 elif handler_type == 'program_overview':
-                    return self._handle_program_overview_query(session_id, message, query_plan, contexts)
+                    return self._handle_program_overview_query_enhanced(session_id, message, query_plan, contexts)
                 elif handler_type == 'dependencies':
                     return self._handle_dependencies_query(session_id, message, query_plan, contexts)
                 elif handler_type == 'business_logic':
@@ -1330,73 +1418,115 @@ class AgenticRAGChatManager:
                 elif handler_type == 'file_operations':
                     return self._handle_file_operations_query(session_id, message, query_plan, contexts)
             
-            # If LLM says use general handler, return None to proceed with normal generation
             return None
             
         except Exception as e:
-            logger.error(f"Error in LLM query routing: {str(e)}")
-            return None  # Fall back to general handler
+            logger.error(f"Error in enhanced query routing: {str(e)}")
+            return None
 
-    def _llm_determine_response_strategy(self, message: str, query_plan: QueryPlan, contexts: List) -> Dict:
-        """Use LLM to intelligently determine the best response strategy"""
+    def _llm_determine_response_strategy_enhanced(self, message: str, query_plan: QueryPlan, contexts: List) -> Dict:
+        """Enhanced LLM routing with program-specific context awareness"""
         
-        # Build context summary for the LLM
-        context_summary = self._build_context_summary_for_routing(contexts)
+        context_summary = self._build_enhanced_context_summary(contexts, query_plan.entities)
         
         routing_prompt = f"""
-    You are an expert at analyzing user queries about COBOL programs and determining the best response strategy.
+    You are analyzing a user query about COBOL programs to determine the best response strategy.
 
     User Query: "{message}"
-    Query Type Detected: {query_plan.query_type.value}
+    Query Type: {query_plan.query_type.value}
     Entities Found: {query_plan.entities}
     Confidence: {query_plan.confidence:.2f}
 
     Available Context Summary:
     {context_summary}
 
-    Determine the best response strategy by analyzing what the user is really asking for.
+    IMPORTANT: Pay attention to which specific program(s) the user is asking about based on the entities found and context available.
 
-    Response Options:
-    1. "field_analysis" - User wants specific information about field definitions, usage, or properties
-    2. "program_overview" - User wants to understand what the program does, its purpose, or general functionality  
-    3. "dependencies" - User wants to know about program calls, file usage, or system interactions
-    4. "business_logic" - User wants to understand calculations, business rules, or processing logic
-    5. "file_operations" - User wants specific information about file I/O operations
-    6. "general" - Use standard LLM generation with all available context
+    Response Strategy Options:
+    1. "field_analysis" - User wants field information (definitions, usage, properties)
+    2. "program_overview" - User wants program functionality, purpose, or general info
+    3. "dependencies" - User wants program calls, file usage, system interactions
+    4. "business_logic" - User wants calculations, rules, processing logic
+    5. "file_operations" - User wants file I/O operations
+    6. "general" - Use standard generation
 
     Return JSON:
     {{
         "route_to_specialized": true/false,
-        "handler_type": "program_overview|field_analysis|dependencies|business_logic|file_operations|general",
+        "handler_type": "field_analysis|program_overview|dependencies|business_logic|file_operations|general",
+        "target_programs": ["program1", "program2"],
         "confidence": 0.8,
-        "reasoning": "Brief explanation of why this handler was chosen"
+        "reasoning": "Explanation including which program(s) this relates to"
     }}
-
-    Examples:
-    - "What does this program do?" → program_overview
-    - "Tell me about CUSTOMER-NAME field" → field_analysis  
-    - "What programs does this call?" → dependencies
-    - "How does it calculate totals?" → business_logic
-    - "What files does it read?" → file_operations
     """
         
         try:
-            response = self.llm_client.call_llm(routing_prompt, max_tokens=300, temperature=0.2)
+            response = self.llm_client.call_llm(routing_prompt, max_tokens=400, temperature=0.2)
             
             if response.success:
                 routing_result = self.llm_client.extract_json_from_response(response.content)
                 
                 if isinstance(routing_result, dict):
-                    logger.info(f"LLM Routing Decision: {routing_result.get('handler_type')} (confidence: {routing_result.get('confidence', 0)})")
-                    logger.info(f"Reasoning: {routing_result.get('reasoning', 'Not provided')}")
+                    logger.info(f"Enhanced routing: {routing_result.get('handler_type')} for programs: {routing_result.get('target_programs', [])}")
                     return routing_result
             
-            # Fallback to general handler
             return {"route_to_specialized": False, "handler_type": "general"}
             
         except Exception as e:
-            logger.error(f"Error in LLM routing: {str(e)}")
+            logger.error(f"Error in enhanced LLM routing: {str(e)}")
             return {"route_to_specialized": False, "handler_type": "general"}
+        
+    def _build_enhanced_context_summary(self, contexts: List, entities: List[str]) -> str:
+        """Build enhanced context summary with program-specific matching"""
+    
+        if not contexts:
+            return "No context available"
+        
+        summary_parts = []
+        program_contexts = {}
+        
+        # Group contexts by program
+        for context in contexts:
+            metadata = context.metadata
+            comp_name = metadata.get('component_name', 'Unknown')
+            program_match = metadata.get('program_match', comp_name)
+            
+            if program_match not in program_contexts:
+                program_contexts[program_match] = []
+            program_contexts[program_match].append(context)
+        
+        # Build summary for each program
+        for program_name, prog_contexts in program_contexts.items():
+            summary_parts.append(f"=== PROGRAM: {program_name} ===")
+            
+            # Check which entities match this program
+            matching_entities = []
+            for context in prog_contexts:
+                entity_matches = context.metadata.get('entity_matches', [])
+                matching_entities.extend(entity_matches)
+            
+            if matching_entities:
+                summary_parts.append(f"Matches entities: {', '.join(set(matching_entities))}")
+            
+            # Add context details
+            for i, context in enumerate(prog_contexts[:2], 1):  # Max 2 contexts per program
+                metadata = context.metadata
+                
+                summary_parts.append(f"Context {i}:")
+                summary_parts.append(f"- Type: {metadata.get('component_type', 'Unknown')}")
+                
+                if 'field_name' in metadata:
+                    summary_parts.append(f"- Field: {metadata['field_name']}")
+                if 'total_lines' in metadata:
+                    summary_parts.append(f"- Lines: {metadata['total_lines']}")
+                
+                # Source preview
+                source_preview = context.source_code[:150].replace('\n', ' ').strip()
+                summary_parts.append(f"- Preview: {source_preview}...")
+            
+            summary_parts.append("")
+        
+        return '\n'.join(summary_parts)
 
     def _build_context_summary_for_routing(self, contexts: List) -> str:
         """Build a concise context summary for routing decisions"""
@@ -1430,79 +1560,114 @@ class AgenticRAGChatManager:
         
         return '\n'.join(summary_parts)
 
-    def _handle_program_overview_query(self, session_id: str, message: str, 
-                                    query_plan: QueryPlan, contexts: List) -> str:
-        """Handle queries asking 'what does this program do'"""
+    def _handle_program_overview_query_enhanced(self, session_id: str, message: str, 
+                                           query_plan: QueryPlan, contexts: List) -> str:
+        """Enhanced program overview with program-specific context matching"""
+        
+        if not contexts:
+            return "I don't have enough context to explain what this program does."
+        
         try:
-            if not contexts:
-                return "I don't have enough context to explain what this program does."
-            
-            # Build program overview prompt
-            overview_prompt = self._build_program_overview_prompt(message, contexts)
-            
-            response = self.llm_client.call_llm(overview_prompt, max_tokens=1500, temperature=0.3)
-            
-            if response.success and response.content:
-                return self._post_process_program_overview(response.content, contexts)
-            else:
-                return self._generate_fallback_program_overview(contexts)
+            # Group contexts by program to handle multi-program queries
+            program_contexts = {}
+            for context in contexts:
+                comp_name = context.metadata.get('component_name', 'Unknown')
+                program_match = context.metadata.get('program_match', comp_name)
                 
+                if program_match not in program_contexts:
+                    program_contexts[program_match] = []
+                program_contexts[program_match].append(context)
+            
+            # If user mentioned specific entities, focus on programs that contain them
+            target_programs = []
+            if query_plan.entities:
+                for entity in query_plan.entities:
+                    entity_upper = entity.upper()
+                    for prog_name in program_contexts.keys():
+                        if (entity_upper in prog_name.upper() or 
+                            any(entity_upper in ctx.source_code.upper() for ctx in program_contexts[prog_name])):
+                            if prog_name not in target_programs:
+                                target_programs.append(prog_name)
+            
+            # If no specific programs found, use all available
+            if not target_programs:
+                target_programs = list(program_contexts.keys())
+            
+            response_parts = []
+            
+            for program_name in target_programs[:2]:  # Limit to 2 programs to avoid overwhelming
+                if program_name in program_contexts:
+                    prog_contexts = program_contexts[program_name]
+                    
+                    overview_prompt = self._build_program_overview_prompt_enhanced(
+                        message, prog_contexts, program_name, query_plan.entities
+                    )
+                    
+                    response = self.llm_client.call_llm(overview_prompt, max_tokens=1200, temperature=0.3)
+                    
+                    if response.success and response.content:
+                        cleaned_response = response.content.strip()
+                        response_parts.append(f"**{program_name}:**\n{cleaned_response}")
+                    else:
+                        response_parts.append(f"**{program_name}:**\n{self._generate_fallback_program_overview(prog_contexts)}")
+            
+            return '\n\n'.join(response_parts) if response_parts else "No program information available."
+            
         except Exception as e:
-            logger.error(f"Error in program overview handler: {str(e)}")
+            logger.error(f"Error in enhanced program overview handler: {str(e)}")
             return f"Error analyzing program overview: {str(e)}"
 
-    def _build_program_overview_prompt(self, message: str, contexts: List) -> str:
-        """Build specialized prompt for program overview"""
+    def _build_program_overview_prompt_enhanced(self, message: str, contexts: List, 
+                                          program_name: str, entities: List[str]) -> str:
+        """Build enhanced program overview prompt with entity context"""
         
         prompt_parts = [
-            "You are a COBOL expert explaining what a mainframe program does in business terms.",
-            f'The user asked: "{message}"',
-            "",
-            "Based on the source code analysis below, explain:",
-            "1. What this program's main business purpose is",
-            "2. What key operations it performs", 
-            "3. What systems or files it interacts with",
-            "4. How it fits into the overall business process",
-            "",
-            "Make it conversational and business-focused, not technical.",
+            f"You are explaining what the COBOL program '{program_name}' does in business terms.",
+            f'User asked: "{message}"',
             ""
         ]
+        
+        if entities:
+            matching_entities = []
+            for context in contexts:
+                entity_matches = context.metadata.get('entity_matches', [])
+                matching_entities.extend(entity_matches)
+            
+            if matching_entities:
+                prompt_parts.extend([
+                    f"User is specifically asking about: {', '.join(set(matching_entities))}",
+                    ""
+                ])
+        
+        prompt_parts.extend([
+            "Based on the source code analysis below, explain:",
+            "1. What this program's main business purpose is",
+            "2. What key operations it performs",
+            "3. What systems or files it interacts with", 
+            "4. How it fits into the wealth management process",
+            "",
+            "Keep it business-focused and conversational.",
+            ""
+        ])
         
         # Add context information
         for i, context in enumerate(contexts, 1):
             metadata = context.metadata
-            component_name = metadata.get('component_name', 'Unknown')
             
             prompt_parts.extend([
-                f"=== PROGRAM ANALYSIS {i}: {component_name} ===",
+                f"=== SOURCE ANALYSIS {i}: {program_name} ===",
                 ""
             ])
             
-            # Add business purpose if available
-            if 'business_purpose' in metadata:
-                prompt_parts.append(f"Business Purpose: {metadata['business_purpose']}")
-                prompt_parts.append("")
+            if 'field_name' in metadata:
+                prompt_parts.append(f"Field Context: {metadata['field_name']}")
             
-            # Add dependency summary
-            if 'dependencies' in metadata:
-                dependencies = metadata['dependencies']
-                if dependencies:
-                    program_calls = [d for d in dependencies if 'PROGRAM' in d.get('relationship_type', '')]
-                    file_ops = [d for d in dependencies if 'FILE' in d.get('relationship_type', '')]
-                    
-                    if program_calls:
-                        called_programs = [d.get('target_component') for d in program_calls]
-                        prompt_parts.append(f"Calls Programs: {', '.join(called_programs[:5])}")
-                    
-                    if file_ops:
-                        files_used = [d.get('target_component') for d in file_ops]
-                        prompt_parts.append(f"Uses Files: {', '.join(files_used[:5])}")
-                    
-                    prompt_parts.append("")
+            if metadata.get('total_lines'):
+                prompt_parts.append(f"Program Size: {metadata['total_lines']} lines")
             
-            # Add relevant source code sections
             prompt_parts.extend([
-                "Key Source Code Sections:",
+                "",
+                "Source Code:",
                 context.source_code,
                 "",
                 "=" * 60,
