@@ -962,7 +962,7 @@ class ContextRetriever:
             
             for comp in business_components:
                 source_data = self.db_manager.get_component_source_code(
-                    session_id, comp.get('component_name'), max_size=70000
+                    session_id, comp.get('component_name'), max_size=500000
                 )
                 
                 if source_data.get('success') and source_data.get('components'):
