@@ -292,33 +292,46 @@ class QueryAnalyzer:
         )
     
     def _classify_query_type(self, message: str, entities: List[str]) -> QueryType:
-        """Classify the type of query"""
+        """Enhanced query classification"""
         message_lower = message.lower()
         
+        # Field analysis patterns
         if any(pattern in message_lower for pattern in [
             'field', 'what is', 'tell me about', 'how is', 'where is', 'show me'
-        ]) and entities:
+        ]) and entities and not any(prog_word in message_lower for prog_word in ['call', 'program', 'file']):
             return QueryType.FIELD_ANALYSIS
+        
+        # Program structure patterns
         elif any(pattern in message_lower for pattern in [
             'program structure', 'layout', 'record', 'data structure', 'working storage'
         ]):
             return QueryType.PROGRAM_STRUCTURE
+            
+        # Business logic patterns
         elif any(pattern in message_lower for pattern in [
-            'business logic', 'calculation', 'compute', 'rule', 'process', 'workflow'
+            'business logic', 'calculation', 'compute', 'rule', 'process', 'workflow', 'how does'
         ]):
             return QueryType.BUSINESS_LOGIC
+            
+        # Data flow patterns
         elif any(pattern in message_lower for pattern in [
             'data flow', 'move', 'copy', 'transfer', 'populate', 'source', 'target'
         ]):
             return QueryType.DATA_FLOW
+            
+        # Dependencies patterns (enhanced)
         elif any(pattern in message_lower for pattern in [
-            'call', 'calls', 'depend', 'link', 'relationship', 'connect'
+            'call', 'calls', 'program call', 'depend', 'link', 'relationship', 'connect',
+            'file', 'read', 'write', 'cics', 'uses', 'accesses'
         ]):
             return QueryType.DEPENDENCIES
+            
+        # Code search patterns
         elif any(pattern in message_lower for pattern in [
-            'find', 'search', 'locate', 'contains', 'uses'
+            'find', 'search', 'locate', 'contains'
         ]):
             return QueryType.CODE_SEARCH
+            
         else:
             return QueryType.GENERAL
     
@@ -430,7 +443,7 @@ class ContextRetriever:
         return filtered_contexts
     
     def _execute_strategy(self, session_id: str, strategy: RetrievalStrategy, query_plan: QueryPlan) -> List[RetrievedContext]:
-        """Execute a specific retrieval strategy"""
+        """Enhanced strategy execution with comprehensive support"""
         contexts = []
         
         if strategy == RetrievalStrategy.PRECISE_FIELD:
@@ -440,7 +453,7 @@ class ContextRetriever:
         elif strategy == RetrievalStrategy.STRUCTURAL:
             contexts = self._retrieve_structural_contexts(session_id, query_plan)
         elif strategy == RetrievalStrategy.DEPENDENCY:
-            contexts = self._retrieve_dependency_contexts(session_id, query_plan.entities)
+            contexts = self._retrieve_dependency_contexts(session_id, query_plan)
         elif strategy == RetrievalStrategy.BUSINESS_CONTEXT:
             contexts = self._retrieve_business_contexts(session_id, query_plan)
         elif strategy == RetrievalStrategy.VECTOR_SEARCH:
@@ -486,7 +499,7 @@ class ContextRetriever:
         return contexts
     
     def _retrieve_field_contexts(self, session_id: str, entities: List[str]) -> List[RetrievedContext]:
-        """Retrieve contexts for specific fields"""
+        """Retrieve contexts for specific fields with more source code"""
         contexts = []
         
         for entity in entities:
@@ -497,31 +510,103 @@ class ContextRetriever:
                 if field_details:
                     program_name = field_details[0].get('program_name')
                     if program_name:
+                        # CHANGE 4: Request more source code
                         source_data = self.db_manager.get_component_source_code(
-                            session_id, program_name, max_size=150000
+                            session_id, program_name, max_size=300000  # Increased significantly
                         )
                         
                         if source_data.get('success') and source_data.get('components'):
                             for comp in source_data['components']:
                                 source_code = comp.get('source_for_chat', '')
-                                if entity.upper() in source_code.upper():
+                                
+                                # Verify field is actually in the source
+                                if source_code and entity.upper() in source_code.upper():
+                                    # Extract field-specific context from full source
+                                    field_specific_context = self._extract_field_specific_context(
+                                        source_code, entity, field_details[0]
+                                    )
+                                    
                                     contexts.append(RetrievedContext(
-                                        source_code=source_code,
+                                        source_code=field_specific_context,
                                         metadata={
                                             'component_name': comp.get('component_name'),
                                             'component_type': comp.get('component_type'),
                                             'field_name': entity,
                                             'field_details': field_details[0],
-                                            'source_strategy': comp.get('source_strategy')
+                                            'source_strategy': comp.get('source_strategy'),
+                                            'total_source_lines': len(source_code.split('\n'))
                                         },
-                                        relevance_score=0.9,
-                                        retrieval_method=f"precise_field_{entity}"
+                                        relevance_score=0.95,  # High relevance for direct field match
+                                        retrieval_method=f"precise_field_{entity}_with_context"
                                     ))
+                                else:
+                                    logger.warning(f"Field {entity} not found in source code for {program_name}")
             except Exception as e:
                 logger.error(f"Error retrieving field context for {entity}: {str(e)}")
                 continue
         
         return contexts
+    
+    def _extract_field_specific_context(self, source_code: str, field_name: str, field_details: Dict) -> str:
+        """Extract field-specific context with surrounding code"""
+        lines = source_code.split('\n')
+        field_upper = field_name.upper()
+        relevant_lines = []
+        
+        # Find all lines containing the field
+        field_line_numbers = []
+        for i, line in enumerate(lines):
+            if field_upper in line.upper():
+                field_line_numbers.append(i)
+        
+        # Build context around each occurrence
+        context_parts = [
+            f"=== FIELD ANALYSIS: {field_name} ===",
+            f"Field found at {len(field_line_numbers)} locations in source code",
+            ""
+        ]
+        
+        # Add field definition context
+        def_line = field_details.get('definition_line_number', 0)
+        if def_line > 0:
+            start_idx = max(0, def_line - 10)
+            end_idx = min(len(lines), def_line + 5)
+            context_parts.extend([
+                f"--- FIELD DEFINITION (Lines {start_idx+1}-{end_idx}) ---"
+            ])
+            for i in range(start_idx, end_idx):
+                marker = ">>> " if i == def_line - 1 else "    "
+                context_parts.append(f"{marker}{i+1:4d}: {lines[i]}")
+            context_parts.append("")
+        
+        # Add usage contexts (first 3 occurrences)
+        for i, line_num in enumerate(field_line_numbers[:3]):
+            start_idx = max(0, line_num - 3)
+            end_idx = min(len(lines), line_num + 4)
+            
+            context_parts.extend([
+                f"--- USAGE CONTEXT {i+1} (Lines {start_idx+1}-{end_idx}) ---"
+            ])
+            for j in range(start_idx, end_idx):
+                marker = ">>> " if j == line_num else "    "
+                context_parts.append(f"{marker}{j+1:4d}: {lines[j]}")
+            context_parts.append("")
+        
+        # Add field references summary
+        field_refs_json = field_details.get('field_references_json', '[]')
+        try:
+            field_refs = json.loads(field_refs_json) if field_refs_json else []
+            if field_refs:
+                context_parts.extend([
+                    f"--- FIELD REFERENCES SUMMARY ({len(field_refs)} total) ---"
+                ])
+                for ref in field_refs[:5]:  # First 5 references
+                    context_parts.append(f"Line {ref.get('line_number')}: {ref.get('operation_type')} - {ref.get('line_content')}")
+                context_parts.append("")
+        except:
+            pass
+        
+        return '\n'.join(context_parts)
     
     def _retrieve_semantic_code_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
         """Retrieve code contexts using semantic search"""
@@ -594,48 +679,187 @@ class ContextRetriever:
         
         return contexts
     
-    def _retrieve_dependency_contexts(self, session_id: str, entities: List[str]) -> List[RetrievedContext]:
-        """Retrieve dependency-related contexts"""
+    def _retrieve_dependency_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
+        """Enhanced dependency retrieval for program calls and file usage"""
         contexts = []
         
         try:
+            # Get all dependencies from database
             dependencies = self.db_manager.get_dependencies(session_id)
             
+            # Filter dependencies based on query entities and type
             relevant_deps = []
-            for entity in entities:
-                relevant_deps.extend([
-                    dep for dep in dependencies 
-                    if entity.upper() in dep.get('source_component', '').upper() or 
-                       entity.upper() in dep.get('target_component', '').upper()
-                ])
+            query_entities_upper = [entity.upper() for entity in query_plan.entities]
             
-            involved_programs = set()
-            for dep in relevant_deps[:5]:
-                involved_programs.add(dep.get('source_component'))
-                involved_programs.add(dep.get('target_component'))
-            
-            for program in list(involved_programs)[:3]:
-                source_data = self.db_manager.get_component_source_code(
-                    session_id, program, max_size=60000
+            for dep in dependencies:
+                source_upper = dep.get('source_component', '').upper()
+                target_upper = dep.get('target_component', '').upper()
+                
+                # Check if any entities match source or target
+                entity_match = any(
+                    entity in source_upper or entity in target_upper 
+                    for entity in query_entities_upper
                 )
                 
-                if source_data.get('success') and source_data.get('components'):
-                    for comp in source_data['components']:
-                        contexts.append(RetrievedContext(
-                            source_code=comp.get('source_for_chat', ''),
-                            metadata={
-                                'component_name': comp.get('component_name'),
-                                'component_type': comp.get('component_type'),
-                                'dependencies': relevant_deps
-                            },
-                            relevance_score=0.7,
-                            retrieval_method="dependency"
-                        ))
-                        
+                # Also check for query type specific dependencies
+                rel_type = dep.get('relationship_type', '')
+                query_type_match = False
+                
+                if query_plan.query_type == QueryType.DEPENDENCIES:
+                    query_type_match = True
+                elif 'program' in ' '.join(query_plan.entities).lower():
+                    query_type_match = 'PROGRAM' in rel_type or 'CALL' in rel_type
+                elif 'file' in ' '.join(query_plan.entities).lower():
+                    query_type_match = 'FILE' in rel_type or 'CICS' in rel_type
+                
+                if entity_match or query_type_match:
+                    relevant_deps.append(dep)
+            
+            if not relevant_deps:
+                logger.info(f"No relevant dependencies found for entities: {query_plan.entities}")
+                return contexts
+            
+            # Get source code for programs involved in dependencies
+            involved_programs = set()
+            for dep in relevant_deps[:10]:  # Limit to top 10
+                involved_programs.add(dep.get('source_component'))
+                if dep.get('relationship_type') in ['PROGRAM_CALL']:
+                    involved_programs.add(dep.get('target_component'))
+            
+            # Retrieve source code for involved programs
+            for program in list(involved_programs)[:5]:  # Top 5 programs
+                try:
+                    source_data = self.db_manager.get_component_source_code(
+                        session_id, program, max_size=200000
+                    )
+                    
+                    if source_data.get('success') and source_data.get('components'):
+                        for comp in source_data['components']:
+                            # Create dependency-specific context
+                            dep_context = self._create_dependency_context(
+                                comp, relevant_deps, query_plan.entities
+                            )
+                            
+                            contexts.append(RetrievedContext(
+                                source_code=dep_context,
+                                metadata={
+                                    'component_name': comp.get('component_name'),
+                                    'component_type': comp.get('component_type'),
+                                    'dependencies': [dep for dep in relevant_deps 
+                                                if dep.get('source_component') == program or 
+                                                    dep.get('target_component') == program],
+                                    'total_dependencies': len(relevant_deps),
+                                    'source_strategy': comp.get('source_strategy')
+                                },
+                                relevance_score=0.8,
+                                retrieval_method="dependency_analysis"
+                            ))
+                except Exception as e:
+                    logger.error(f"Error retrieving dependency context for {program}: {str(e)}")
+                    continue
+                    
         except Exception as e:
             logger.error(f"Error in dependency retrieval: {str(e)}")
         
         return contexts
+    
+    def _create_dependency_context(self, component: Dict, relevant_deps: List[Dict], entities: List[str]) -> str:
+        """Create specialized context for dependency analysis"""
+        source_code = component.get('source_for_chat', '')
+        comp_name = component.get('component_name', 'Unknown')
+        
+        context_parts = [
+            f"=== DEPENDENCY ANALYSIS: {comp_name} ===",
+            ""
+        ]
+        
+        # Categorize dependencies
+        program_calls = [d for d in relevant_deps if 'PROGRAM' in d.get('relationship_type', '') or 'CALL' in d.get('relationship_type', '')]
+        file_deps = [d for d in relevant_deps if 'FILE' in d.get('relationship_type', '')]
+        cics_deps = [d for d in relevant_deps if 'CICS' in d.get('relationship_type', '')]
+        
+        # Add dependency summary
+        if program_calls:
+            context_parts.extend([
+                f"PROGRAM CALLS ({len(program_calls)}):",
+                ""
+            ])
+            for dep in program_calls[:5]:
+                context_parts.append(f"• Calls: {dep.get('target_component')} ({dep.get('relationship_type')})")
+                # Try to extract line info from analysis details
+                try:
+                    details = json.loads(dep.get('analysis_details_json', '{}'))
+                    if details.get('line_number'):
+                        context_parts.append(f"  Line {details['line_number']}")
+                except:
+                    pass
+            context_parts.append("")
+        
+        if file_deps:
+            context_parts.extend([
+                f"FILE OPERATIONS ({len(file_deps)}):",
+                ""
+            ])
+            for dep in file_deps[:5]:
+                io_type = "reads from" if "INPUT" in dep.get('relationship_type', '') else "writes to" if "OUTPUT" in dep.get('relationship_type', '') else "accesses"
+                context_parts.append(f"• {io_type}: {dep.get('target_component')} ({dep.get('relationship_type')})")
+            context_parts.append("")
+        
+        if cics_deps:
+            context_parts.extend([
+                f"CICS OPERATIONS ({len(cics_deps)}):",
+                ""
+            ])
+            for dep in cics_deps[:5]:
+                context_parts.append(f"• CICS {dep.get('target_component')} ({dep.get('relationship_type')})")
+            context_parts.append("")
+        
+        # Add relevant source code sections
+        if source_code:
+            context_parts.extend([
+                "=== RELEVANT SOURCE CODE SECTIONS ===",
+                ""
+            ])
+            
+            # Extract sections related to the query entities
+            lines = source_code.split('\n')
+            relevant_sections = []
+            
+            for entity in entities:
+                entity_upper = entity.upper()
+                for i, line in enumerate(lines):
+                    line_upper = line.upper()
+                    if entity_upper in line_upper:
+                        # Add context around this line
+                        start_idx = max(0, i - 3)
+                        end_idx = min(len(lines), i + 4)
+                        
+                        section = []
+                        for j in range(start_idx, end_idx):
+                            marker = ">>> " if j == i else "    "
+                            section.append(f"{marker}{j+1:4d}: {lines[j]}")
+                        
+                        relevant_sections.append({
+                            'entity': entity,
+                            'line_number': i + 1,
+                            'section': '\n'.join(section)
+                        })
+                        
+                        if len(relevant_sections) >= 5:  # Limit sections
+                            break
+                
+                if len(relevant_sections) >= 5:
+                    break
+            
+            # Add the relevant sections to context
+            for section_info in relevant_sections:
+                context_parts.extend([
+                    f"--- {section_info['entity']} at Line {section_info['line_number']} ---",
+                    section_info['section'],
+                    ""
+                ])
+        
+        return '\n'.join(context_parts)
     
     def _retrieve_business_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
         """Retrieve business context information"""
@@ -1080,26 +1304,190 @@ class AgenticRAGChatManager:
         }
     
     def _route_specialized_query(self, session_id: str, message: str, 
-                               query_plan: QueryPlan, contexts: List) -> Optional[str]:
-        """Route specialized queries to dedicated handlers"""
+                           query_plan: QueryPlan, contexts: List) -> Optional[str]:
+        """Enhanced query routing for different types"""
+        
+        message_lower = message.lower()
         
         # Field definition queries
         if (query_plan.query_type == QueryType.FIELD_ANALYSIS and 
             len(query_plan.entities) == 1 and 
             query_plan.confidence > 0.7):
-            
-            return self._handle_field_definition_query(
-                session_id, query_plan.entities[0], contexts
-            )
+            return self._handle_field_definition_query(session_id, query_plan.entities[0], contexts)
         
-        # Business logic queries  
+        # Program calls queries
+        elif ('call' in message_lower or 'calls' in message_lower or 'program' in message_lower):
+            return self._handle_program_calls_query(session_id, message, query_plan, contexts)
+        
+        # File usage queries  
+        elif ('file' in message_lower or 'read' in message_lower or 'write' in message_lower):
+            return self._handle_file_usage_query(session_id, message, query_plan, contexts)
+        
+        # CICS operations queries
+        elif ('cics' in message_lower):
+            return self._handle_cics_operations_query(session_id, message, query_plan, contexts)
+        
+        # Business logic queries
         elif (query_plan.query_type == QueryType.BUSINESS_LOGIC and
-              'how' in message.lower() and 'calculate' in message.lower()):
-            
+            'how' in message_lower and ('calculate' in message_lower or 'process' in message_lower)):
             return self._handle_calculation_query(session_id, message, contexts)
         
         return None
+
+    def _handle_program_calls_query(self, session_id: str, message: str, 
+                                query_plan: QueryPlan, contexts: List) -> str:
+        """Handle program calls queries"""
+        try:
+            if not contexts:
+                return "I couldn't find program call information in the analyzed code."
+            
+            response_parts = [
+                "**Program Calls Analysis**",
+                ""
+            ]
+            
+            all_program_calls = []
+            
+            for context in contexts:
+                metadata = context.metadata
+                dependencies = metadata.get('dependencies', [])
+                
+                # Extract program call dependencies
+                program_calls = [dep for dep in dependencies 
+                            if 'PROGRAM' in dep.get('relationship_type', '') or 
+                                'CALL' in dep.get('relationship_type', '')]
+                
+                if program_calls:
+                    component_name = metadata.get('component_name', 'Unknown')
+                    response_parts.extend([
+                        f"**In {component_name}:**",
+                        ""
+                    ])
+                    
+                    for call in program_calls:
+                        target_prog = call.get('target_component')
+                        rel_type = call.get('relationship_type')
+                        
+                        # Extract line information
+                        try:
+                            details = json.loads(call.get('analysis_details_json', '{}'))
+                            line_info = f" (Line {details.get('line_number', 'Unknown')})" if details.get('line_number') else ""
+                        except:
+                            line_info = ""
+                        
+                        response_parts.append(f"• **{rel_type}**: {target_prog}{line_info}")
+                        
+                        all_program_calls.append({
+                            'source': component_name,
+                            'target': target_prog,
+                            'type': rel_type
+                        })
+                    
+                    response_parts.append("")
+            
+            if not all_program_calls:
+                return "No program calls found in the analyzed components."
+            
+            # Add summary
+            response_parts.extend([
+                f"**Summary**: Found {len(all_program_calls)} program call(s) across {len(contexts)} component(s).",
+                ""
+            ])
+            
+            # Add source code evidence if available
+            for context in contexts:
+                source_lines = context.source_code.split('\n')
+                call_lines = [line for line in source_lines 
+                            if 'CALL' in line.upper() or 'LINK' in line.upper() or 'XCTL' in line.upper()]
+                
+                if call_lines:
+                    response_parts.extend([
+                        "**Source Code Examples:**",
+                        ""
+                    ])
+                    for line in call_lines[:3]:  # Show first 3
+                        response_parts.append(f"```cobol\n{line.strip()}\n```")
+                    response_parts.append("")
+                    break
+            
+            return '\n'.join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error in program calls handler: {str(e)}")
+            return f"Error analyzing program calls: {str(e)}"
     
+    def _handle_file_usage_query(self, session_id: str, message: str, 
+                            query_plan: QueryPlan, contexts: List) -> str:
+        """Handle file usage queries"""
+        try:
+            if not contexts:
+                return "I couldn't find file usage information in the analyzed code."
+            
+            response_parts = [
+                "**File Usage Analysis**",
+                ""
+            ]
+            
+            all_file_ops = []
+            
+            for context in contexts:
+                metadata = context.metadata
+                dependencies = metadata.get('dependencies', [])
+                
+                # Extract file dependencies
+                file_deps = [dep for dep in dependencies 
+                            if 'FILE' in dep.get('relationship_type', '')]
+                
+                if file_deps:
+                    component_name = metadata.get('component_name', 'Unknown')
+                    response_parts.extend([
+                        f"**In {component_name}:**",
+                        ""
+                    ])
+                    
+                    # Group by file type
+                    input_files = [d for d in file_deps if 'INPUT' in d.get('relationship_type', '')]
+                    output_files = [d for d in file_deps if 'OUTPUT' in d.get('relationship_type', '')]
+                    io_files = [d for d in file_deps if 'INPUT_OUTPUT' in d.get('relationship_type', '')]
+                    
+                    if input_files:
+                        response_parts.append("**Input Files:**")
+                        for dep in input_files:
+                            response_parts.append(f"• Reads from: {dep.get('target_component')}")
+                        response_parts.append("")
+                    
+                    if output_files:
+                        response_parts.append("**Output Files:**")
+                        for dep in output_files:
+                            response_parts.append(f"• Writes to: {dep.get('target_component')}")
+                        response_parts.append("")
+                    
+                    if io_files:
+                        response_parts.append("**Input/Output Files:**")
+                        for dep in io_files:
+                            response_parts.append(f"• Processes: {dep.get('target_component')}")
+                        response_parts.append("")
+                    
+                    all_file_ops.extend(file_deps)
+            
+            if not all_file_ops:
+                return "No file operations found in the analyzed components."
+            
+            # Add summary with file operation breakdown
+            input_count = len([f for f in all_file_ops if 'INPUT' in f.get('relationship_type', '')])
+            output_count = len([f for f in all_file_ops if 'OUTPUT' in f.get('relationship_type', '')])
+            
+            response_parts.extend([
+                f"**Summary**: Found {len(all_file_ops)} file operation(s) - {input_count} input, {output_count} output",
+                ""
+            ])
+            
+            return '\n'.join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error in file usage handler: {str(e)}")
+            return f"Error analyzing file usage: {str(e)}"
+
     def _handle_field_definition_query(self, session_id: str, field_name: str, contexts: List) -> str:
         """Specialized handler for field definition queries"""
         try:
@@ -1186,6 +1574,68 @@ class AgenticRAGChatManager:
             response_parts.append("")
         
         return '\n'.join(response_parts)
+    
+    def _handle_cics_operations_query(self, session_id: str, message: str, 
+                                 query_plan: QueryPlan, contexts: List) -> str:
+        """Handle CICS operations queries"""
+        try:
+            if not contexts:
+                return "I couldn't find CICS operations in the analyzed code."
+            
+            response_parts = [
+                "**CICS Operations Analysis**",
+                ""
+            ]
+            
+            all_cics_ops = []
+            
+            for context in contexts:
+                metadata = context.metadata
+                dependencies = metadata.get('dependencies', [])
+                
+                # Extract CICS dependencies
+                cics_deps = [dep for dep in dependencies 
+                            if 'CICS' in dep.get('relationship_type', '')]
+                
+                if cics_deps:
+                    component_name = metadata.get('component_name', 'Unknown')
+                    response_parts.extend([
+                        f"**In {component_name}:**",
+                        ""
+                    ])
+                    
+                    for dep in cics_deps:
+                        file_name = dep.get('target_component')
+                        rel_type = dep.get('relationship_type')
+                        
+                        # Determine operation type
+                        if 'INPUT' in rel_type:
+                            op_desc = f"Reads from CICS file: {file_name}"
+                        elif 'OUTPUT' in rel_type:
+                            op_desc = f"Writes to CICS file: {file_name}"
+                        else:
+                            op_desc = f"Accesses CICS file: {file_name}"
+                        
+                        response_parts.append(f"• {op_desc}")
+                        all_cics_ops.append(dep)
+                    
+                    response_parts.append("")
+            
+            if not all_cics_ops:
+                return "No CICS operations found in the analyzed components."
+            
+            # Add CICS-specific summary
+            response_parts.extend([
+                f"**Summary**: Found {len(all_cics_ops)} CICS operation(s) across online transaction processing.",
+                "These operations indicate this is an online transaction program that interacts with CICS files.",
+                ""
+            ])
+            
+            return '\n'.join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error in CICS operations handler: {str(e)}")
+            return f"Error analyzing CICS operations: {str(e)}"
     
     def _log_conversation_with_metrics(self, session_id: str, conversation_id: str, 
                                      message: str, response: str, query_plan: QueryPlan,

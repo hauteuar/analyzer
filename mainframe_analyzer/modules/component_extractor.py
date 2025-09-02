@@ -52,18 +52,20 @@ class ComponentExtractor:
 
             for component in components:
                 try:
-                    # Store main component (without derived_components in JSON)
+                    # CHANGE 1: Ensure source content is always stored
                     main_component_data = {
                         'name': component.get('name', 'UNKNOWN'),
                         'friendly_name': component.get('friendly_name', component.get('name', 'UNKNOWN')),
                         'type': component.get('type', 'UNKNOWN'),
                         'file_path': file_name,
-                        'content': file_content,
+                        'content': file_content,  # ALWAYS store full source
                         'total_lines': component.get('total_lines', 0),
+                        'business_purpose': component.get('business_purpose', ''),
+                        #'total_lines': component.get('total_lines', 0),
                         'executable_lines': component.get('executable_lines', 0),
                         'comment_lines': component.get('comment_lines', 0),
                         'total_fields': len(component.get('fields', [])),
-                        'business_purpose': component.get('business_purpose', ''),
+                        #'business_purpose': component.get('business_purpose', ''),
                         'complexity_score': component.get('complexity_score', 0.5),
                         'llm_summary': component.get('llm_summary', {}),
                         # Don't include derived_components in main JSON
@@ -76,12 +78,13 @@ class ComponentExtractor:
                     }
                     
                     # Store main component
-                    self.db_manager.store_component_analysis(
+                    self.db_manager.store_component_analysis_with_full_source(
                         session_id, 
                         main_component_data['name'], 
                         main_component_data['type'], 
                         file_name, 
-                        main_component_data
+                        main_component_data,
+                        full_source_content=file_content  # Explicit parameter
                     )
                     
                     llm_summary = component.get('llm_summary', {})

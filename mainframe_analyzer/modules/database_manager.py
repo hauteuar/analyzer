@@ -788,6 +788,76 @@ class DatabaseManager:
     
                         # Don't re-raise the exception to prevent stopping the entire process
     
+    def store_component_analysis_with_full_source(self, session_id: str, component_name: str, 
+                                           component_type: str, file_path: str, 
+                                           analysis_result: Dict, full_source_content: str):
+        """Store component analysis ensuring full source code is preserved"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Create analysis JSON WITHOUT source content to save space
+                clean_analysis = {}
+                for key, value in analysis_result.items():
+                    if key == 'content':
+                        continue  # Don't duplicate in JSON
+                    elif isinstance(value, (str, int, float, bool, list, dict)):
+                        clean_analysis[key] = value
+                    else:
+                        clean_analysis[key] = str(value)
+                
+                analysis_json = json.dumps(clean_analysis, ensure_ascii=False, separators=(',', ':'))
+                
+                # Check if component exists
+                cursor.execute('''
+                    SELECT COUNT(*) FROM component_analysis 
+                    WHERE session_id = ? AND component_name = ? AND component_type = ?
+                ''', (session_id, component_name, component_type))
+                
+                exists = cursor.fetchone()[0] > 0
+                
+                # CRITICAL: Always store full source content separately
+                if exists:
+                    cursor.execute('''
+                        UPDATE component_analysis 
+                        SET total_lines = ?, total_fields = ?, business_purpose = ?, 
+                            complexity_score = ?, analysis_result_json = ?, 
+                            source_content = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE session_id = ? AND component_name = ? AND component_type = ?
+                    ''', (
+                        int(analysis_result.get('total_lines', 0)),
+                        len(analysis_result.get('fields', [])),
+                        str(analysis_result.get('business_purpose', ''))[:1000],
+                        float(analysis_result.get('complexity_score', 0.5)),
+                        analysis_json,
+                        full_source_content,  # Full source stored here
+                        session_id, component_name, component_type
+                    ))
+                else:
+                    cursor.execute('''
+                        INSERT INTO component_analysis 
+                        (session_id, component_name, component_type, file_path, 
+                        total_lines, total_fields, business_purpose, complexity_score,
+                        source_content, analysis_result_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        session_id, component_name, component_type, file_path,
+                        int(analysis_result.get('total_lines', 0)),
+                        len(analysis_result.get('fields', [])),
+                        str(analysis_result.get('business_purpose', ''))[:1000],
+                        float(analysis_result.get('complexity_score', 0.5)),
+                        full_source_content,  # Full source stored here
+                        analysis_json
+                    ))
+                
+                logger.info(f"Stored component {component_name} with {len(full_source_content)} chars of source")
+                
+        except Exception as e:
+            logger.error(f"Error storing component {component_name}: {str(e)}")
+            raise
+
+
+
     def store_record_layout(self, session_id: str, layout_data: Dict, program_name: str):
         """Simplified record layout storage"""
         layout_name = layout_data.get('name', 'UNKNOWN')
@@ -1594,8 +1664,8 @@ class DatabaseManager:
     # Changes for database_manager.py
 
     def get_component_source_code(self, session_id: str, component_name: str = None, 
-                                component_type: str = None, max_size: int = 100000) -> Dict:  # CHANGE 1: Increased default
-        """Get source code for chat, with improved size handling"""
+                            component_type: str = None, max_size: int = 200000) -> Dict:  # Increased default
+        """Get source code for chat with better size handling"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
@@ -1603,23 +1673,22 @@ class DatabaseManager:
                 if component_name:
                     cursor.execute('''
                         SELECT component_name, component_type, source_content, 
-                            total_lines, analysis_result_json
+                            total_lines, analysis_result_json, file_path
                         FROM component_analysis 
                         WHERE session_id = ? AND component_name = ?
-                        ORDER BY created_at DESC
-                        LIMIT 1
+                        ORDER BY created_at DESC LIMIT 1
                     ''', (session_id, component_name))
                 else:
-                    # CHANGE 2: Better component selection for general queries
                     cursor.execute('''
                         SELECT component_name, component_type, source_content, 
-                            total_lines, analysis_result_json
+                            total_lines, analysis_result_json, file_path
                         FROM component_analysis 
                         WHERE session_id = ? AND source_content IS NOT NULL 
                             AND LENGTH(source_content) > 100
                         ORDER BY 
                             CASE WHEN component_type = 'PROGRAM' THEN 1 ELSE 2 END,
                             total_lines ASC, created_at DESC
+                        LIMIT 5
                     ''', (session_id,))
                 
                 results = []
@@ -1627,47 +1696,30 @@ class DatabaseManager:
                     row_dict = dict(row)
                     source_content = row_dict.get('source_content', '')
                     
-                    # CHANGE 3: Better source strategy determination
+                    # CHANGE 3: Better source strategy with more content
                     if len(source_content) <= max_size:
                         # Send full source
                         row_dict['source_strategy'] = 'full'
                         row_dict['source_for_chat'] = source_content
-                    elif len(source_content) <= max_size * 2:
-                        # Send substantial portion with key sections
-                        row_dict['source_strategy'] = 'substantial'
+                    elif len(source_content) <= max_size * 3:  # Increased multiplier
+                        # Send substantial portion
+                        row_dict['source_strategy'] = 'substantial'  
                         row_dict['source_for_chat'] = self._create_substantial_source_summary(
                             source_content, row_dict.get('analysis_result_json', '{}'), max_size
                         )
                     else:
-                        # Send enhanced summary with more content
+                        # Enhanced summary with more actual code
                         row_dict['source_strategy'] = 'enhanced_summary'
-                        row_dict['source_for_chat'] = self._create_enhanced_source_summary(
+                        row_dict['source_for_chat'] = self._create_enhanced_source_summary_with_more_code(
                             source_content, row_dict.get('analysis_result_json', '{}')
                         )
                     
-                    if len(source_content) <= max_size:
-            # Send full source
-                        row_dict['source_strategy'] = 'full'
-                        row_dict['source_for_chat'] = source_content
-                    elif len(source_content) <= max_size * 2:
-                        # Send substantial portion with key sections
-                        row_dict['source_strategy'] = 'substantial'
-                        row_dict['source_for_chat'] = self._create_substantial_source_summary(
-                            source_content, row_dict.get('analysis_result_json', '{}'), max_size
-                        )
-                    else:
-                        # Send enhanced summary with more content
-                        row_dict['source_strategy'] = 'enhanced_summary'
-                        row_dict['source_for_chat'] = self._create_enhanced_source_summary(
-                            source_content, row_dict.get('analysis_result_json', '{}')
-                        )
-
-
                     results.append(row_dict)
                 
                 return {
                     'success': True,
-                    'components': results
+                    'components': results,
+                    'source_available': len(results) > 0 and any(len(r.get('source_for_chat', '')) > 100 for r in results)
                 }
                 
         except Exception as e:
@@ -1675,9 +1727,10 @@ class DatabaseManager:
             return {
                 'success': False,
                 'error': str(e),
-                'components': []
+                'components': [],
+                'source_available': False
             }
-
+        
     def _create_substantial_source_summary(self, source_content: str, analysis_json: str, max_size: int) -> str:
         """Create substantial source summary with more actual code"""
         try:
@@ -1758,68 +1811,99 @@ class DatabaseManager:
             logger.error(f"Error creating substantial source summary: {str(e)}")
             return f"Source code available ({len(source_content)} characters) but summary generation failed: {str(e)}"
 
-    def _create_enhanced_source_summary(self, source_content: str, analysis_json: str) -> str:
-        """Create enhanced summary with key business logic sections"""
+    def _create_enhanced_source_summary_with_more_code(self, source_content: str, analysis_json: str) -> str:
+        """Create enhanced summary with MORE actual source code"""
         try:
             analysis = json.loads(analysis_json) if analysis_json else {}
             lines = source_content.split('\n')
             total_lines = len(lines)
             
             summary_parts = [
-                f"=== ENHANCED SOURCE ANALYSIS (Total: {total_lines} lines) ===",
+                f"=== COMPREHENSIVE SOURCE ANALYSIS ({total_lines} lines) ===",
                 "",
                 "BUSINESS PURPOSE:",
-                analysis.get('business_purpose', 'Not analyzed'),
+                analysis.get('business_purpose', 'Business logic analysis pending'),
                 "",
-                "KEY OPERATIONS:"
             ]
             
-            # Add key operations from analysis
-            file_ops = analysis.get('file_operations', [])
-            if file_ops:
-                summary_parts.append(f"File Operations ({len(file_ops)}):")
-                for op in file_ops[:5]:
-                    summary_parts.append(f"  - {op.get('operation')} {op.get('file_name')} (Line {op.get('line_number')})")
-            
-            cics_ops = analysis.get('cics_operations', [])
-            if cics_ops:
-                summary_parts.append(f"CICS Operations ({len(cics_ops)}):")
-                for op in cics_ops[:5]:
-                    summary_parts.append(f"  - {op.get('operation')} {op.get('file_name')} (Line {op.get('line_number')})")
-            
-            program_calls = analysis.get('program_calls', [])
-            if program_calls:
-                summary_parts.append(f"Program Calls ({len(program_calls)}):")
-                for call in program_calls[:5]:
-                    summary_parts.append(f"  - CALL {call.get('program_name')} (Line {call.get('line_number')})")
-            
+            # Include MORE header content
+            summary_parts.extend([
+                "--- PROGRAM HEADER (First 50 lines) ---"  # Increased
+            ])
+            summary_parts.extend(lines[:50])  # More lines
             summary_parts.append("")
             
-            # CHANGE 8: Always include some actual source code lines
+            # Include working storage section
+            ws_start = -1
+            for i, line in enumerate(lines):
+                if 'WORKING-STORAGE SECTION' in line.upper():
+                    ws_start = i
+                    break
+            
+            if ws_start >= 0:
+                summary_parts.extend([
+                    "--- WORKING STORAGE SECTION (First 50 lines) ---"  # Increased
+                ])
+                end_idx = min(ws_start + 50, total_lines)
+                summary_parts.extend(lines[ws_start:end_idx])
+                summary_parts.append("")
+            
+            # Include procedure division
+            proc_div_start = -1
+            for i, line in enumerate(lines):
+                if 'PROCEDURE DIVISION' in line.upper():
+                    proc_div_start = i
+                    break
+            
+            if proc_div_start >= 0:
+                summary_parts.extend([
+                    "--- PROCEDURE DIVISION (First 60 lines) ---"  # Increased
+                ])
+                end_idx = min(proc_div_start + 60, total_lines)
+                summary_parts.extend(lines[proc_div_start:end_idx])
+                summary_parts.append("")
+            
+            # Include record layouts with full source
+            record_layouts = analysis.get('record_layouts', [])
+            if record_layouts:
+                summary_parts.extend([
+                    f"--- RECORD LAYOUTS ({len(record_layouts)} found) ---"
+                ])
+                for layout in record_layouts[:3]:  # Show first 3 layouts
+                    layout_name = layout.get('name', 'Unknown')
+                    summary_parts.append(f"=== LAYOUT: {layout_name} ===")
+                    
+                    if layout.get('source_code'):
+                        summary_parts.extend(layout['source_code'].split('\n'))
+                    else:
+                        summary_parts.append(f"[Layout {layout_name} - source not available]")
+                    summary_parts.append("")
+            
+            # Add business logic excerpts
             summary_parts.extend([
-                "--- KEY SOURCE CODE SECTIONS ---",
-                ""
+                "--- KEY BUSINESS LOGIC EXCERPTS ---"
             ])
             
-            # Find and include business logic sections
             business_logic_lines = []
-            keywords = ['PERFORM', 'IF', 'EVALUATE', 'CALL', 'MOVE', 'COMPUTE', 'EXEC CICS']
+            keywords = ['PERFORM', 'IF', 'EVALUATE', 'CALL', 'MOVE', 'COMPUTE', 'EXEC CICS', 'READ', 'WRITE']
             
             for i, line in enumerate(lines):
                 line_upper = line.strip().upper()
-                if any(keyword in line_upper for keyword in keywords):
-                    business_logic_lines.append((i+1, line.strip()))
-                    if len(business_logic_lines) >= 20:  # Include up to 20 key lines
+                if any(keyword in line_upper for keyword in keywords) and line.strip():
+                    business_logic_lines.append(f"{i+1:4d}: {line.strip()}")
+                    if len(business_logic_lines) >= 30:  # More logic lines
                         break
             
-            for line_num, line_content in business_logic_lines:
-                summary_parts.append(f"{line_num:4d}: {line_content}")
+            summary_parts.extend(business_logic_lines)
+            summary_parts.append("")
+            summary_parts.append("[Additional source code sections available on request]")
             
             return '\n'.join(summary_parts)
             
         except Exception as e:
             logger.error(f"Error creating enhanced source summary: {str(e)}")
-            return f"Source code available ({len(source_content)} characters) but enhanced summary failed: {str(e)}"
+            return f"Source code available ({len(source_content)} characters) - summary generation failed: {str(e)}"
+        
     def _create_source_summary(self, source_content: str, analysis_json: str) -> str:
         """Create a summary of source code for large components"""
         try:
