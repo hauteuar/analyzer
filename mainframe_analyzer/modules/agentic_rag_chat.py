@@ -1303,37 +1303,364 @@ class AgenticRAGChatManager:
             'timestamp': time.time()
         }
     
+    # Replace the _route_specialized_query method in ResponseGenerator class
+
     def _route_specialized_query(self, session_id: str, message: str, 
-                           query_plan: QueryPlan, contexts: List) -> Optional[str]:
-        """Enhanced query routing for different types"""
+                            query_plan: QueryPlan, contexts: List) -> Optional[str]:
+        """LLM-based intelligent query routing"""
         
+        if not contexts:
+            return None  # No context to work with
+        
+        try:
+            # Use LLM to determine the best response strategy
+            routing_decision = self._llm_determine_response_strategy(message, query_plan, contexts)
+            
+            if routing_decision.get('route_to_specialized'):
+                handler_type = routing_decision.get('handler_type')
+                
+                if handler_type == 'field_analysis':
+                    return self._handle_field_analysis_query(session_id, message, query_plan, contexts)
+                elif handler_type == 'program_overview':
+                    return self._handle_program_overview_query(session_id, message, query_plan, contexts)
+                elif handler_type == 'dependencies':
+                    return self._handle_dependencies_query(session_id, message, query_plan, contexts)
+                elif handler_type == 'business_logic':
+                    return self._handle_business_logic_query(session_id, message, query_plan, contexts)
+                elif handler_type == 'file_operations':
+                    return self._handle_file_operations_query(session_id, message, query_plan, contexts)
+            
+            # If LLM says use general handler, return None to proceed with normal generation
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in LLM query routing: {str(e)}")
+            return None  # Fall back to general handler
+
+    def _llm_determine_response_strategy(self, message: str, query_plan: QueryPlan, contexts: List) -> Dict:
+        """Use LLM to intelligently determine the best response strategy"""
+        
+        # Build context summary for the LLM
+        context_summary = self._build_context_summary_for_routing(contexts)
+        
+        routing_prompt = f"""
+    You are an expert at analyzing user queries about COBOL programs and determining the best response strategy.
+
+    User Query: "{message}"
+    Query Type Detected: {query_plan.query_type.value}
+    Entities Found: {query_plan.entities}
+    Confidence: {query_plan.confidence:.2f}
+
+    Available Context Summary:
+    {context_summary}
+
+    Determine the best response strategy by analyzing what the user is really asking for.
+
+    Response Options:
+    1. "field_analysis" - User wants specific information about field definitions, usage, or properties
+    2. "program_overview" - User wants to understand what the program does, its purpose, or general functionality  
+    3. "dependencies" - User wants to know about program calls, file usage, or system interactions
+    4. "business_logic" - User wants to understand calculations, business rules, or processing logic
+    5. "file_operations" - User wants specific information about file I/O operations
+    6. "general" - Use standard LLM generation with all available context
+
+    Return JSON:
+    {{
+        "route_to_specialized": true/false,
+        "handler_type": "program_overview|field_analysis|dependencies|business_logic|file_operations|general",
+        "confidence": 0.8,
+        "reasoning": "Brief explanation of why this handler was chosen"
+    }}
+
+    Examples:
+    - "What does this program do?" → program_overview
+    - "Tell me about CUSTOMER-NAME field" → field_analysis  
+    - "What programs does this call?" → dependencies
+    - "How does it calculate totals?" → business_logic
+    - "What files does it read?" → file_operations
+    """
+        
+        try:
+            response = self.llm_client.call_llm(routing_prompt, max_tokens=300, temperature=0.2)
+            
+            if response.success:
+                routing_result = self.llm_client.extract_json_from_response(response.content)
+                
+                if isinstance(routing_result, dict):
+                    logger.info(f"LLM Routing Decision: {routing_result.get('handler_type')} (confidence: {routing_result.get('confidence', 0)})")
+                    logger.info(f"Reasoning: {routing_result.get('reasoning', 'Not provided')}")
+                    return routing_result
+            
+            # Fallback to general handler
+            return {"route_to_specialized": False, "handler_type": "general"}
+            
+        except Exception as e:
+            logger.error(f"Error in LLM routing: {str(e)}")
+            return {"route_to_specialized": False, "handler_type": "general"}
+
+    def _build_context_summary_for_routing(self, contexts: List) -> str:
+        """Build a concise context summary for routing decisions"""
+        
+        if not contexts:
+            return "No context available"
+        
+        summary_parts = []
+        
+        for i, context in enumerate(contexts[:2], 1):  # Only first 2 contexts for routing
+            metadata = context.metadata
+            
+            summary_parts.append(f"Context {i}:")
+            summary_parts.append(f"- Component: {metadata.get('component_name', 'Unknown')}")
+            summary_parts.append(f"- Type: {metadata.get('component_type', 'Unknown')}")
+            
+            # Add specific context info
+            if 'field_name' in metadata:
+                summary_parts.append(f"- Field: {metadata['field_name']}")
+            if 'dependencies' in metadata:
+                dep_count = len(metadata['dependencies'])
+                summary_parts.append(f"- Dependencies: {dep_count} found")
+            if 'business_purpose' in metadata:
+                purpose = metadata['business_purpose'][:100]
+                summary_parts.append(f"- Purpose: {purpose}")
+            
+            # Source code preview
+            source_preview = context.source_code[:200].replace('\n', ' ').strip()
+            summary_parts.append(f"- Source Preview: {source_preview}...")
+            summary_parts.append("")
+        
+        return '\n'.join(summary_parts)
+
+    def _handle_program_overview_query(self, session_id: str, message: str, 
+                                    query_plan: QueryPlan, contexts: List) -> str:
+        """Handle queries asking 'what does this program do'"""
+        try:
+            if not contexts:
+                return "I don't have enough context to explain what this program does."
+            
+            # Build program overview prompt
+            overview_prompt = self._build_program_overview_prompt(message, contexts)
+            
+            response = self.llm_client.call_llm(overview_prompt, max_tokens=1500, temperature=0.3)
+            
+            if response.success and response.content:
+                return self._post_process_program_overview(response.content, contexts)
+            else:
+                return self._generate_fallback_program_overview(contexts)
+                
+        except Exception as e:
+            logger.error(f"Error in program overview handler: {str(e)}")
+            return f"Error analyzing program overview: {str(e)}"
+
+    def _build_program_overview_prompt(self, message: str, contexts: List) -> str:
+        """Build specialized prompt for program overview"""
+        
+        prompt_parts = [
+            "You are a COBOL expert explaining what a mainframe program does in business terms.",
+            f'The user asked: "{message}"',
+            "",
+            "Based on the source code analysis below, explain:",
+            "1. What this program's main business purpose is",
+            "2. What key operations it performs", 
+            "3. What systems or files it interacts with",
+            "4. How it fits into the overall business process",
+            "",
+            "Make it conversational and business-focused, not technical.",
+            ""
+        ]
+        
+        # Add context information
+        for i, context in enumerate(contexts, 1):
+            metadata = context.metadata
+            component_name = metadata.get('component_name', 'Unknown')
+            
+            prompt_parts.extend([
+                f"=== PROGRAM ANALYSIS {i}: {component_name} ===",
+                ""
+            ])
+            
+            # Add business purpose if available
+            if 'business_purpose' in metadata:
+                prompt_parts.append(f"Business Purpose: {metadata['business_purpose']}")
+                prompt_parts.append("")
+            
+            # Add dependency summary
+            if 'dependencies' in metadata:
+                dependencies = metadata['dependencies']
+                if dependencies:
+                    program_calls = [d for d in dependencies if 'PROGRAM' in d.get('relationship_type', '')]
+                    file_ops = [d for d in dependencies if 'FILE' in d.get('relationship_type', '')]
+                    
+                    if program_calls:
+                        called_programs = [d.get('target_component') for d in program_calls]
+                        prompt_parts.append(f"Calls Programs: {', '.join(called_programs[:5])}")
+                    
+                    if file_ops:
+                        files_used = [d.get('target_component') for d in file_ops]
+                        prompt_parts.append(f"Uses Files: {', '.join(files_used[:5])}")
+                    
+                    prompt_parts.append("")
+            
+            # Add relevant source code sections
+            prompt_parts.extend([
+                "Key Source Code Sections:",
+                context.source_code,
+                "",
+                "=" * 60,
+                ""
+            ])
+        
+        return '\n'.join(prompt_parts)
+
+    def _post_process_program_overview(self, response: str, contexts: List) -> str:
+        """Post-process program overview response"""
+        
+        # Add technical summary at the end
+        technical_summary = []
+        
+        for context in contexts:
+            metadata = context.metadata
+            component_name = metadata.get('component_name')
+            
+            if component_name:
+                technical_summary.append(f"**Technical Details for {component_name}:**")
+                
+                if 'dependencies' in metadata:
+                    deps = metadata['dependencies']
+                    dep_summary = []
+                    
+                    program_calls = [d for d in deps if 'PROGRAM' in d.get('relationship_type', '')]
+                    if program_calls:
+                        dep_summary.append(f"{len(program_calls)} program call(s)")
+                    
+                    file_ops = [d for d in deps if 'FILE' in d.get('relationship_type', '')]
+                    if file_ops:
+                        dep_summary.append(f"{len(file_ops)} file operation(s)")
+                    
+                    if dep_summary:
+                        technical_summary.append(f"• Dependencies: {', '.join(dep_summary)}")
+                
+                technical_summary.append("")
+        
+        if technical_summary:
+            return response + "\n\n" + '\n'.join(technical_summary)
+        else:
+            return response
+
+    def _generate_fallback_program_overview(self, contexts: List) -> str:
+        """Generate fallback program overview when LLM fails"""
+        
+        if not contexts:
+            return "No program analysis available."
+        
+        context = contexts[0]
+        metadata = context.metadata
+        component_name = metadata.get('component_name', 'Unknown Program')
+        
+        overview_parts = [
+            f"**Program Overview: {component_name}**",
+            ""
+        ]
+        
+        # Add business purpose if available
+        if 'business_purpose' in metadata:
+            overview_parts.append(f"**Purpose**: {metadata['business_purpose']}")
+            overview_parts.append("")
+        
+        # Add dependency information
+        if 'dependencies' in metadata:
+            dependencies = metadata['dependencies']
+            
+            program_calls = [d for d in dependencies if 'PROGRAM' in d.get('relationship_type', '')]
+            file_ops = [d for d in dependencies if 'FILE' in d.get('relationship_type', '')]
+            
+            if program_calls:
+                overview_parts.append(f"**Program Interactions**: Calls {len(program_calls)} other programs")
+            
+            if file_ops:
+                overview_parts.append(f"**File Operations**: Processes {len(file_ops)} files")
+        
+        if not overview_parts or len(overview_parts) <= 3:
+            overview_parts.append("This appears to be a COBOL program with business logic processing capabilities.")
+        
+        return '\n'.join(overview_parts)
+
+    def _handle_field_analysis_query(self, session_id: str, message: str, 
+                                    query_plan: QueryPlan, contexts: List) -> str:
+        """Enhanced field analysis handler"""
+        
+        if not query_plan.entities:
+            return "I couldn't identify specific field names in your question."
+        
+        field_name = query_plan.entities[0]  # Primary field
+        
+        # Use existing field definition logic but enhanced
+        return self._handle_field_definition_query(session_id, field_name, contexts)
+
+    def _handle_dependencies_query(self, session_id: str, message: str, 
+                                query_plan: QueryPlan, contexts: List) -> str:
+        """Handle dependency-related queries"""
+        
+        # Check what type of dependencies the user is asking about
         message_lower = message.lower()
         
-        # Field definition queries
-        if (query_plan.query_type == QueryType.FIELD_ANALYSIS and 
-            len(query_plan.entities) == 1 and 
-            query_plan.confidence > 0.7):
-            return self._handle_field_definition_query(session_id, query_plan.entities[0], contexts)
-        
-        # Program calls queries
-        elif ('call' in message_lower or 'calls' in message_lower or 'program' in message_lower):
+        if 'program' in message_lower or 'call' in message_lower:
             return self._handle_program_calls_query(session_id, message, query_plan, contexts)
-        
-        # File usage queries  
-        elif ('file' in message_lower or 'read' in message_lower or 'write' in message_lower):
+        elif 'file' in message_lower:
             return self._handle_file_usage_query(session_id, message, query_plan, contexts)
-        
-        # CICS operations queries
-        elif ('cics' in message_lower):
+        elif 'cics' in message_lower:
             return self._handle_cics_operations_query(session_id, message, query_plan, contexts)
-        
-        # Business logic queries
-        elif (query_plan.query_type == QueryType.BUSINESS_LOGIC and
-            'how' in message_lower and ('calculate' in message_lower or 'process' in message_lower)):
-            return self._handle_calculation_query(session_id, message, contexts)
-        
-        return None
+        else:
+            # General dependencies overview
+            return self._handle_general_dependencies_query(session_id, message, query_plan, contexts)
 
+    def _handle_general_dependencies_query(self, session_id: str, message: str, 
+                                        query_plan: QueryPlan, contexts: List) -> str:
+        """Handle general dependency queries"""
+        
+        if not contexts:
+            return "I couldn't find dependency information in the analyzed code."
+        
+        response_parts = [
+            "**Program Dependencies Overview**",
+            ""
+        ]
+        
+        total_deps = 0
+        
+        for context in contexts:
+            metadata = context.metadata
+            dependencies = metadata.get('dependencies', [])
+            
+            if dependencies:
+                component_name = metadata.get('component_name', 'Unknown')
+                response_parts.append(f"**{component_name}:**")
+                
+                # Categorize dependencies
+                program_calls = [d for d in dependencies if 'PROGRAM' in d.get('relationship_type', '')]
+                file_ops = [d for d in dependencies if 'FILE' in d.get('relationship_type', '')]
+                cics_ops = [d for d in dependencies if 'CICS' in d.get('relationship_type', '')]
+                
+                if program_calls:
+                    programs = [d.get('target_component') for d in program_calls]
+                    response_parts.append(f"• Calls: {', '.join(programs)}")
+                
+                if file_ops:
+                    files = [d.get('target_component') for d in file_ops]
+                    response_parts.append(f"• Files: {', '.join(files)}")
+                
+                if cics_ops:
+                    cics_files = [d.get('target_component') for d in cics_ops]
+                    response_parts.append(f"• CICS: {', '.join(cics_files)}")
+                
+                response_parts.append("")
+                total_deps += len(dependencies)
+        
+        if total_deps == 0:
+            return "No external dependencies found in the analyzed components."
+        
+        response_parts.append(f"**Total Dependencies**: {total_deps}")
+        
+        return '\n'.join(response_parts)
     def _handle_program_calls_query(self, session_id: str, message: str, 
                                 query_plan: QueryPlan, contexts: List) -> str:
         """Handle program calls queries"""
