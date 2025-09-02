@@ -1563,6 +1563,125 @@ def get_component_llm_summary(session_id, component_name):
             'success': False,
             'error': str(e)
         }), 500
+    
+
+@app.route('/api/validate-dependencies/<session_id>')
+def validate_dependencies_api(session_id):
+    """Validate all dependencies and identify missing ones"""
+    try:
+        # Get all components in session
+        components = analyzer.db_manager.get_session_components(session_id)
+        uploaded_program_names = set(comp['component_name'].upper() for comp in components)
+        
+        # Get all dependencies
+        dependencies = analyzer.db_manager.get_enhanced_dependencies(session_id)
+        
+        validation_results = {
+            'total_dependencies': len(dependencies),
+            'validated_dependencies': [],
+            'missing_programs': [],
+            'validation_summary': {
+                'present': 0,
+                'missing': 0,
+                'files': 0,
+                'unknown': 0
+            }
+        }
+        
+        for dep in dependencies:
+            target = dep.get('target_component', '')
+            interface_type = dep.get('interface_type', '')
+            
+            # Files and CICS files are always considered available
+            if interface_type in ['FILE_SYSTEM', 'CICS'] or 'FILE' in dep.get('relationship_type', ''):
+                status = 'file'
+                validation_results['validation_summary']['files'] += 1
+            # Programs need to be checked
+            elif interface_type == 'COBOL':
+                if target.upper() in uploaded_program_names:
+                    status = 'present'
+                    validation_results['validation_summary']['present'] += 1
+                else:
+                    status = 'missing'
+                    validation_results['validation_summary']['missing'] += 1
+                    if target not in validation_results['missing_programs']:
+                        validation_results['missing_programs'].append(target)
+            else:
+                status = 'unknown'
+                validation_results['validation_summary']['unknown'] += 1
+            
+            validation_results['validated_dependencies'].append({
+                'source': dep.get('source_component'),
+                'target': target,
+                'relationship': dep.get('relationship_type'),
+                'interface': interface_type,
+                'status': status,
+                'confidence': dep.get('confidence_score', 0)
+            })
+        
+        return jsonify({
+            'success': True,
+            'validation_results': validation_results,
+            'recommendations': [
+                f"Upload {prog} to complete the analysis" 
+                for prog in validation_results['missing_programs']
+            ]
+        })
+        
+    except Exception as e:
+        logger.error(f"Error validating dependencies: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/dependency-impact/<session_id>/<program_name>')
+def get_dependency_impact_api(session_id, program_name):
+    """Get impact analysis of uploading a missing program"""
+    try:
+        # Get current missing dependencies
+        missing_summary = analyzer.db_manager.get_missing_dependencies_summary(session_id)
+        
+        if program_name.upper() not in [p.upper() for p in missing_summary['missing_programs']]:
+            return jsonify({
+                'success': False,
+                'error': f'Program {program_name} is not in the missing dependencies list'
+            })
+        
+        # Find what would be resolved by uploading this program
+        impact_analysis = {
+            'program_name': program_name,
+            'would_resolve': [],
+            'calling_programs': [],
+            'estimated_new_dependencies': 0
+        }
+        
+        # Find which programs call this missing program
+        for source_prog, missing_calls in missing_summary['missing_by_source'].items():
+            for call in missing_calls:
+                if call['program'].upper() == program_name.upper():
+                    impact_analysis['calling_programs'].append({
+                        'caller': source_prog,
+                        'relationship': call['relationship'],
+                        'call_type': call['call_type']
+                    })
+                    impact_analysis['would_resolve'].append(f"{source_prog} -> {program_name}")
+        
+        # Estimate potential new dependencies (typical COBOL program)
+        impact_analysis['estimated_new_dependencies'] = len(impact_analysis['calling_programs']) * 3  # Rough estimate
+        
+        return jsonify({
+            'success': True,
+            'impact_analysis': impact_analysis,
+            'recommendation': f"Uploading {program_name} would resolve {len(impact_analysis['would_resolve'])} missing dependencies and potentially discover {impact_analysis['estimated_new_dependencies']} new dependencies."
+        })
+        
+    except Exception as e:
+        logger.error(f"Error analyzing dependency impact: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 if __name__ == '__main__':
     print(f"\n{'='*60}")

@@ -254,48 +254,72 @@ class COBOLParser:
         
         return operations
 
-    def extract_program_calls(self, lines: List[str]) -> List[Dict]:
-        """Extract program calls with proper CICS command handling"""
-        operations = []
-        seen_operations = set()
+    def extract_program_calls(self, content: str, filename: str) -> List[Dict]:
+        """
+        Enhanced program call extraction including dynamic calls
+        """
+        program_calls = []
         
-        for i, line in enumerate(lines):
-            program_area = self.extract_program_area_only(line)
-            if not program_area:
+        # Extract static calls (existing logic)
+        static_calls = self._extract_static_program_calls(content, filename)
+        program_calls.extend(static_calls)
+        
+        # Extract dynamic calls (new logic)
+        dynamic_calls = self.extract_dynamic_program_calls(content, filename)
+        
+        # Convert dynamic calls to program call format
+        for dynamic_call in dynamic_calls:
+            for resolved_program in dynamic_call['resolved_programs']:
+                program_calls.append({
+                    'operation': dynamic_call['operation'],
+                    'program_name': resolved_program['program_name'],
+                    'line_number': dynamic_call['line_number'],
+                    'call_type': 'dynamic',
+                    'variable_name': dynamic_call['variable_name'],
+                    'resolution_method': resolved_program['resolution'],
+                    'confidence_score': resolved_program['confidence'],
+                    'source_info': resolved_program.get('source', ''),
+                    'business_context': f"Dynamic call via {dynamic_call['variable_name']} variable"
+                })
+        
+        return program_calls
+    
+    def _extract_static_program_calls(self, content: str, filename: str) -> List[Dict]:
+        """Extract static/literal program calls (existing functionality)"""
+        static_calls = []
+        lines = content.split('\n')
+        
+        for i, line in enumerate(lines, 1):
+            line_upper = line.upper().strip()
+            
+            if not line_upper or line_upper.startswith('*'):
                 continue
             
-            program_upper = program_area.upper()
-            
             # Static CALL statements
-            call_matches = self.call_pattern.findall(program_upper)
-            for program_name in call_matches:
-                if self._is_valid_cobol_filename(program_name):
-                    op_key = f"CALL_{program_name}"
-                    if op_key not in seen_operations:
-                        seen_operations.add(op_key)
-                        operations.append({
-                            'operation': 'CALL',
-                            'program_name': program_name,
-                            'call_type': 'STATIC',
-                            'line_number': i + 1,
-                            'line_content': program_area,
-                            'relationship_type': 'PROGRAM_CALL'
-                        })
+            call_match = re.search(r"CALL\s+['\"]([A-Z0-9\-]+)['\"]", line_upper)
+            if call_match:
+                static_calls.append({
+                    'operation': 'CALL',
+                    'program_name': call_match.group(1),
+                    'line_number': i,
+                    'call_type': 'static',
+                    'confidence_score': 1.0,
+                    'business_context': 'Static program call'
+                })
             
-            # CICS program operations - use existing methods
-            if 'EXEC CICS' in program_upper and ('LINK' in program_upper or 'XCTL' in program_upper):
-                # Extract complete multi-line CICS command
-                cics_command = self._extract_complete_cics_command(lines, i)
-                if cics_command:
-                    # Parse CICS command for program calls
-                    cics_program_ops = self._parse_cics_program_calls(cics_command, i + 1)
-                    for cics_op in cics_program_ops:
-                        op_key = f"{cics_op['operation']}_{cics_op['program_name']}"
-                        if op_key not in seen_operations:
-                            seen_operations.add(op_key)
-                            operations.append(cics_op)
+            # Static CICS XCTL/LINK with literal program names
+            static_cics_match = re.search(r"EXEC\s+CICS\s+(XCTL|LINK)\s+PROGRAM\s*\(\s*['\"]([A-Z0-9\-]+)['\"]\s*\)", line_upper)
+            if static_cics_match:
+                static_calls.append({
+                    'operation': f'CICS_{static_cics_match.group(1)}',
+                    'program_name': static_cics_match.group(2),
+                    'line_number': i,
+                    'call_type': 'static',
+                    'confidence_score': 1.0,
+                    'business_context': 'Static CICS program call'
+                })
         
-        return operations
+        return static_calls
 
     def _parse_cics_program_calls(self, cics_command: str, line_number: int) -> List[Dict]:
         """Parse CICS LINK/XCTL program calls from complete CICS command"""
@@ -1392,3 +1416,232 @@ Rules:
         except Exception as e:
             logger.error(f"Error parsing field line '{line}': {e}")
             return None
+
+    def extract_dynamic_program_calls(self, content: str, filename: str) -> List[Dict]:
+        """
+        Extract dynamic CICS program calls that use variables (XCTL, LINK)
+        Resolves variable values from working storage when possible
+        """
+        dynamic_calls = []
+        lines = content.split('\n')
+        
+        # First pass: Build variable value map from working storage
+        variable_values = self._build_variable_value_map(lines)
+        
+        # Second pass: Find dynamic CICS calls
+        for i, line in enumerate(lines, 1):
+            line_upper = line.upper().strip()
+            
+            if not line_upper or line_upper.startswith('*'):
+                continue
+                
+            # Look for CICS XCTL/LINK with variables
+            dynamic_call = self._analyze_dynamic_cics_call(line_upper, i, variable_values)
+            if dynamic_call:
+                dynamic_calls.append(dynamic_call)
+        
+        return dynamic_calls
+
+    def _build_variable_value_map(self, lines: List[str]) -> Dict[str, Any]:
+        """
+        Build map of working storage variables and their possible values
+        Handles group fields, fillers with values, and computed values
+        """
+        variable_map = {}
+        current_group = None
+        
+        for i, line in enumerate(lines, 1):
+            line_upper = line.upper().strip()
+            
+            if not line_upper or line_upper.startswith('*'):
+                continue
+                
+            # Check for field definition with level number
+            level_match = re.match(r'^\s*(\d{2})\s+(.+)', line_upper)
+            if level_match:
+                level = int(level_match.group(1))
+                field_content = level_match.group(2).strip()
+                
+                # Handle group fields (01-49 level)
+                if level == 1 or (level > 1 and level < 49):
+                    # Extract field name
+                    name_match = re.match(r'^([A-Z][A-Z0-9\-]*)', field_content)
+                    if name_match:
+                        field_name = name_match.group(1)
+                        
+                        if level == 1:
+                            current_group = field_name
+                            variable_map[field_name] = {
+                                'type': 'group',
+                                'level': level,
+                                'children': {},
+                                'line': i,
+                                'possible_values': []
+                            }
+                        else:
+                            # Sub-field of group
+                            if current_group and current_group in variable_map:
+                                variable_map[current_group]['children'][field_name] = {
+                                    'type': 'field',
+                                    'level': level,
+                                    'line': i,
+                                    'parent': current_group
+                                }
+                            
+                            variable_map[field_name] = {
+                                'type': 'field',
+                                'level': level,
+                                'line': i,
+                                'parent': current_group,
+                                'possible_values': []
+                            }
+                        
+                        # Check for VALUE clause
+                        value_match = re.search(r"VALUE\s+['\"]([^'\"]*)['\"]", field_content)
+                        if value_match:
+                            value = value_match.group(1)
+                            variable_map[field_name]['constant_value'] = value
+                            variable_map[field_name]['possible_values'].append(value)
+                            
+                            # For fillers with values in groups
+                            if 'FILLER' in field_content and current_group:
+                                if 'filler_values' not in variable_map[current_group]:
+                                    variable_map[current_group]['filler_values'] = []
+                                variable_map[current_group]['filler_values'].append(value)
+            
+            # Look for MOVE statements that populate variables
+            move_match = re.search(r'MOVE\s+([A-Z0-9\-\'\"]+)\s+TO\s+([A-Z0-9\-]+)', line_upper)
+            if move_match:
+                source_val = move_match.group(1).strip("'\"")
+                target_var = move_match.group(2)
+                
+                if target_var in variable_map:
+                    if source_val not in variable_map[target_var]['possible_values']:
+                        variable_map[target_var]['possible_values'].append(source_val)
+        
+        return variable_map
+
+    def _analyze_dynamic_cics_call(self, line: str, line_number: int, variable_map: Dict) -> Optional[Dict]:
+        """
+        Analyze a line for dynamic CICS XCTL/LINK calls
+        """
+        # Patterns for dynamic CICS calls
+        patterns = [
+            r'EXEC\s+CICS\s+(XCTL|LINK)\s+PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)',
+            r'EXEC\s+CICS\s+(XCTL|LINK)\s+.*PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)',
+            r'(XCTL|LINK)\s+PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, line)
+            if match:
+                operation = match.group(1)
+                variable_name = match.group(2)
+                
+                # Resolve variable to possible program names
+                resolved_programs = self._resolve_variable_to_programs(variable_name, variable_map)
+                
+                return {
+                    'operation': f'CICS_{operation}',
+                    'variable_name': variable_name,
+                    'resolved_programs': resolved_programs,
+                    'line_number': line_number,
+                    'line_content': line.strip(),
+                    'call_type': 'dynamic',
+                    'resolution_confidence': self._calculate_resolution_confidence(variable_name, variable_map, resolved_programs)
+                }
+        
+        return None
+
+    def _resolve_variable_to_programs(self, variable_name: str, variable_map: Dict) -> List[Dict]:
+        """
+        Resolve a variable to its possible program name values
+        Handles group fields with filler constants and computed values
+        """
+        resolved_programs = []
+        
+        if variable_name not in variable_map:
+            return [{'program_name': variable_name, 'resolution': 'unresolved', 'confidence': 0.1}]
+        
+        var_info = variable_map[variable_name]
+        
+        # Direct constant value
+        if 'constant_value' in var_info:
+            resolved_programs.append({
+                'program_name': var_info['constant_value'],
+                'resolution': 'constant',
+                'confidence': 1.0,
+                'source': f"VALUE '{var_info['constant_value']}'"
+            })
+        
+        # Possible values from MOVE operations
+        for value in var_info.get('possible_values', []):
+            if value not in [p['program_name'] for p in resolved_programs]:
+                resolved_programs.append({
+                    'program_name': value,
+                    'resolution': 'move_operation',
+                    'confidence': 0.8,
+                    'source': f"MOVE '{value}' TO {variable_name}"
+                })
+        
+        # Handle group fields with filler constants
+        if var_info.get('type') == 'group' and 'children' in var_info:
+            group_programs = self._resolve_group_field_programs(variable_name, var_info, variable_map)
+            resolved_programs.extend(group_programs)
+        
+        # Handle parent group resolution
+        if var_info.get('parent') and var_info['parent'] in variable_map:
+            parent_info = variable_map[var_info['parent']]
+            if 'filler_values' in parent_info:
+                for filler_value in parent_info['filler_values']:
+                    # Construct potential program name from filler + variable
+                    potential_program = f"{filler_value}{variable_name.replace(var_info['parent'] + '-', '')}"
+                    resolved_programs.append({
+                        'program_name': potential_program,
+                        'resolution': 'group_filler_combination',
+                        'confidence': 0.7,
+                        'source': f"Group {var_info['parent']} filler '{filler_value}' + {variable_name}"
+                    })
+        
+        return resolved_programs if resolved_programs else [
+            {'program_name': variable_name, 'resolution': 'unresolved', 'confidence': 0.1}
+        ]
+
+    def _resolve_group_field_programs(self, group_name: str, group_info: Dict, variable_map: Dict) -> List[Dict]:
+        """
+        Resolve program names from group field structure
+        Example: WA-TRANX group with FILLER 'TMST' + WA-HOLD-TRANX variable
+        """
+        resolved_programs = []
+        filler_values = group_info.get('filler_values', [])
+        
+        # Look for sub-fields that could contain program suffixes
+        for child_name, child_info in group_info.get('children', {}).items():
+            if child_name != 'FILLER' and child_name in variable_map:
+                child_var_info = variable_map[child_name]
+                
+                # Combine filler constants with child variable possible values
+                for filler_val in filler_values:
+                    for child_val in child_var_info.get('possible_values', [child_name]):
+                        if child_val != child_name:  # Skip if it's just the variable name
+                            combined_program = f"{filler_val}{child_val}"
+                        else:
+                            combined_program = filler_val  # Just the filler constant
+                        
+                        resolved_programs.append({
+                            'program_name': combined_program,
+                            'resolution': 'group_field_combination',
+                            'confidence': 0.8,
+                            'source': f"Group {group_name}: '{filler_val}' + {child_name}"
+                        })
+        
+        return resolved_programs
+
+    def _calculate_resolution_confidence(self, variable_name: str, variable_map: Dict, resolved_programs: List[Dict]) -> float:
+        """Calculate confidence in variable resolution"""
+        if not resolved_programs:
+            return 0.0
+        
+        # Average confidence of all resolved programs
+        total_confidence = sum(prog['confidence'] for prog in resolved_programs)
+        return min(total_confidence / len(resolved_programs), 1.0)

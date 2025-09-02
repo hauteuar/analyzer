@@ -323,7 +323,7 @@ class ComponentExtractor:
             program_component['total_layouts'] = len(parsed_data['record_layouts'])
             
             # Extract and store dependencies
-            self._extract_and_store_dependencies(session_id, components, filename)
+            self._extract_and_store_enhanced_dependencies(session_id, components, filename)
             
             logger.info(f"Analysis complete: 1 program + {len(layout_components)} layout components, {program_component['total_fields']} total fields")
             
@@ -1993,8 +1993,8 @@ File Content ({filename}):
         
         return components
     
-    def _extract_and_store_dependencies(self, session_id: str, components: List[Dict], filename: str):
-        """Enhanced dependency extraction with improved validation"""
+    def _extract_and_store_enhanced_dependencies(self, session_id: str, components: List[Dict], filename: str):
+        """Enhanced dependency extraction with dynamic call resolution and missing detection"""
         try:
             main_program = None
             for component in components:
@@ -2007,130 +2007,65 @@ File Content ({filename}):
             
             dependencies = []
             program_name = main_program['name']
-
-            def _is_valid_dependency_target(target_name: Optional[str], source_program: str) -> bool:
-                """Enhanced validation for dependency targets"""
-                if not target_name:
-                    return False
-                
-                t = str(target_name).strip()
-                if not t or len(t) < 3:
-                    return False
-
-                t_upper = t.upper()
-
-                # Ignore self-references
-                if t_upper == str(source_program).upper():
-                    return False
-
-                # Enhanced COBOL keywords and operators to ignore
-                INVALID_KEYWORDS = {
-                    # Comparison operators
-                    'EQUAL', 'NOT', 'GREATER', 'LESS', 'THAN', 'OR', 'AND',
-                    # COBOL reserved words
-                    'VALUE', 'VALUES', 'PIC', 'PICTURE', 'USAGE', 'REDEFINES', 'OCCURS',
-                    'COMP', 'COMP-3', 'BINARY', 'DISPLAY', 'PACKED-DECIMAL',
-                    # Control flow
-                    'IF', 'THEN', 'ELSE', 'END-IF', 'WHEN', 'OTHER', 'ALSO',
-                    'PERFORM', 'UNTIL', 'VARYING', 'TIMES', 'THRU', 'THROUGH',
-                    # Data movement
-                    'MOVE', 'TO', 'FROM', 'INTO', 'GIVING',
-                    # Arithmetic
-                    'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE', 'COMPUTE',
-                    # File operations  
-                    'READ', 'WRITE', 'OPEN', 'CLOSE', 'REWRITE', 'DELETE',
-                    # Common literals
-                    'SPACES', 'ZEROS', 'HIGH-VALUES', 'LOW-VALUES', 'QUOTES',
-                    # Program structure
-                    'SECTION', 'PARAGRAPH', 'DIVISION', 'END', 'EXIT',
-                    # Common single words that aren't dependencies
-                    'THIS', 'THE', 'A', 'AN', 'IS', 'ARE', 'WAS', 'WERE',
-                    'ON', 'OFF', 'YES', 'NO', 'TRUE', 'FALSE',
-                    # Common COBOL suffixes that indicate keywords
-                    'SIZE', 'LENGTH', 'COUNT', 'ERROR', 'STATUS'
-                }
-
-                # Check if it's an invalid keyword
-                if t_upper in INVALID_KEYWORDS:
-                    return False
-
-                # Check if it contains only operators/punctuation
-                if re.match(r'^[=<>!&|+\-*/\(\)\.,;:\[\]{}]+$', t):
-                    return False
-
-                # Check if it's a numeric literal
-                if re.match(r'^\d+(\.\d+)?$', t):
-                    return False
-
-                # Check if it's a quoted string
-                if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
-                    return False
-
-                # Must contain at least one letter (not just numbers and symbols)
-                if not re.search(r'[A-Za-z]', t):
-                    return False
-
-                # Should look like a valid COBOL identifier
-                if not re.match(r'^[A-Za-z][A-Za-z0-9\-_]*[A-Za-z0-9]?$', t):
-                    return False
-
-                # Additional length checks for realistic program/file names
-                if len(t) > 30:  # COBOL names typically <= 30 chars
-                    return False
-
-                return True
             
-            # Extract FILE dependencies with enhanced I/O classification
+            # Get all uploaded components for missing dependency detection
+            all_session_components = self.db_manager.get_session_components(session_id)
+            uploaded_programs = set(comp['component_name'].upper() for comp in all_session_components)
+            
+            # Enhanced program calls with dynamic resolution
+            program_calls = main_program.get('program_calls', [])
+            
+            for call in program_calls:
+                call_type = call.get('call_type', 'static')
+                
+                if call_type == 'dynamic':
+                    # Handle dynamic calls with multiple possible targets
+                    dependencies.extend(self._create_dynamic_call_dependencies(
+                        session_id, program_name, call, uploaded_programs
+                    ))
+                else:
+                    # Handle static calls
+                    target_prog = call.get('program_name')
+                    if target_prog and self._is_valid_dependency_target(target_prog, program_name):
+                        dependency = self._create_program_call_dependency(
+                            program_name, call, uploaded_programs
+                        )
+                        if dependency:
+                            dependencies.append(dependency)
+            
+            # File dependencies (unchanged logic)
             file_operations = main_program.get('file_operations', [])
             file_classifications = self._classify_file_io_direction_enhanced(file_operations)
             processed_files = set()
             
             for file_op in file_operations:
                 file_name = file_op.get('file_name')
-                if not file_name or file_name in processed_files:
-                    continue
-                    
-                if _is_valid_dependency_target(file_name, program_name):
+                if file_name and file_name not in processed_files and self._is_valid_dependency_target(file_name, program_name):
                     processed_files.add(file_name)
-                    
                     io_direction = file_classifications.get(file_name, file_op.get('io_direction', 'UNKNOWN'))
-                    
-                    # Enhanced relationship type mapping
-                    if io_direction == 'INPUT':
-                        relationship_type = 'INPUT_FILE'
-                    elif io_direction == 'OUTPUT':
-                        relationship_type = 'OUTPUT_FILE'
-                    elif io_direction == 'INPUT_OUTPUT':
-                        relationship_type = 'INPUT_OUTPUT_FILE'
-                    else:
-                        relationship_type = 'FILE_ACCESS'
                     
                     dependencies.append({
                         'source_component': program_name,
                         'target_component': file_name,
-                        'relationship_type': relationship_type,
+                        'relationship_type': self._map_io_to_relationship_type(io_direction),
                         'interface_type': 'FILE_SYSTEM',
                         'confidence_score': 0.95,
+                        'dependency_status': 'file',  # Files don't have upload status
                         'analysis_details_json': json.dumps({
                             'io_direction': io_direction,
-                            'operations': [op.get('operation') for op in file_operations 
-                                        if op.get('file_name') == file_name]
+                            'operations': [op.get('operation') for op in file_operations if op.get('file_name') == file_name]
                         })
                     })
             
-            # Extract CICS dependencies with proper I/O classification
+            # CICS dependencies with I/O classification
             cics_operations = main_program.get('cics_operations', [])
             processed_cics_files = set()
             
             for cics_op in cics_operations:
                 file_name = cics_op.get('file_name')
-                if not file_name or file_name in processed_cics_files:
-                    continue
-                    
-                if _is_valid_dependency_target(file_name, program_name):
+                if file_name and file_name not in processed_cics_files and self._is_valid_dependency_target(file_name, program_name):
                     processed_cics_files.add(file_name)
                     
-                    # Classify CICS operations for this file
                     cics_file_ops = [op for op in cics_operations if op.get('file_name') == file_name]
                     io_classification = self._classify_cics_io_operations(cics_file_ops)
                     
@@ -2140,36 +2075,214 @@ File Content ({filename}):
                         'relationship_type': io_classification['relationship_type'],
                         'interface_type': 'CICS',
                         'confidence_score': 0.95,
+                        'dependency_status': 'cics_file',  # CICS files don't have upload status
                         'analysis_details_json': json.dumps({
                             'io_direction': io_classification['io_direction'],
                             'operations': [op.get('operation') for op in cics_file_ops]
                         })
                     })
             
-            # Extract PROGRAM CALL dependencies
-            program_calls = main_program.get('program_calls', [])
-            for call in program_calls:
-                target_prog = call.get('program_name')
-                if target_prog and _is_valid_dependency_target(target_prog, program_name):
-                    dependencies.append({
-                        'source_component': program_name,
-                        'target_component': target_prog,
-                        'relationship_type': 'PROGRAM_CALL',
-                        'interface_type': 'COBOL',
-                        'confidence_score': 0.98,
-                        'analysis_details_json': json.dumps({
-                            'line_number': call.get('line_number', 0)
-                        })
-                    })
-            
-            # Store dependencies
-            if dependencies:
-                self._store_dependencies_with_deduplication(session_id, dependencies)
-                logger.info(f"Stored {len(dependencies)} validated dependencies for {program_name}")
-                
-        except Exception as e:
-            logger.error(f"Error extracting dependencies: {str(e)}")
+             # After storing file dependencies, store file-layout associations
+            file_layout_associations = self.db_manager.get_file_record_layout_associations(session_id)
 
+            for file_name, layout_info in file_layout_associations.items():
+                # Store as a special dependency type
+                dependencies.append({
+                    'source_component': layout_info['program_name'],
+                    'target_component': f"{file_name}::{layout_info['layout_name']}",
+                    'relationship_type': f"FILE_LAYOUT_{layout_info['io_type']}",
+                    'interface_type': 'RECORD_LAYOUT',
+                    'confidence_score': 0.95,
+                    'dependency_status': 'layout_association',
+                    'analysis_details_json': json.dumps({
+                        'file_name': file_name,
+                        'layout_name': layout_info['layout_name'],
+                        'io_type': layout_info['io_type'],
+                        'association_method': layout_info['method']
+                    })
+                })
+
+
+
+            # Store enhanced dependencies
+            if dependencies:
+                self._store_enhanced_dependencies_with_status(session_id, dependencies)
+                logger.info(f"Stored {len(dependencies)} enhanced dependencies for {program_name}")
+
+           
+
+        except Exception as e:
+            logger.error(f"Error in enhanced dependency extraction: {str(e)}")
+
+
+    def _get_file_record_layout_association(self, session_id: str, file_name: str, program_name: str) -> Optional[Dict]:
+        """Get record layout associated with a specific file"""
+        try:
+            associations = self.db_manager.get_file_record_layout_associations(session_id)
+            
+            if file_name in associations:
+                layout_info = associations[file_name]
+                
+                # Get the actual fields from the layout
+                layout_fields = self.db_manager.get_field_matrix(
+                    session_id, record_layout=layout_info['layout_name']
+                )
+                
+                return {
+                    'layout_name': layout_info['layout_name'],
+                    'io_type': layout_info['io_type'],
+                    'fields': layout_fields,
+                    'program_name': layout_info['program_name']
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting file-layout association for {file_name}: {str(e)}")
+            return None
+
+
+    def _create_dynamic_call_dependencies(self, session_id: str, program_name: str, 
+                                   dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
+        """Create dependencies for dynamic calls with multiple possible targets"""
+        dependencies = []
+        variable_name = dynamic_call.get('variable_name', 'UNKNOWN')
+        
+        # Get resolved programs from the dynamic call analysis
+        resolved_programs = dynamic_call.get('resolved_programs', [])
+        if not resolved_programs:
+            resolved_programs = [{'program_name': variable_name, 'resolution': 'unresolved', 'confidence': 0.1}]
+        
+        for resolved_program in resolved_programs:
+            target_prog = resolved_program.get('program_name')
+            if target_prog and self._is_valid_dependency_target(target_prog, program_name):
+                
+                # Check if target program is uploaded
+                dependency_status = 'present' if target_prog.upper() in uploaded_programs else 'missing'
+                
+                dependency = {
+                    'source_component': program_name,
+                    'target_component': target_prog,
+                    'relationship_type': 'DYNAMIC_PROGRAM_CALL',
+                    'interface_type': 'CICS',
+                    'confidence_score': resolved_program.get('confidence', 0.5),
+                    'dependency_status': dependency_status,
+                    'analysis_details_json': json.dumps({
+                        'call_type': 'dynamic',
+                        'variable_name': variable_name,
+                        'resolution_method': resolved_program.get('resolution', 'unknown'),
+                        'source_info': resolved_program.get('source', ''),
+                        'line_number': dynamic_call.get('line_number', 0),
+                        'business_context': f"Dynamic call via {variable_name} variable"
+                    }),
+                    'source_code_evidence': f"Line {dynamic_call.get('line_number', 0)}: {dynamic_call.get('operation')} PROGRAM({variable_name}) -> {target_prog}"
+                }
+                dependencies.append(dependency)
+        
+        return dependencies
+
+    def _create_program_call_dependency(self, program_name: str, call: Dict, uploaded_programs: set) -> Optional[Dict]:
+        """Create dependency for static program call with missing detection"""
+        target_prog = call.get('program_name')
+        if not target_prog:
+            return None
+        
+        # Check if target program is uploaded
+        dependency_status = 'present' if target_prog.upper() in uploaded_programs else 'missing'
+        
+        return {
+            'source_component': program_name,
+            'target_component': target_prog,
+            'relationship_type': 'PROGRAM_CALL',
+            'interface_type': 'COBOL',
+            'confidence_score': call.get('confidence_score', 0.98),
+            'dependency_status': dependency_status,
+            'analysis_details_json': json.dumps({
+                'call_type': call.get('call_type', 'static'),
+                'line_number': call.get('line_number', 0),
+                'business_context': call.get('business_context', 'Program call')
+            }),
+            'source_code_evidence': f"Line {call.get('line_number', 0)}: {call.get('operation', 'CALL')} {target_prog}"
+        }
+
+    def _store_enhanced_dependencies_with_status(self, session_id: str, dependencies: List[Dict]):
+        """Store dependencies with enhanced status tracking"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Add dependency_status column if it doesn't exist
+                cursor.execute('''
+                    ALTER TABLE dependency_relationships 
+                    ADD COLUMN dependency_status TEXT DEFAULT 'unknown'
+                ''')
+                
+                for dep in dependencies:
+                    try:
+                        # Check for existing dependency
+                        cursor.execute('''
+                            SELECT id, confidence_score FROM dependency_relationships
+                            WHERE session_id = ? AND source_component = ? AND target_component = ? 
+                                AND relationship_type = ?
+                        ''', (session_id, dep['source_component'], dep['target_component'], dep['relationship_type']))
+                        
+                        existing = cursor.fetchone()
+                        
+                        if existing:
+                            # Update existing with enhanced information
+                            cursor.execute('''
+                                UPDATE dependency_relationships
+                                SET confidence_score = ?, analysis_details_json = ?, 
+                                    source_code_evidence = ?, dependency_status = ?
+                                WHERE id = ?
+                            ''', (
+                                max(existing[1] or 0, dep.get('confidence_score', 0)),
+                                dep.get('analysis_details_json', '{}'),
+                                dep.get('source_code_evidence', ''),
+                                dep.get('dependency_status', 'unknown'),
+                                existing[0]
+                            ))
+                        else:
+                            # Insert new dependency
+                            cursor.execute('''
+                                INSERT INTO dependency_relationships 
+                                (session_id, source_component, target_component, relationship_type,
+                                interface_type, confidence_score, analysis_details_json, 
+                                source_code_evidence, dependency_status)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                session_id, dep['source_component'], dep['target_component'], 
+                                dep['relationship_type'], dep.get('interface_type', ''),
+                                dep.get('confidence_score', 0.0), dep.get('analysis_details_json', '{}'),
+                                dep.get('source_code_evidence', ''), dep.get('dependency_status', 'unknown')
+                            ))
+                            
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column" in str(e).lower():
+                            # Column already exists, continue with insert/update
+                            pass
+                        else:
+                            raise
+                            
+                    except Exception as store_error:
+                        logger.error(f"Error storing enhanced dependency: {store_error}")
+                        continue
+                        
+        except Exception as e:
+            logger.error(f"Error in enhanced dependency storage: {str(e)}")
+
+    def _map_io_to_relationship_type(self, io_direction: str) -> str:
+        """Map I/O direction to relationship type"""
+        mapping = {
+            'INPUT': 'INPUT_FILE',
+            'OUTPUT': 'OUTPUT_FILE', 
+            'INPUT_OUTPUT': 'INPUT_OUTPUT_FILE',
+            'UNKNOWN': 'FILE_ACCESS'
+        }
+        return mapping.get(io_direction, 'FILE_ACCESS')
+
+    
+    
     def _classify_cics_io_operations(self, cics_ops: List[Dict]) -> Dict:
         """Classify CICS operations to determine I/O direction"""
         operations = [op.get('operation', '').upper() for op in cics_ops]

@@ -2220,6 +2220,210 @@ class DatabaseManager:
         
         return mainframe_length, oracle_length, oracle_type
 
+
+    # Add method to get missing dependencies summary
+    def get_missing_dependencies_summary(self, session_id: str) -> Dict:
+        """Get summary of missing dependencies"""
+        try:
+            dependencies = self.get_enhanced_dependencies(session_id)
+            
+            missing_programs = []
+            missing_by_source = {}
+            
+            for dep in dependencies:
+                if dep.get('display_status') == 'missing' and dep.get('interface_type') == 'COBOL':
+                    target = dep['target_component']
+                    source = dep['source_component']
+                    
+                    if target not in missing_programs:
+                        missing_programs.append(target)
+                    
+                    if source not in missing_by_source:
+                        missing_by_source[source] = []
+                    missing_by_source[source].append({
+                        'program': target,
+                        'relationship': dep.get('relationship_type'),
+                        'call_type': dep.get('analysis_details', {}).get('call_type', 'unknown')
+                    })
+            
+            return {
+                'total_missing': len(missing_programs),
+                'missing_programs': missing_programs,
+                'missing_by_source': missing_by_source,
+                'recommendations': [
+                    f"Upload {prog} program to complete dependency analysis" 
+                    for prog in missing_programs
+                ]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting missing dependencies summary: {str(e)}")
+            return {'total_missing': 0, 'missing_programs': [], 'missing_by_source': {}}
+
+    def get_file_record_layout_associations(self, session_id: str) -> Dict[str, Dict]:
+        """Get associations between files and record layouts from FD statements and CICS operations"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get all components with file operations
+                cursor.execute('''
+                    SELECT component_name, analysis_result_json, source_content
+                    FROM component_analysis 
+                    WHERE session_id = ? AND source_content IS NOT NULL
+                ''', (session_id,))
+                
+                associations = {}
+                
+                for row in cursor.fetchall():
+                    program_name = row[0]
+                    source_content = row[2]
+                    
+                    # Parse file-to-layout associations from source
+                    file_layouts = self._extract_file_layout_associations(source_content)
+                    
+                    for file_name, layout_info in file_layouts.items():
+                        associations[file_name] = {
+                            'layout_name': layout_info['layout_name'],
+                            'program_name': program_name,
+                            'io_type': layout_info['io_type'],
+                            'association_method': layout_info['method']
+                        }
+                
+                return associations
+                
+        except Exception as e:
+            logger.error(f"Error getting file-layout associations: {str(e)}")
+            return {}
+
+    def _extract_file_layout_associations(self, source_content: str) -> Dict[str, Dict]:
+        """Extract file to record layout associations from COBOL source"""
+        associations = {}
+        lines = source_content.split('\n')
+        
+        # Track FD statements and their record layouts
+        current_fd_file = None
+        
+        for line in lines:
+            line_upper = line.upper().strip()
+            
+            # FD file-name
+            fd_match = re.search(r'FD\s+([A-Z][A-Z0-9\-]+)', line_upper)
+            if fd_match:
+                current_fd_file = fd_match.group(1)
+                continue
+            
+            # 01 level record layout under FD
+            if current_fd_file and re.match(r'^\s*01\s+([A-Z][A-Z0-9\-]+)', line_upper):
+                layout_match = re.match(r'^\s*01\s+([A-Z][A-Z0-9\-]+)', line_upper)
+                if layout_match:
+                    layout_name = layout_match.group(1)
+                    associations[current_fd_file] = {
+                        'layout_name': layout_name,
+                        'io_type': 'BATCH_FILE',
+                        'method': 'FD_ASSOCIATION'
+                    }
+                    current_fd_file = None  # Reset after finding layout
+            
+            # CICS file associations
+            cics_read_match = re.search(r'EXEC\s+CICS\s+READ.*?INTO\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)', line_upper)
+            if cics_read_match:
+                layout_name = cics_read_match.group(1)
+                # Find the file name in same CICS command
+                file_match = re.search(r'(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9]+)[\'"]?\s*\)', line_upper)
+                if file_match:
+                    file_name = file_match.group(1)
+                    associations[file_name] = {
+                        'layout_name': layout_name,
+                        'io_type': 'INPUT',
+                        'method': 'CICS_READ_INTO'
+                    }
+            
+            # CICS write associations
+            cics_write_match = re.search(r'EXEC\s+CICS\s+WRITE.*?FROM\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)', line_upper)
+            if cics_write_match:
+                layout_name = cics_write_match.group(1)
+                file_match = re.search(r'(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9]+)[\'"]?\s*\)', line_upper)
+                if file_match:
+                    file_name = file_match.group(1)
+                    associations[file_name] = {
+                        'layout_name': layout_name,
+                        'io_type': 'OUTPUT',
+                        'method': 'CICS_WRITE_FROM'
+                    }
+        
+        return associations
+
+
+    # Update database_manager.py to handle enhanced dependencies
+    def get_enhanced_dependencies(self, session_id: str) -> List[Dict]:
+        """Get dependencies with enhanced status information"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Try to get dependencies with status, fallback if column doesn't exist
+                try:
+                    cursor.execute('''
+                        SELECT dr.source_component, dr.target_component, dr.relationship_type,
+                            dr.interface_type, dr.confidence_score, dr.analysis_details_json,
+                            dr.source_code_evidence, dr.created_at, dr.dependency_status,
+                            ca1.business_purpose as source_purpose,
+                            ca2.business_purpose as target_purpose
+                        FROM dependency_relationships dr
+                        LEFT JOIN component_analysis ca1 ON (dr.source_component = ca1.component_name AND ca1.session_id = ?)
+                        LEFT JOIN component_analysis ca2 ON (dr.target_component = ca2.component_name AND ca2.session_id = ?)
+                        WHERE dr.session_id = ?
+                        ORDER BY dr.source_component, dr.relationship_type, dr.target_component
+                    ''', (session_id, session_id, session_id))
+                except sqlite3.OperationalError:
+                    # Fallback query without dependency_status column
+                    cursor.execute('''
+                        SELECT dr.source_component, dr.target_component, dr.relationship_type,
+                            dr.interface_type, dr.confidence_score, dr.analysis_details_json,
+                            dr.source_code_evidence, dr.created_at, 'unknown' as dependency_status,
+                            ca1.business_purpose as source_purpose,
+                            ca2.business_purpose as target_purpose
+                        FROM dependency_relationships dr
+                        LEFT JOIN component_analysis ca1 ON (dr.source_component = ca1.component_name AND ca1.session_id = ?)
+                        LEFT JOIN component_analysis ca2 ON (dr.target_component = ca2.component_name AND ca2.session_id = ?)
+                        WHERE dr.session_id = ?
+                        ORDER BY dr.source_component, dr.relationship_type, dr.target_component
+                    ''', (session_id, session_id, session_id))
+                
+                enhanced_dependencies = []
+                for row in cursor.fetchall():
+                    dep_dict = dict(row)
+                    
+                    # Parse analysis details for additional context
+                    try:
+                        analysis_details = json.loads(dep_dict.get('analysis_details_json', '{}'))
+                        dep_dict['analysis_details'] = analysis_details
+                    except:
+                        dep_dict['analysis_details'] = {}
+                    
+                    # Determine display status for UI
+                    dep_status = dep_dict.get('dependency_status', 'unknown')
+                    interface_type = dep_dict.get('interface_type', '')
+                    
+                    if interface_type in ['FILE_SYSTEM', 'CICS'] and 'FILE' in dep_dict.get('relationship_type', ''):
+                        dep_dict['display_status'] = 'file'  # Files are always available
+                    elif dep_status == 'missing':
+                        dep_dict['display_status'] = 'missing'  # Red indicator
+                    elif dep_status == 'present':
+                        dep_dict['display_status'] = 'present'  # Green indicator
+                    else:
+                        dep_dict['display_status'] = 'unknown'  # Gray indicator
+                    
+                    enhanced_dependencies.append(dep_dict)
+                
+                return enhanced_dependencies
+                
+        except Exception as e:
+            logger.error(f"Error getting enhanced dependencies: {str(e)}")
+            return []
+
+
     def get_enhanced_field_mappings(self, session_id: str, target_file: str) -> List[Dict]:
         """Get field mappings with enhanced validation and lengths"""
         try:

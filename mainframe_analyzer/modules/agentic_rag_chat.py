@@ -331,6 +331,11 @@ class QueryAnalyzer:
             'find', 'search', 'locate', 'contains'
         ]):
             return QueryType.CODE_SEARCH
+        
+        elif any(pattern in message_lower for pattern in [
+            'dynamic call', 'xctl', 'link program', 'variable program', 'runtime call'
+        ]):
+            return QueryType.DYNAMIC_CALLS
             
         else:
             return QueryType.GENERAL
@@ -417,22 +422,28 @@ class ContextRetriever:
         self.vector_store = vector_store
     
     def retrieve_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
-        """Execute retrieval strategies to gather context"""
+        """Enhanced context retrieval including dynamic call business logic"""
         all_contexts = []
         
         for strategy in query_plan.retrieval_strategies:
             try:
+                if strategy == RetrievalStrategy.BUSINESS_CONTEXT:
+                    # Include dynamic call contexts for business logic queries
+                    dynamic_contexts = self._retrieve_dynamic_call_contexts(session_id, query_plan)
+                    all_contexts.extend(dynamic_contexts)
+                
                 contexts = self._execute_strategy(session_id, strategy, query_plan)
                 all_contexts.extend(contexts)
+                
             except Exception as e:
                 logger.error(f"Error executing strategy {strategy}: {str(e)}")
                 continue
         
-        # Deduplicate and rank contexts
-        unique_contexts = self._deduplicate_contexts(all_contexts)
-        ranked_contexts = self._rank_contexts(unique_contexts, query_plan)
+        # Enhanced deduplication and ranking
+        unique_contexts = self._deduplicate_contexts_enhanced(all_contexts)
+        ranked_contexts = self._rank_contexts_enhanced(unique_contexts, query_plan)
         
-        max_contexts = query_plan.context_requirements.get('max_contexts', 3)
+        max_contexts = query_plan.context_requirements.get('max_contexts', 4)  # Increased for dynamic calls
         min_relevance = query_plan.context_requirements.get('min_relevance', 0.3)
         
         filtered_contexts = [
@@ -983,6 +994,238 @@ class ContextRetriever:
         
         return contexts
     
+    def _retrieve_dynamic_call_contexts(self, session_id: str, query_plan: QueryPlan) -> List[RetrievedContext]:
+        """Retrieve contexts for dynamic program call business logic"""
+        contexts = []
+        
+        try:
+            # Get all dependencies to find dynamic calls
+            dependencies = self.db_manager.get_enhanced_dependencies(session_id)
+            
+            # Filter for dynamic program calls
+            dynamic_deps = [dep for dep in dependencies 
+                        if dep.get('relationship_type') == 'DYNAMIC_PROGRAM_CALL']
+            
+            if not dynamic_deps:
+                return contexts
+            
+            # Group by source program for analysis
+            programs_with_dynamic_calls = {}
+            for dep in dynamic_deps:
+                source_prog = dep.get('source_component')
+                if source_prog not in programs_with_dynamic_calls:
+                    programs_with_dynamic_calls[source_prog] = []
+                programs_with_dynamic_calls[source_prog].append(dep)
+            
+            # For each program, get source code and analyze dynamic call logic
+            for program_name, prog_deps in programs_with_dynamic_calls.items():
+                source_data = self.db_manager.get_component_source_code(
+                    session_id, program_name, max_size=300000
+                )
+                
+                if source_data.get('success') and source_data.get('components'):
+                    for comp in source_data['components']:
+                        source_code = comp.get('source_for_chat', '')
+                        
+                        if source_code:
+                            # Create dynamic call business logic context
+                            dynamic_context = self._create_dynamic_call_business_context(
+                                source_code, program_name, prog_deps, query_plan.entities
+                            )
+                            
+                            if dynamic_context:
+                                contexts.append(RetrievedContext(
+                                    source_code=dynamic_context,
+                                    metadata={
+                                        'component_name': program_name,
+                                        'component_type': 'PROGRAM',
+                                        'analysis_type': 'dynamic_call_logic',
+                                        'dynamic_calls': prog_deps,
+                                        'call_variables': [dep.get('analysis_details', {}).get('variable_name') 
+                                                        for dep in prog_deps],
+                                        'resolved_programs': [dep.get('target_component') for dep in prog_deps]
+                                    },
+                                    relevance_score=0.9,
+                                    retrieval_method="dynamic_call_business_logic"
+                                ))
+            
+        except Exception as e:
+            logger.error(f"Error retrieving dynamic call contexts: {str(e)}")
+        
+        return contexts
+
+    def _create_dynamic_call_business_context(self, source_code: str, program_name: str, 
+                                            dynamic_deps: List[Dict], entities: List[str]) -> str:
+        """Create business context for dynamic program call analysis"""
+        
+        context_parts = [
+            f"=== DYNAMIC PROGRAM CALL ANALYSIS: {program_name} ===",
+            "",
+            f"This program uses dynamic CICS calls that determine target programs at runtime.",
+            f"Found {len(dynamic_deps)} dynamic call dependencies:",
+            ""
+        ]
+        
+        # Group dependencies by variable for clearer explanation
+        calls_by_variable = {}
+        for dep in dynamic_deps:
+            analysis_details = dep.get('analysis_details', {})
+            var_name = analysis_details.get('variable_name', 'UNKNOWN')
+            
+            if var_name not in calls_by_variable:
+                calls_by_variable[var_name] = []
+            calls_by_variable[var_name].append(dep)
+        
+        # Explain each dynamic call variable
+        for var_name, var_deps in calls_by_variable.items():
+            context_parts.extend([
+                f"--- DYNAMIC CALL VARIABLE: {var_name} ---",
+                f"Possible target programs: {len(var_deps)} resolved",
+                ""
+            ])
+            
+            for dep in var_deps:
+                target_prog = dep.get('target_component')
+                analysis_details = dep.get('analysis_details', {})
+                resolution_method = analysis_details.get('resolution_method', 'unknown')
+                source_info = analysis_details.get('source_info', '')
+                confidence = dep.get('confidence_score', 0.0)
+                
+                status_indicator = "✓" if dep.get('display_status') == 'present' else "⚠" if dep.get('display_status') == 'missing' else "?"
+                
+                context_parts.extend([
+                    f"  {status_indicator} Target: {target_prog} (confidence: {confidence:.1f})",
+                    f"    Resolution: {resolution_method}",
+                    f"    Logic: {source_info}" if source_info else "",
+                    ""
+                ])
+        
+        # Extract business logic sections from source code
+        context_parts.extend([
+            "--- BUSINESS LOGIC ANALYSIS ---",
+            ""
+        ])
+        
+        business_logic_sections = self._extract_dynamic_call_business_logic(
+            source_code, calls_by_variable.keys()
+        )
+        
+        context_parts.extend(business_logic_sections)
+        
+        # Add working storage variable definitions
+        context_parts.extend([
+            "",
+            "--- VARIABLE DEFINITIONS ---",
+            ""
+        ])
+        
+        var_definitions = self._extract_variable_definitions(source_code, calls_by_variable.keys())
+        context_parts.extend(var_definitions)
+        
+        return '\n'.join(context_parts)
+
+    def _extract_dynamic_call_business_logic(self, source_code: str, call_variables: List[str]) -> List[str]:
+        """Extract business logic that determines dynamic call targets"""
+        
+        logic_sections = []
+        lines = source_code.split('\n')
+        
+        # Find sections where call variables are populated or used
+        for var_name in call_variables:
+            var_upper = var_name.upper()
+            
+            logic_sections.append(f"Business Logic for {var_name}:")
+            
+            # Find MOVE statements that populate the variable
+            move_logic = []
+            conditional_logic = []
+            call_logic = []
+            
+            for i, line in enumerate(lines):
+                line_upper = line.upper().strip()
+                
+                if var_upper in line_upper:
+                    # Context around this line
+                    start_idx = max(0, i - 3)
+                    end_idx = min(len(lines), i + 4)
+                    
+                    if 'MOVE' in line_upper and f'TO {var_upper}' in line_upper:
+                        move_logic.append({
+                            'line_num': i + 1,
+                            'context': lines[start_idx:end_idx],
+                            'type': 'population'
+                        })
+                    elif any(cond in line_upper for cond in ['IF ', 'WHEN ', 'EVALUATE']):
+                        conditional_logic.append({
+                            'line_num': i + 1,
+                            'context': lines[start_idx:end_idx],
+                            'type': 'condition'
+                        })
+                    elif any(call in line_upper for call in ['XCTL', 'LINK']) and var_upper in line_upper:
+                        call_logic.append({
+                            'line_num': i + 1,
+                            'context': lines[start_idx:end_idx],
+                            'type': 'execution'
+                        })
+            
+            # Format the business logic
+            if move_logic:
+                logic_sections.append("  Variable Population Logic:")
+                for logic in move_logic[:2]:  # First 2 instances
+                    logic_sections.append(f"    Line {logic['line_num']}:")
+                    for ctx_line in logic['context']:
+                        logic_sections.append(f"      {ctx_line.strip()}")
+                    logic_sections.append("")
+            
+            if conditional_logic:
+                logic_sections.append("  Conditional Logic:")
+                for logic in conditional_logic[:2]:
+                    logic_sections.append(f"    Line {logic['line_num']}:")
+                    for ctx_line in logic['context']:
+                        logic_sections.append(f"      {ctx_line.strip()}")
+                    logic_sections.append("")
+            
+            if call_logic:
+                logic_sections.append("  Call Execution:")
+                for logic in call_logic[:1]:  # Usually just one call
+                    logic_sections.append(f"    Line {logic['line_num']}:")
+                    for ctx_line in logic['context']:
+                        logic_sections.append(f"      {ctx_line.strip()}")
+                    logic_sections.append("")
+        
+        return logic_sections
+
+    def _extract_variable_definitions(self, source_code: str, call_variables: List[str]) -> List[str]:
+        """Extract working storage definitions for call variables"""
+        
+        definitions = []
+        lines = source_code.split('\n')
+        
+        for var_name in call_variables:
+            var_upper = var_name.upper()
+            
+            # Find the variable definition in working storage
+            for i, line in enumerate(lines):
+                line_upper = line.upper().strip()
+                
+                # Look for level number + variable name
+                if re.match(rf'^\s*\d{{2}}\s+{re.escape(var_upper)}', line_upper):
+                    # Found definition, get context including group structure
+                    start_idx = max(0, i - 5)  # Get parent group if any
+                    end_idx = min(len(lines), i + 10)  # Get child fields if any
+                    
+                    definitions.append(f"Definition of {var_name}:")
+                    for j in range(start_idx, end_idx):
+                        if j == i:
+                            definitions.append(f"  >>> {lines[j].strip()}")  # Highlight main definition
+                        else:
+                            definitions.append(f"      {lines[j].strip()}")
+                    definitions.append("")
+                    break
+        
+        return definitions
+
+    
     def _calculate_semantic_relevance(self, source_code: str, entities: List[str], query_type: QueryType) -> float:
         """Calculate semantic relevance of source code to query"""
         relevance = 0.0
@@ -1007,12 +1250,27 @@ class ContextRetriever:
         
         return min(relevance, 1.0)
     
-    def _deduplicate_contexts(self, contexts: List[RetrievedContext]) -> List[RetrievedContext]:
-        """Remove duplicate contexts"""
+    def _deduplicate_contexts_enhanced(self, contexts: List[RetrievedContext]) -> List[RetrievedContext]:
+        """Enhanced deduplication that preserves dynamic call contexts"""
         seen_sources = set()
         unique_contexts = []
         
-        for context in contexts:
+        # Prioritize dynamic call contexts
+        dynamic_contexts = [ctx for ctx in contexts if ctx.retrieval_method == "dynamic_call_business_logic"]
+        other_contexts = [ctx for ctx in contexts if ctx.retrieval_method != "dynamic_call_business_logic"]
+        
+        # Process dynamic contexts first (they're unique by nature)
+        for context in dynamic_contexts:
+            comp_name = context.metadata.get('component_name')
+            analysis_type = context.metadata.get('analysis_type', '')
+            key = f"dynamic_{comp_name}_{analysis_type}"
+            
+            if key not in seen_sources:
+                seen_sources.add(key)
+                unique_contexts.append(context)
+        
+        # Process other contexts with standard deduplication
+        for context in other_contexts:
             source_hash = hash(context.source_code[:1000])
             if source_hash not in seen_sources:
                 seen_sources.add(source_hash)
@@ -1020,8 +1278,22 @@ class ContextRetriever:
         
         return unique_contexts
     
-    def _rank_contexts(self, contexts: List[RetrievedContext], query_plan: QueryPlan) -> List[RetrievedContext]:
-        """Rank contexts by relevance"""
+    def _rank_contexts_enhanced(self, contexts: List[RetrievedContext], query_plan: QueryPlan) -> List[RetrievedContext]:
+        """Enhanced context ranking that prioritizes business logic contexts"""
+    
+        # Business logic queries should prioritize dynamic call contexts
+        if query_plan.query_type in [QueryType.BUSINESS_LOGIC, QueryType.DEPENDENCIES]:
+            dynamic_contexts = [ctx for ctx in contexts if ctx.retrieval_method == "dynamic_call_business_logic"]
+            other_contexts = [ctx for ctx in contexts if ctx.retrieval_method != "dynamic_call_business_logic"]
+            
+            # Sort each group by relevance
+            dynamic_contexts.sort(key=lambda x: x.relevance_score, reverse=True)
+            other_contexts.sort(key=lambda x: x.relevance_score, reverse=True)
+            
+            # Combine with dynamic contexts first
+            return dynamic_contexts + other_contexts
+        
+        # Standard ranking for other query types
         return sorted(contexts, key=lambda x: x.relevance_score, reverse=True)
 
 class ResponseGenerator:
@@ -1417,6 +1689,8 @@ class AgenticRAGChatManager:
                     return self._handle_business_logic_query(session_id, message, query_plan, contexts)
                 elif handler_type == 'file_operations':
                     return self._handle_file_operations_query(session_id, message, query_plan, contexts)
+                elif handler_type == 'dynamic_calls':
+                    return self._handle_dynamic_call_query(session_id, message, query_plan, contexts)
             
             return None
             
@@ -1749,6 +2023,56 @@ class AgenticRAGChatManager:
         
         return '\n'.join(overview_parts)
 
+    def _handle_dynamic_call_query(self, session_id: str, message: str, 
+                              query_plan: QueryPlan, contexts: List) -> str:
+        """Handle queries about dynamic program calls and their business logic"""
+        
+        dynamic_contexts = [ctx for ctx in contexts if ctx.retrieval_method == "dynamic_call_business_logic"]
+        
+        if not dynamic_contexts:
+            return "I don't see any dynamic CICS program calls in the analyzed code."
+        
+        response_parts = [
+            "**Dynamic CICS Program Call Analysis**",
+            ""
+        ]
+        
+        for context in dynamic_contexts:
+            metadata = context.metadata
+            program_name = metadata.get('component_name')
+            dynamic_calls = metadata.get('dynamic_calls', [])
+            resolved_programs = metadata.get('resolved_programs', [])
+            
+            response_parts.extend([
+                f"**Program: {program_name}**",
+                f"Uses dynamic calls to determine target programs at runtime.",
+                f"Resolved {len(resolved_programs)} possible target programs: {', '.join(resolved_programs)}",
+                ""
+            ])
+            
+            # Explain the business logic
+            missing_programs = [dep.get('target_component') for dep in dynamic_calls 
+                            if dep.get('display_status') == 'missing']
+            
+            if missing_programs:
+                response_parts.extend([
+                    f"⚠️  **Missing Dependencies**: {', '.join(missing_programs)}",
+                    "These programs are called dynamically but haven't been uploaded for analysis.",
+                    ""
+                ])
+            
+            # Add source context (first 1000 chars)
+            source_preview = context.source_code[:1000]
+            response_parts.extend([
+                "**Business Logic Details:**",
+                "```",
+                source_preview,
+                "```",
+                ""
+            ])
+        
+        return '\n'.join(response_parts)
+
     def _handle_field_analysis_query(self, session_id: str, message: str, 
                                     query_plan: QueryPlan, contexts: List) -> str:
         """Enhanced field analysis handler"""
@@ -1778,6 +2102,51 @@ class AgenticRAGChatManager:
             # General dependencies overview
             return self._handle_general_dependencies_query(session_id, message, query_plan, contexts)
 
+    def _handle_output_file_fields_query(self, session_id: str, message: str, 
+                                    query_plan: QueryPlan, contexts: List) -> str:
+        """Handle queries about fields within output files"""
+        response_parts = [
+            "**Output File Field Structure Analysis**",
+            ""
+        ]
+        
+        # Get record layouts associated with output files
+        for context in contexts:
+            dependencies = context.metadata.get('dependencies', [])
+            
+            # Find output file dependencies
+            output_files = [dep for dep in dependencies 
+                        if 'OUTPUT' in dep.get('relationship_type', '')]
+            
+            for file_dep in output_files:
+                file_name = file_dep.get('target_component')
+                if file_name:
+                    # Find associated record layout
+                    layout_info = self.db_manager._get_file_record_layout_association(
+                        session_id, file_name, context.metadata.get('component_name')
+                    )
+                    
+                    if layout_info:
+                        response_parts.extend([
+                            f"**Output File: {file_name}**",
+                            f"Associated Record Layout: {layout_info['layout_name']}",
+                            f"Fields in this output file:",
+                            ""
+                        ])
+                        
+                        for field in layout_info.get('fields', []):
+                            response_parts.append(f"• {field['name']} - {field.get('business_purpose', 'Data field')}")
+                        
+                        response_parts.append("")
+        
+        if len(response_parts) <= 2:
+            return "No output file field structures found in the analyzed code."
+        
+        return '\n'.join(response_parts)
+
+
+
+
     def _handle_file_operations_query(self, session_id: str, message: str, 
                                query_plan: QueryPlan, contexts: List) -> str:
         """Handle file operations specific queries (READ, WRITE, file processing)"""
@@ -1789,7 +2158,16 @@ class AgenticRAGChatManager:
                 "**File Operations Analysis**",
                 ""
             ]
+            message_lower = message.lower()
             
+            # Check if user is asking about fields within output files
+            if any(phrase in message_lower for phrase in ['fields in', 'fields inside', 'what fields', 'field structure', 'record layout', 'output fields']):
+                return self._handle_output_file_fields_query(session_id, message, query_plan, contexts)
+            
+            # Check if asking about specific file's record layout
+            for entity in query_plan.entities:
+                if any(phrase in message_lower for phrase in [f'fields in {entity.lower()}', f'{entity.lower()} fields', f'{entity.lower()} layout']):
+                    return self._handle_file_record_layout_query(session_id, entity, contexts)
             all_file_operations = []
             
             for context in contexts:
