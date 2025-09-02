@@ -1613,6 +1613,345 @@ class AgenticRAGChatManager:
             # General dependencies overview
             return self._handle_general_dependencies_query(session_id, message, query_plan, contexts)
 
+    def _handle_file_operations_query(self, session_id: str, message: str, 
+                               query_plan: QueryPlan, contexts: List) -> str:
+        """Handle file operations specific queries (READ, WRITE, file processing)"""
+        try:
+            if not contexts:
+                return "I couldn't find file operations information in the analyzed code."
+            
+            response_parts = [
+                "**File Operations Analysis**",
+                ""
+            ]
+            
+            all_file_operations = []
+            
+            for context in contexts:
+                metadata = context.metadata
+                component_name = metadata.get('component_name', 'Unknown')
+                source_code = context.source_code
+                dependencies = metadata.get('dependencies', [])
+                
+                # Extract file dependencies
+                file_deps = [dep for dep in dependencies 
+                            if 'FILE' in dep.get('relationship_type', '') and 
+                            'CICS' not in dep.get('relationship_type', '')]
+                
+                if file_deps or self._has_file_operations_in_source(source_code):
+                    response_parts.extend([
+                        f"**In {component_name}:**",
+                        ""
+                    ])
+                    
+                    # Analyze file dependencies
+                    if file_deps:
+                        input_files = [d for d in file_deps if 'INPUT' in d.get('relationship_type', '')]
+                        output_files = [d for d in file_deps if 'OUTPUT' in d.get('relationship_type', '')]
+                        io_files = [d for d in file_deps if 'INPUT_OUTPUT' in d.get('relationship_type', '')]
+                        
+                        if input_files:
+                            response_parts.append("**Input File Operations:**")
+                            for dep in input_files:
+                                file_name = dep.get('target_component')
+                                response_parts.append(f"• **READ** operations on: `{file_name}`")
+                                # Try to get line information
+                                try:
+                                    details = json.loads(dep.get('analysis_details_json', '{}'))
+                                    if details.get('line_number'):
+                                        response_parts.append(f"  - Referenced at line {details['line_number']}")
+                                except:
+                                    pass
+                            response_parts.append("")
+                        
+                        if output_files:
+                            response_parts.append("**Output File Operations:**")
+                            for dep in output_files:
+                                file_name = dep.get('target_component')
+                                response_parts.append(f"• **WRITE** operations on: `{file_name}`")
+                                try:
+                                    details = json.loads(dep.get('analysis_details_json', '{}'))
+                                    if details.get('line_number'):
+                                        response_parts.append(f"  - Referenced at line {details['line_number']}")
+                                except:
+                                    pass
+                            response_parts.append("")
+                        
+                        if io_files:
+                            response_parts.append("**Input/Output File Operations:**")
+                            for dep in io_files:
+                                file_name = dep.get('target_component')
+                                response_parts.append(f"• **READ/WRITE** operations on: `{file_name}`")
+                            response_parts.append("")
+                    
+                    # Analyze source code for file operations patterns
+                    file_operations = self._extract_file_operations_from_source(source_code)
+                    if file_operations:
+                        response_parts.append("**File Operation Statements:**")
+                        for op in file_operations[:5]:  # Show first 5
+                            response_parts.append(f"• Line {op['line_number']}: `{op['statement']}`")
+                            response_parts.append(f"  - Operation: **{op['operation_type']}**")
+                            if op.get('file_name'):
+                                response_parts.append(f"  - File: `{op['file_name']}`")
+                        response_parts.append("")
+                    
+                    all_file_operations.extend(file_deps)
+            
+            if not all_file_operations and not any(self._has_file_operations_in_source(ctx.source_code) for ctx in contexts):
+                return "No file operations found in the analyzed components."
+            
+            # Add file operations summary
+            read_ops = len([f for f in all_file_operations if 'INPUT' in f.get('relationship_type', '')])
+            write_ops = len([f for f in all_file_operations if 'OUTPUT' in f.get('relationship_type', '')])
+            
+            response_parts.extend([
+                "**File Operations Summary:**",
+                f"• **Read Operations**: {read_ops}",
+                f"• **Write Operations**: {write_ops}",
+                f"• **Total File Dependencies**: {len(all_file_operations)}",
+                ""
+            ])
+            
+            # Add file processing patterns if found
+            processing_patterns = self._identify_file_processing_patterns(contexts)
+            if processing_patterns:
+                response_parts.extend([
+                    "**File Processing Patterns:**",
+                    ""
+                ])
+                for pattern in processing_patterns:
+                    response_parts.append(f"• **{pattern['type']}**: {pattern['description']}")
+                response_parts.append("")
+            
+            return '\n'.join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error in file operations handler: {str(e)}")
+            return f"Error analyzing file operations: {str(e)}"
+
+    def _has_file_operations_in_source(self, source_code: str) -> bool:
+        """Check if source code contains file operation statements"""
+        file_op_patterns = [
+            r'\bREAD\s+[\w\-]+',
+            r'\bWRITE\s+[\w\-]+',
+            r'\bOPEN\s+(INPUT|OUTPUT|I-O)\s+[\w\-]+',
+            r'\bCLOSE\s+[\w\-]+',
+            r'\bREWRITE\s+[\w\-]+',
+            r'\bDELETE\s+[\w\-]+'
+        ]
+        
+        source_upper = source_code.upper()
+        return any(re.search(pattern, source_upper) for pattern in file_op_patterns)
+
+    def _extract_file_operations_from_source(self, source_code: str) -> List[Dict]:
+        """Extract file operations from source code with line numbers"""
+        operations = []
+        lines = source_code.split('\n')
+        
+        file_op_patterns = {
+            r'\b(READ)\s+([\w\-]+)': 'READ',
+            r'\b(WRITE)\s+([\w\-]+)': 'WRITE', 
+            r'\b(OPEN)\s+(INPUT|OUTPUT|I-O)\s+([\w\-]+)': 'OPEN',
+            r'\b(CLOSE)\s+([\w\-]+)': 'CLOSE',
+            r'\b(REWRITE)\s+([\w\-]+)': 'REWRITE',
+            r'\b(DELETE)\s+([\w\-]+)': 'DELETE'
+        }
+        
+        for line_num, line in enumerate(lines, 1):
+            line_upper = line.upper().strip()
+            if not line_upper or line_upper.startswith('*'):
+                continue
+                
+            for pattern, op_type in file_op_patterns.items():
+                match = re.search(pattern, line_upper)
+                if match:
+                    # Extract file name (usually the last captured group)
+                    file_name = None
+                    if len(match.groups()) >= 2:
+                        file_name = match.groups()[-1]  # Last group is usually the file name
+                    
+                    operations.append({
+                        'line_number': line_num,
+                        'statement': line.strip(),
+                        'operation_type': op_type,
+                        'file_name': file_name
+                    })
+        
+        return operations
+
+    def _identify_file_processing_patterns(self, contexts: List) -> List[Dict]:
+        """Identify common file processing patterns"""
+        patterns = []
+        
+        for context in contexts:
+            source_code = context.source_code.upper()
+            
+            # Sequential file processing
+            if ('READ' in source_code and 'AT END' in source_code and 
+                'PERFORM' in source_code):
+                patterns.append({
+                    'type': 'Sequential File Processing',
+                    'description': 'Reads file sequentially with end-of-file handling'
+                })
+            
+            # File update pattern
+            if ('READ' in source_code and 'REWRITE' in source_code):
+                patterns.append({
+                    'type': 'File Update Processing',
+                    'description': 'Reads and updates existing file records'
+                })
+            
+            # Master file processing
+            if ('SORT' in source_code or 'MERGE' in source_code):
+                patterns.append({
+                    'type': 'Sorted File Processing',
+                    'description': 'Processes files with sorting or merging operations'
+                })
+            
+            # Report generation
+            if ('WRITE' in source_code and 'REPORT' in source_code):
+                patterns.append({
+                    'type': 'Report Generation',
+                    'description': 'Generates output reports from data files'
+                })
+        
+        return patterns
+
+    def _handle_business_logic_query(self, session_id: str, message: str, 
+                                query_plan: QueryPlan, contexts: List) -> str:
+        """Handle business logic specific queries"""
+        try:
+            if not contexts:
+                return "I couldn't find business logic information in the analyzed code."
+            
+            response_parts = [
+                "**Business Logic Analysis**",
+                ""
+            ]
+            
+            all_business_logic = []
+            
+            for context in contexts:
+                metadata = context.metadata
+                component_name = metadata.get('component_name', 'Unknown')
+                source_code = context.source_code
+                
+                # Extract business logic patterns
+                business_logic = self._extract_business_logic_patterns(source_code)
+                
+                if business_logic:
+                    response_parts.extend([
+                        f"**In {component_name}:**",
+                        ""
+                    ])
+                    
+                    # Categorize business logic
+                    calculations = [bl for bl in business_logic if bl['category'] == 'calculation']
+                    validations = [bl for bl in business_logic if bl['category'] == 'validation']
+                    decisions = [bl for bl in business_logic if bl['category'] == 'decision']
+                    
+                    if calculations:
+                        response_parts.append("**Calculations:**")
+                        for calc in calculations[:3]:
+                            response_parts.append(f"• Line {calc['line_number']}: {calc['description']}")
+                            response_parts.append(f"  ```cobol\n  {calc['code_snippet']}\n  ```")
+                        response_parts.append("")
+                    
+                    if validations:
+                        response_parts.append("**Validations:**")
+                        for val in validations[:3]:
+                            response_parts.append(f"• Line {val['line_number']}: {val['description']}")
+                            response_parts.append(f"  ```cobol\n  {val['code_snippet']}\n  ```")
+                        response_parts.append("")
+                    
+                    if decisions:
+                        response_parts.append("**Decision Logic:**")
+                        for dec in decisions[:3]:
+                            response_parts.append(f"• Line {dec['line_number']}: {dec['description']}")
+                            response_parts.append(f"  ```cobol\n  {dec['code_snippet']}\n  ```")
+                        response_parts.append("")
+                    
+                    all_business_logic.extend(business_logic)
+            
+            if not all_business_logic:
+                return "No specific business logic patterns found in the analyzed components."
+            
+            # Add business logic summary
+            calc_count = len([bl for bl in all_business_logic if bl['category'] == 'calculation'])
+            val_count = len([bl for bl in all_business_logic if bl['category'] == 'validation'])
+            dec_count = len([bl for bl in all_business_logic if bl['category'] == 'decision'])
+            
+            response_parts.extend([
+                "**Business Logic Summary:**",
+                f"• **Calculations**: {calc_count}",
+                f"• **Validations**: {val_count}",
+                f"• **Decision Points**: {dec_count}",
+                f"• **Total Logic Patterns**: {len(all_business_logic)}",
+                ""
+            ])
+            
+            # Add business context if available
+            business_purposes = [ctx.metadata.get('business_purpose') for ctx in contexts 
+                            if ctx.metadata.get('business_purpose')]
+            
+            if business_purposes:
+                response_parts.extend([
+                    "**Business Context:**",
+                    ""
+                ])
+                for purpose in business_purposes[:2]:
+                    response_parts.append(f"• {purpose}")
+                response_parts.append("")
+            
+            return '\n'.join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error in business logic handler: {str(e)}")
+            return f"Error analyzing business logic: {str(e)}"
+
+    def _extract_business_logic_patterns(self, source_code: str) -> List[Dict]:
+        """Extract business logic patterns from source code"""
+        patterns = []
+        lines = source_code.split('\n')
+        
+        # Business logic patterns
+        logic_patterns = {
+            # Calculations
+            r'COMPUTE\s+([\w\-]+)\s*=': ('calculation', 'Computation assignment'),
+            r'ADD\s+([\w\-]+)\s+TO\s+([\w\-]+)': ('calculation', 'Addition operation'),
+            r'SUBTRACT\s+([\w\-]+)\s+FROM\s+([\w\-]+)': ('calculation', 'Subtraction operation'),
+            r'MULTIPLY\s+([\w\-]+)\s+BY\s+([\w\-]+)': ('calculation', 'Multiplication operation'),
+            r'DIVIDE\s+([\w\-]+)\s+BY\s+([\w\-]+)': ('calculation', 'Division operation'),
+            
+            # Validations  
+            r'IF\s+([\w\-]+)\s*(=|>|<|NOT)': ('validation', 'Conditional validation'),
+            r'EVALUATE\s+([\w\-]+)': ('validation', 'Multi-way validation'),
+            r'IF\s+([\w\-]+)\s+IS\s+(NUMERIC|ALPHABETIC)': ('validation', 'Data type validation'),
+            
+            # Decision logic
+            r'IF\s+.*\s+THEN': ('decision', 'Conditional decision'),
+            r'WHEN\s+': ('decision', 'Case-based decision'),
+            r'PERFORM\s+([\w\-]+)\s+UNTIL': ('decision', 'Loop decision')
+        }
+        
+        for line_num, line in enumerate(lines, 1):
+            line_upper = line.upper().strip()
+            if not line_upper or line_upper.startswith('*'):
+                continue
+                
+            for pattern, (category, description) in logic_patterns.items():
+                if re.search(pattern, line_upper):
+                    patterns.append({
+                        'line_number': line_num,
+                        'category': category,
+                        'description': description,
+                        'code_snippet': line.strip(),
+                        'pattern': pattern
+                    })
+        
+        return patterns
+
+
     def _handle_general_dependencies_query(self, session_id: str, message: str, 
                                         query_plan: QueryPlan, contexts: List) -> str:
         """Handle general dependency queries"""
