@@ -488,6 +488,31 @@ class MainframeAnalyzer:
                 'error': str(e)
             }
 
+    def _generate_dynamic_call_summary(self, source_code: str, dynamic_calls: List[Dict]) -> str:
+        """Generate business logic summary for dynamic calls"""
+        try:
+            # Extract key business logic points
+            summary_points = []
+            
+            for call in dynamic_calls:
+                var_name = call.get('variable_name', '')
+                resolved_programs = call.get('resolved_programs', [])
+                
+                summary_points.append(f"Variable {var_name} can resolve to: {[p.get('program_name') for p in resolved_programs]}")
+                
+                # Look for business logic that determines the variable value
+                lines = source_code.split('\n')
+                for i, line in enumerate(lines):
+                    if var_name in line.upper() and any(logic in line.upper() for logic in ['IF', 'WHEN', 'EVALUATE']):
+                        context = ' '.join(lines[max(0, i-1):i+2]).strip()
+                        summary_points.append(f"Business logic: {context}")
+                        break
+            
+            return '; '.join(summary_points)
+            
+        except Exception as e:
+            logger.error(f"Error generating dynamic call summary: {str(e)}")
+            return "Dynamic call analysis available but summary generation failed"
 # Initialize analyzer
 analyzer = MainframeAnalyzer()
 
@@ -1683,6 +1708,155 @@ def get_dependency_impact_api(session_id, program_name):
             'error': str(e)
         })
 
+@app.route('/api/dependencies-enhanced/<session_id>')
+def get_enhanced_dependencies_api(session_id):
+    """Get enhanced dependencies with status information"""
+    try:
+        # Get enhanced dependencies with missing status
+        dependencies = analyzer.db_manager.get_enhanced_dependencies(session_id)
+        
+        # Get missing dependencies summary
+        missing_summary = analyzer.db_manager.get_missing_dependencies_summary(session_id)
+        
+        # Categorize dependencies for better UI display
+        categorized_deps = {
+            'program_calls': [],
+            'file_operations': [],
+            'cics_operations': [],
+            'dynamic_calls': []
+        }
+        
+        for dep in dependencies:
+            rel_type = dep.get('relationship_type', '')
+            interface_type = dep.get('interface_type', '')
+            analysis_details = dep.get('analysis_details', {})
+            
+            dep_info = {
+                'source_component': dep.get('source_component'),
+                'target_component': dep.get('target_component'),
+                'relationship_type': rel_type,
+                'interface_type': interface_type,
+                'confidence_score': dep.get('confidence_score', 0),
+                'display_status': dep.get('display_status', 'unknown'),
+                'analysis_details': analysis_details,
+                'source_code_evidence': dep.get('source_code_evidence', ''),
+                'created_at': dep.get('created_at', '')
+            }
+            
+            # Categorize for UI display
+            if rel_type == 'DYNAMIC_PROGRAM_CALL':
+                dep_info['call_type'] = 'dynamic'
+                dep_info['variable_name'] = analysis_details.get('variable_name', '')
+                dep_info['resolution_method'] = analysis_details.get('resolution_method', '')
+                categorized_deps['dynamic_calls'].append(dep_info)
+            elif rel_type in ['PROGRAM_CALL']:
+                dep_info['call_type'] = analysis_details.get('call_type', 'static')
+                categorized_deps['program_calls'].append(dep_info)
+            elif 'FILE' in rel_type and interface_type == 'CICS':
+                dep_info['io_direction'] = analysis_details.get('io_direction', 'unknown')
+                dep_info['operations'] = analysis_details.get('operations', [])
+                categorized_deps['cics_operations'].append(dep_info)
+            elif 'FILE' in rel_type:
+                dep_info['io_direction'] = analysis_details.get('io_direction', 'unknown')
+                dep_info['operations'] = analysis_details.get('operations', [])
+                categorized_deps['file_operations'].append(dep_info)
+        
+        return jsonify({
+            'success': True,
+            'dependencies': dependencies,
+            'categorized_dependencies': categorized_deps,
+            'missing_summary': missing_summary,
+            'total_count': len(dependencies),
+            'status_counts': {
+                'present': len([d for d in dependencies if d.get('display_status') == 'present']),
+                'missing': len([d for d in dependencies if d.get('display_status') == 'missing']),
+                'file': len([d for d in dependencies if d.get('display_status') == 'file']),
+                'unknown': len([d for d in dependencies if d.get('display_status') == 'unknown'])
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting enhanced dependencies: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/dynamic-call-analysis/<session_id>')
+def get_dynamic_call_analysis_api(session_id):
+    """Get detailed analysis of dynamic program calls"""
+    try:
+        # Get all components to analyze dynamic calls
+        components = analyzer.db_manager.get_session_components(session_id)
+        
+        dynamic_call_analysis = []
+        
+        for component in components:
+            if component.get('component_type') != 'PROGRAM':
+                continue
+                
+            try:
+                # Get component analysis
+                analysis_result = json.loads(component.get('analysis_result_json', '{}'))
+                program_calls = analysis_result.get('program_calls', [])
+                
+                # Filter for dynamic calls
+                dynamic_calls = [call for call in program_calls if call.get('call_type') == 'dynamic']
+                
+                if dynamic_calls:
+                    # Get source code for business logic analysis
+                    source_data = analyzer.db_manager.get_component_source_code(
+                        session_id, component.get('component_name'), max_size=100000
+                    )
+                    
+                    program_analysis = {
+                        'program_name': component.get('component_name'),
+                        'dynamic_calls': dynamic_calls,
+                        'total_dynamic_calls': len(dynamic_calls),
+                        'variables_used': list(set(call.get('variable_name', '') for call in dynamic_calls)),
+                        'resolved_programs': [],
+                        'business_logic_summary': ''
+                    }
+                    
+                    # Collect all resolved programs
+                    for call in dynamic_calls:
+                        resolved_programs = call.get('resolved_programs', [])
+                        for resolved in resolved_programs:
+                            if resolved not in program_analysis['resolved_programs']:
+                                program_analysis['resolved_programs'].append(resolved)
+                    
+                    # Generate business logic summary
+                    if source_data.get('success') and source_data.get('components'):
+                        source_code = source_data['components'][0].get('source_for_chat', '')
+                        program_analysis['business_logic_summary'] = analyzer._generate_dynamic_call_summary(
+                            source_code, dynamic_calls
+                        )
+                    
+                    dynamic_call_analysis.append(program_analysis)
+                    
+            except Exception as comp_error:
+                logger.error(f"Error analyzing component {component.get('component_name')}: {str(comp_error)}")
+                continue
+        
+        return jsonify({
+            'success': True,
+            'dynamic_call_analysis': dynamic_call_analysis,
+            'total_programs_with_dynamic_calls': len(dynamic_call_analysis),
+            'summary': {
+                'total_dynamic_calls': sum(p['total_dynamic_calls'] for p in dynamic_call_analysis),
+                'unique_variables': list(set(var for p in dynamic_call_analysis for var in p['variables_used'])),
+                'all_resolved_programs': list(set(prog['program_name'] for p in dynamic_call_analysis 
+                                                for prog in p['resolved_programs']))
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting dynamic call analysis: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+    
 if __name__ == '__main__':
     print(f"\n{'='*60}")
     print(f"🚀 Mainframe Analyzer Starting")
