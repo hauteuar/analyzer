@@ -1,0 +1,32 @@
+graph TB
+    subgraph UserLayer[User Layer]
+        U([Operations Team / FAs])
+    end
+
+    subgraph AgentLayer[Opulence AI Agent]
+        QUEST[Context-Aware Quest Module]
+        CACHE[(Cache Store)]
+        MEMORY[(Chat Session Memory)]
+        SELECTOR{LLM / SLM Selector}
+        RAG[Agentic RAG Retriever]
+        SUM[Summarizer]
+        RESP[Response Generator]
+    end
+
+    subgraph DataLayer[Data Sources]
+        ORADB[(Oracle DB<br/>Pricing Data)]
+        DOCKB[(Business Logic<br/>Document KB)]
+    end
+
+    %% Connections
+    U --> QUEST
+    QUEST --> CACHE
+    QUEST --> MEMORY
+    QUEST --> SELECTOR
+    SELECTOR --> RAG
+    RAG --> ORADB
+    RAG --> DOCKB
+    RAG --> SUM
+    SUM --> RESP
+    RESP --> U
+    RESP --> CACHE
