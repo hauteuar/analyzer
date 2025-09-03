@@ -3276,3 +3276,309 @@ File Content ({filename}):
             
         except Exception as e:
             logger.error(f"Error extracting dependencies: {str(e)}")
+
+    def _parse_cics_operations_enhanced(self, source_content: str, program_name: str) -> List[Dict]:
+        """
+        Enhanced CICS operations parser with layout association detection
+        Extracts CICS operations and attempts to resolve record layout associations
+        """
+        cics_operations = []
+        lines = source_content.split('\n')
+        
+        logger.info(f"Starting enhanced CICS parsing for {program_name}")
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            program_area = self.cobol_parser.extract_program_area_only(line)
+            if not program_area:
+                i += 1
+                continue
+            
+            line_upper = program_area.upper()
+            
+            # Look for EXEC CICS statements
+            if 'EXEC CICS' in line_upper:
+                logger.debug(f"Found CICS statement at line {i+1}: {program_area[:80]}...")
+                
+                # Extract complete multi-line CICS command
+                cics_command, end_line = self._extract_complete_cics_command_enhanced(lines, i)
+                
+                if cics_command:
+                    # Parse the complete CICS command
+                    parsed_ops = self._parse_single_cics_command_enhanced(
+                        cics_command, i + 1, program_name
+                    )
+                    cics_operations.extend(parsed_ops)
+                    
+                    # Skip to end of this CICS command
+                    i = end_line
+                else:
+                    i += 1
+            else:
+                i += 1
+        
+        logger.info(f"Enhanced CICS parsing completed: found {len(cics_operations)} operations")
+        return cics_operations
+
+    def _extract_complete_cics_command_enhanced(self, lines: List[str], start_idx: int) -> Tuple[str, int]:
+        """
+        Extract complete CICS command that may span multiple lines
+        Returns: (complete_command, end_line_index)
+        """
+        command_parts = []
+        current_idx = start_idx
+        
+        while current_idx < len(lines):
+            line = lines[current_idx]
+            program_area = self.cobol_parser.extract_program_area_only(line)
+            
+            if program_area:
+                command_parts.append(program_area.strip())
+                
+                # Check for command termination
+                if 'END-EXEC' in program_area.upper():
+                    break
+                
+                # Also check for period termination (some CICS commands end with periods)
+                if program_area.strip().endswith('.') and len(' '.join(command_parts)) > 20:
+                    break
+            
+            current_idx += 1
+            
+            # Safety limit to prevent infinite loops
+            if current_idx - start_idx > 15:
+                logger.warning(f"CICS command extraction exceeded line limit at line {start_idx + 1}")
+                break
+        
+        complete_command = ' '.join(command_parts)
+        return complete_command, current_idx
+
+    def _parse_single_cics_command_enhanced(self, cics_command: str, line_number: int, program_name: str) -> List[Dict]:
+        """
+        Parse a single complete CICS command and extract operations with layout associations
+        """
+        operations = []
+        cics_upper = cics_command.upper()
+        
+        logger.debug(f"Parsing CICS command: {cics_command[:100]}...")
+        
+        # Enhanced CICS operation patterns with layout detection
+        cics_patterns = [
+            # READ operations with various formats
+            {
+                'pattern': r'EXEC\s+CICS\s+READ\s+(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)(?:.*?INTO\s*\(\s*([A-Z0-9\-]+)\s*\))?',
+                'operation': 'READ',
+                'io_direction': 'INPUT'
+            },
+            # Alternative READ pattern
+            {
+                'pattern': r'EXEC\s+CICS\s+READ\s+.*?(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)(?:.*?INTO\s*\(\s*([A-Z0-9\-]+)\s*\))?',
+                'operation': 'READ', 
+                'io_direction': 'INPUT'
+            },
+            # WRITE operations
+            {
+                'pattern': r'EXEC\s+CICS\s+WRITE\s+(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)(?:.*?FROM\s*\(\s*([A-Z0-9\-]+)\s*\))?',
+                'operation': 'WRITE',
+                'io_direction': 'OUTPUT'
+            },
+            # Alternative WRITE pattern  
+            {
+                'pattern': r'EXEC\s+CICS\s+WRITE\s+.*?(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)(?:.*?FROM\s*\(\s*([A-Z0-9\-]+)\s*\))?',
+                'operation': 'WRITE',
+                'io_direction': 'OUTPUT'
+            },
+            # REWRITE operations
+            {
+                'pattern': r'EXEC\s+CICS\s+REWRITE\s+(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)(?:.*?FROM\s*\(\s*([A-Z0-9\-]+)\s*\))?',
+                'operation': 'REWRITE',
+                'io_direction': 'INPUT_OUTPUT'
+            },
+            # DELETE operations
+            {
+                'pattern': r'EXEC\s+CICS\s+DELETE\s+(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)',
+                'operation': 'DELETE',
+                'io_direction': 'OUTPUT'
+            },
+            # STARTBR (Start Browse) operations
+            {
+                'pattern': r'EXEC\s+CICS\s+STARTBR\s+(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)(?:.*?RIDFLD\s*\(\s*([A-Z0-9\-]+)\s*\))?',
+                'operation': 'STARTBR',
+                'io_direction': 'INPUT'
+            },
+            # READNEXT operations
+            {
+                'pattern': r'EXEC\s+CICS\s+READNEXT\s+(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]{3,})[\'"]?\s*\)(?:.*?INTO\s*\(\s*([A-Z0-9\-]+)\s*\))?',
+                'operation': 'READNEXT', 
+                'io_direction': 'INPUT'
+            }
+        ]
+        
+        for pattern_info in cics_patterns:
+            pattern = pattern_info['pattern']
+            operation = pattern_info['operation']
+            io_direction = pattern_info['io_direction']
+            
+            matches = re.findall(pattern, cics_upper, re.DOTALL)
+            
+            for match in matches:
+                if isinstance(match, tuple):
+                    # Pattern captured both file and layout
+                    file_name = match[0] if match[0] else None
+                    layout_name = match[1] if len(match) > 1 and match[1] else None
+                else:
+                    # Pattern captured only file name
+                    file_name = match
+                    layout_name = None
+                
+                if file_name and self._is_valid_cics_file_name(file_name):
+                    # Additional layout detection if not captured by pattern
+                    if not layout_name:
+                        layout_name = self._extract_layout_from_cics_clauses(cics_command)
+                    
+                    # Create enhanced CICS operation
+                    cics_operation = {
+                        'operation': operation,
+                        'file_name': file_name,
+                        'layout_name': layout_name,
+                        'line_number': line_number,
+                        'source_line': cics_command.strip(),
+                        'io_direction': io_direction,
+                        'has_layout_association': bool(layout_name),
+                        'association_source': 'CICS_STATEMENT' if layout_name else None,
+                        'business_context': self._generate_cics_business_context(operation, file_name, layout_name),
+                        'extraction_method': 'enhanced_parser',
+                        'program_name': program_name
+                    }
+                    
+                    operations.append(cics_operation)
+                    logger.debug(f"Extracted CICS {operation} operation: {file_name} -> {layout_name}")
+        
+        return operations
+
+    def _is_valid_cics_file_name(self, file_name: str) -> bool:
+        """
+        Validate CICS file names with more flexible rules
+        """
+        if not file_name or len(file_name) < 3:
+            return False
+        
+        file_upper = file_name.upper()
+        
+        # Must start with letter
+        if not file_upper[0].isalpha():
+            return False
+        
+        # Must be alphanumeric with possible hyphens
+        if not re.match(r'^[A-Z][A-Z0-9\-]{2,29}$', file_upper):
+            return False
+        
+        # Exclude obvious COBOL keywords
+        excluded = {'PIC', 'PICTURE', 'VALUE', 'USAGE', 'COMP', 'DISPLAY', 'REDEFINES'}
+        if file_upper in excluded:
+            return False
+        
+        return True
+
+    def _extract_layout_from_cics_clauses(self, cics_command: str) -> Optional[str]:
+        """
+        Extract record layout name from CICS INTO/FROM/RIDFLD clauses
+        """
+        cics_upper = cics_command.upper()
+        
+        # Try INTO clause
+        into_match = re.search(r'INTO\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)', cics_upper)
+        if into_match:
+            return into_match.group(1)
+        
+        # Try FROM clause
+        from_match = re.search(r'FROM\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)', cics_upper)
+        if from_match:
+            return from_match.group(1)
+        
+        # Try RIDFLD clause (may contain layout field reference)
+        ridfld_match = re.search(r'RIDFLD\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)', cics_upper)
+        if ridfld_match:
+            field_name = ridfld_match.group(1)
+            # If it contains a dash, it might be a field within a layout
+            if '-' in field_name:
+                parts = field_name.split('-')
+                if len(parts) >= 2:
+                    # Return potential layout prefix
+                    return '-'.join(parts[:2])
+            return field_name
+        
+        return None
+
+    def _generate_cics_business_context(self, operation: str, file_name: str, layout_name: str) -> str:
+        """
+        Generate business context description for CICS operations
+        """
+        operation_descriptions = {
+            'READ': 'retrieves data from',
+            'WRITE': 'creates new record in', 
+            'REWRITE': 'updates existing record in',
+            'DELETE': 'removes record from',
+            'STARTBR': 'initiates browse of',
+            'READNEXT': 'reads next record from'
+        }
+        
+        base_desc = operation_descriptions.get(operation, f'performs {operation} on')
+        
+        if layout_name:
+            return f"CICS {operation} - {base_desc} {file_name} using {layout_name} layout"
+        else:
+            return f"CICS {operation} - {base_desc} {file_name} file"
+
+    def _enhance_cics_operations_with_context(self, cics_operations: List[Dict], source_content: str) -> List[Dict]:
+        """
+        Enhance CICS operations with additional business context
+        """
+        enhanced_operations = []
+        
+        for cics_op in cics_operations:
+            # Add friendly name
+            file_name = cics_op.get('file_name', '')
+            if file_name:
+                cics_op['friendly_name'] = self.cobol_parser.generate_friendly_name(file_name, 'CICS File')
+            
+            # Add confidence score based on layout association
+            if cics_op.get('has_layout_association'):
+                cics_op['confidence_score'] = 0.95
+            else:
+                cics_op['confidence_score'] = 0.80
+            
+            # Add file type classification
+            cics_op['file_type'] = 'CICS_FILE'
+            
+            enhanced_operations.append(cics_op)
+        
+        return enhanced_operations
+
+    def _get_file_layout_associations_from_fd(self, source_content: str) -> Dict[str, str]:
+        """
+        Get file to layout associations from FD statements
+        """
+        associations = {}
+        lines = source_content.split('\n')
+        current_fd_file = None
+        
+        for line in lines:
+            line_upper = line.upper().strip()
+            
+            # FD file-name
+            fd_match = re.search(r'FD\s+([A-Z][A-Z0-9\-]+)', line_upper)
+            if fd_match:
+                current_fd_file = fd_match.group(1)
+                continue
+            
+            # 01 level record under FD
+            if current_fd_file and re.match(r'^\s*01\s+([A-Z][A-Z0-9\-]+)', line_upper):
+                layout_match = re.match(r'^\s*01\s+([A-Z][A-Z0-9\-]+)', line_upper)
+                if layout_match:
+                    layout_name = layout_match.group(1)
+                    associations[current_fd_file] = layout_name
+                    current_fd_file = None  # Reset after finding layout
+        
+        return associations
