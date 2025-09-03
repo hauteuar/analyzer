@@ -327,7 +327,7 @@ class ComponentExtractor:
             # Update main program totals
             program_component['total_fields'] = len(program_component['fields'])
             program_component['total_layouts'] = len(parsed_data['record_layouts'])
-            
+            logger.info(f"Program {program_name} has {program_component['total_fields']} fields across {program_component['total_layouts']} layouts")
             # Extract and store dependencies
             self._extract_and_store_enhanced_dependencies(session_id, components, filename)
             

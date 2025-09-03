@@ -355,9 +355,9 @@ class DatabaseManager:
                             relationship_type TEXT NOT NULL,
                             interface_type TEXT,
                             confidence_score REAL DEFAULT 0.0,
-                            analysis_details_json TEXT,
-                            source_code_evidence TEXT,
                             dependency_status TEXT DEFAULT 'unknown',  -- ADD THIS LINE
+                            analysis_details_json TEXT,
+                            source_code_evidence TEXT,                            
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
                         )
@@ -850,7 +850,7 @@ class DatabaseManager:
                         full_source_content,  # Full source stored here
                         analysis_json
                     ))
-                
+                logger.info(f"Storing component {component_name} with {len(analysis_result.get('cics_operations', []))} CICS ops")
                 logger.info(f"Stored component {component_name} with {len(full_source_content)} chars of source")
                 
         except Exception as e:

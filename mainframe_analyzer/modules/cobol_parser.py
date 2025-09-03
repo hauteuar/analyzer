@@ -125,8 +125,7 @@ class COBOLParser:
         return True
 
     def _is_valid_cics_filename_enhanced(self, name: str) -> bool:
-        """Enhanced validation specifically for CICS file names like TMS92ASO"""
-        if not name or len(name) < 6:
+        if not name or len(name) < 3:  # Reduced from 6 to 3
             return False
         
         name_upper = name.upper()
@@ -135,8 +134,8 @@ class COBOLParser:
         if not re.match(r'^[A-Z]', name_upper):
             return False
         
-        # Must be valid CICS file name pattern (6-30 chars, alphanumeric + limited special chars)
-        if not re.match(r'^[A-Z][A-Z0-9]{5,29}', name_upper):
+        # More flexible pattern - allow 3+ character files
+        if not re.match(r'^[A-Z][A-Z0-9]{2,29}', name_upper):
             return False
         
         # EXCLUDE obvious comment tags and sequence numbers
@@ -471,22 +470,24 @@ class COBOLParser:
         return operations
 
     def extract_cics_operations(self, lines: List[str]) -> List[Dict]:
-        """Extract CICS operations with proper column handling"""
         operations = []
         seen_operations = set()
+        
+        logger.info(f"Starting CICS extraction from {len(lines)} lines")
         
         for i, line in enumerate(lines):
             program_area = self.extract_program_area_only(line)
             if not program_area:
                 continue
             
-            program_upper = program_area.upper()
-            
-            # Multi-line CICS command handling
-            if 'EXEC CICS' in program_upper:
+            if 'EXEC CICS' in program_area.upper():
+                logger.debug(f"Found CICS line {i+1}: {program_area[:100]}")
                 cics_command = self._extract_complete_cics_command(lines, i)
                 if cics_command:
+                    logger.debug(f"Complete CICS command: {cics_command[:200]}")
                     cics_ops = self._parse_cics_command_enhanced(cics_command, i + 1)
+                    logger.debug(f"Extracted {len(cics_ops)} CICS operations")
+                    
                     for cics_op in cics_ops:
                         op_key = f"CICS_{cics_op['operation']}_{cics_op.get('file_name', 'NOFILE')}_{i}"
                         if op_key not in seen_operations:
