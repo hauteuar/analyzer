@@ -3403,15 +3403,405 @@ function displayFieldMatrix(matrixData) {
         }
 
         // Component Details Functions
-        function showProgramDetails(programName) {
-            console.log(`Showing details for program: ${programName}`);
-            alert(`Program Details: ${programName}\n\nClick OK to continue.\n(This can be enhanced to show detailed program information)`);
+        async function showProgramDetails(programName) {
+        try {
+            // Get detailed program information from API
+            const response = await fetch(`/api/component-source/${currentSessionId}/${programName}`);
+            const data = await response.json();
+            
+            if (data.success) {
+                displayProgramDetailsModal(data.components[0], programName);
+            } else {
+                // Fallback to basic component data
+                showBasicProgramDetails(programName);
+            }
+        } catch (error) {
+            console.error('Error loading program details:', error);
+            showBasicProgramDetails(programName);
         }
+    }
 
-        function showFileDetails(fileName) {
-            console.log(`Showing details for file: ${fileName}`);
-            alert(`File Details: ${fileName}\n\nClick OK to continue.\n(This can be enhanced to show detailed file and layout information)`);
+        async function showFileDetails(fileName) {
+    try {
+        // Get file and layout information
+        const [dependencyResponse, layoutResponse] = await Promise.all([
+            fetch(`/api/dependencies/${currentSessionId}`),
+            fetch(`/api/record-layouts/${currentSessionId}`)
+        ]);
+        
+        const dependencyData = await dependencyResponse.json();
+        const layoutData = await layoutResponse.json();
+        
+        displayFileDetailsModal(fileName, dependencyData, layoutData);
+    } catch (error) {
+        console.error('Error loading file details:', error);
+        showBasicFileDetails(fileName);
+    }
+}
+
+function displayProgramDetailsModal(programData, programName) {
+    const modalHtml = `
+        <div class="modal" style="display: block; z-index: 10001;">
+            <div class="modal-content" style="width: 80%; max-width: 900px;">
+                <div class="modal-header">
+                    <h3 class="modal-title">${programName} - Program Details</h3>
+                    <button class="close" onclick="closeProgramModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+                        <div>
+                            <h5>Program Information</h5>
+                            <table style="width: 100%; font-size: 0.9rem;">
+                                <tr><td><strong>Program Name:</strong></td><td>${programData.component_name || programName}</td></tr>
+                                <tr><td><strong>Friendly Name:</strong></td><td>${programData.friendly_name || programName.replace('-', ' ')}</td></tr>
+                                <tr><td><strong>Type:</strong></td><td>${programData.component_type || 'COBOL Program'}</td></tr>
+                                <tr><td><strong>Lines of Code:</strong></td><td>${programData.total_lines || 'Unknown'}</td></tr>
+                                <tr><td><strong>Total Fields:</strong></td><td>${programData.total_fields || 'Unknown'}</td></tr>
+                            </table>
+                        </div>
+                        <div>
+                            <h5>Analysis Metrics</h5>
+                            <table style="width: 100%; font-size: 0.9rem;">
+                                <tr><td><strong>Complexity Score:</strong></td><td>${programData.complexity_score ? Math.round(programData.complexity_score * 100) + '%' : 'N/A'}</td></tr>
+                                <tr><td><strong>Analysis Status:</strong></td><td><span class="badge badge-success">Complete</span></td></tr>
+                                <tr><td><strong>Dependencies:</strong></td><td id="programDependencyCount">Loading...</td></tr>
+                                <tr><td><strong>Called By:</strong></td><td id="programCallerCount">Loading...</td></tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 2rem;">
+                        <h5>Business Purpose</h5>
+                        <div style="padding: 1rem; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #667eea;">
+                            ${programData.business_purpose || 'This program handles mainframe business logic and data processing operations.'}
+                        </div>
+                    </div>
+
+                    <div class="program-details-tabs">
+                        <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid #e9ecef;">
+                            <button class="tab-button active" onclick="showProgramTab('dependencies', this)">Dependencies</button>
+                            <button class="tab-button" onclick="showProgramTab('fields', this)">Field Usage</button>
+                            <button class="tab-button" onclick="showProgramTab('source', this)">Source Code</button>
+                        </div>
+
+                        <div id="dependencies-tab" class="program-tab active">
+                            <div id="programDependencies">Loading dependency information...</div>
+                        </div>
+
+                        <div id="fields-tab" class="program-tab" style="display: none;">
+                            <div id="programFields">Loading field usage...</div>
+                        </div>
+
+                        <div id="source-tab" class="program-tab" style="display: none;">
+                            <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; max-height: 400px; overflow-y: auto;">
+                                <pre style="margin: 0; font-size: 0.8rem; white-space: pre-wrap;">${programData.source_for_chat || 'Source code not available'}</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="askAboutProgram('${programName}')">Ask AI About This</button>
+                    <button class="btn btn-secondary" onclick="closeProgramModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Load additional data
+    loadProgramDependencies(programName);
+    loadProgramFields(programName);
+}
+
+async function loadProgramDependencies(programName) {
+    try {
+        const response = await fetch(`/api/dependencies/${currentSessionId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            const outgoing = data.dependencies.filter(dep => dep.source_component === programName);
+            const incoming = data.dependencies.filter(dep => dep.target_component === programName);
+            
+            document.getElementById('programDependencyCount').textContent = outgoing.length;
+            document.getElementById('programCallerCount').textContent = incoming.length;
+            
+            const dependenciesHtml = createDependencyTables(outgoing, incoming);
+            document.getElementById('programDependencies').innerHTML = dependenciesHtml;
         }
+    } catch (error) {
+        console.error('Error loading program dependencies:', error);
+        document.getElementById('programDependencies').innerHTML = 'Error loading dependency information.';
+    }
+}
+
+function createDependencyTables(outgoing, incoming) {
+    let html = '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">';
+    
+    html += '<div><h6>This Program Calls:</h6>';
+    if (outgoing.length > 0) {
+        html += '<div style="max-height: 200px; overflow-y: auto;">';
+        outgoing.forEach(dep => {
+            const icon = dep.interface_type === 'CICS' ? '🏦' : dep.relationship_type.includes('FILE') ? '📁' : '📞';
+            html += `<div style="padding: 0.5rem; margin-bottom: 0.5rem; background: #f8f9fa; border-left: 3px solid #667eea; border-radius: 4px; font-size: 0.8rem;">${icon} <strong>${dep.target_component}</strong><br><small>${dep.relationship_type} via ${dep.interface_type}</small></div>`;
+        });
+        html += '</div>';
+    } else {
+        html += '<p class="text-muted">No outgoing dependencies found.</p>';
+    }
+    html += '</div>';
+    
+    html += '<div><h6>Called By:</h6>';
+    if (incoming.length > 0) {
+        html += '<div style="max-height: 200px; overflow-y: auto;">';
+        incoming.forEach(dep => {
+            html += `<div style="padding: 0.5rem; margin-bottom: 0.5rem; background: #f8f9fa; border-left: 3px solid #28a745; border-radius: 4px; font-size: 0.8rem;">📞 <strong>${dep.source_component}</strong><br><small>${dep.relationship_type}</small></div>`;
+        });
+        html += '</div>';
+    } else {
+        html += '<p class="text-muted">No incoming dependencies found.</p>';
+    }
+    html += '</div></div>';
+    
+    return html;
+}
+
+async function loadProgramFields(programName) {
+    try {
+        const response = await fetch(`/api/field-matrix?session_id=${currentSessionId}&program_name=${programName}`);
+        const data = await response.json();
+        
+        if (data.success && data.matrix_data) {
+            const fieldsHtml = createProgramFieldsDisplay(data.matrix_data);
+            document.getElementById('programFields').innerHTML = fieldsHtml;
+        } else {
+            document.getElementById('programFields').innerHTML = '<p class="text-muted">No field usage information available.</p>';
+        }
+    } catch (error) {
+        console.error('Error loading program fields:', error);
+        document.getElementById('programFields').innerHTML = 'Error loading field information.';
+    }
+}
+
+function createProgramFieldsDisplay(matrixData) {
+    const fields = matrixData.fields || [];
+    
+    if (fields.length === 0) {
+        return '<p class="text-muted">No field usage data found.</p>';
+    }
+
+    let html = `<div style="max-height: 300px; overflow-y: auto;"><table class="data-table" style="font-size: 0.8rem;"><thead><tr><th>Field Name</th><th>Usage</th><th>Source/Target</th><th>Purpose</th></tr></thead><tbody>`;
+
+    fields.forEach(field => {
+        html += `<tr><td><strong>${field.field_name}</strong>${field.friendly_name ? `<br><small class="text-muted">${field.friendly_name}</small>` : ''}</td><td><span class="badge ${getBadgeClass(field.usage_type)}">${field.usage_type || 'STATIC'}</span></td><td>${field.source_field || 'N/A'}</td><td>${field.business_purpose || 'Field processing'}</td></tr>`;
+    });
+
+    html += '</tbody></table></div>';
+    return html;
+}
+
+function displayFileDetailsModal(fileName, dependencyData, layoutData) {
+    // Find related layouts
+    const relatedLayouts = layoutData.success ? 
+        layoutData.layouts.filter(layout => 
+            layout.layout_name.toUpperCase().includes(fileName.toUpperCase()) ||
+            fileName.toUpperCase().includes(layout.layout_name.toUpperCase())
+        ) : [];
+
+    // Find file dependencies
+    const fileDependencies = dependencyData.success ?
+        dependencyData.dependencies.filter(dep => 
+            dep.target_component.toUpperCase() === fileName.toUpperCase()
+        ) : [];
+
+    const modalHtml = `
+        <div class="modal" style="display: block; z-index: 10001;">
+            <div class="modal-content" style="width: 80%; max-width: 900px;">
+                <div class="modal-header">
+                    <h3 class="modal-title">${fileName} - File Details</h3>
+                    <button class="close" onclick="closeFileModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+                        <div>
+                            <h5>File Information</h5>
+                            <table style="width: 100%; font-size: 0.9rem;">
+                                <tr><td><strong>File Name:</strong></td><td>${fileName}</td></tr>
+                                <tr><td><strong>Interface Type:</strong></td><td>${fileDependencies[0]?.interface_type || 'FILE_SYSTEM'}</td></tr>
+                                <tr><td><strong>I/O Operations:</strong></td><td>${getFileOperations(fileDependencies)}</td></tr>
+                                <tr><td><strong>Access Programs:</strong></td><td>${fileDependencies.length}</td></tr>
+                            </table>
+                        </div>
+                        <div>
+                            <h5>Layout Information</h5>
+                            <table style="width: 100%; font-size: 0.9rem;">
+                                <tr><td><strong>Associated Layouts:</strong></td><td>${relatedLayouts.length}</td></tr>
+                                <tr><td><strong>Total Fields:</strong></td><td>${getTotalFields(relatedLayouts)}</td></tr>
+                                <tr><td><strong>Layout Status:</strong></td><td>${relatedLayouts.length > 0 ? '<span class="badge badge-success">Available</span>' : '<span class="badge badge-warning">No Layouts</span>'}</td></tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="file-details-tabs">
+                        <div style="display: flex; gap: 1rem; margin-bottom: 1rem; border-bottom: 1px solid #e9ecef;">
+                            <button class="tab-button active" onclick="showFileTab('access', this)">File Access</button>
+                            <button class="tab-button" onclick="showFileTab('layouts', this)">Record Layouts</button>
+                            <button class="tab-button" onclick="showFileTab('fields', this)">Field Structure</button>
+                        </div>
+
+                        <div id="access-tab" class="file-tab active">
+                            <h6>Programs Accessing This File</h6>
+                            <div style="max-height: 300px; overflow-y: auto;">
+                                ${createFileAccessTable(fileDependencies)}
+                            </div>
+                        </div>
+
+                        <div id="layouts-tab" class="file-tab" style="display: none;">
+                            <h6>Associated Record Layouts</h6>
+                            <div style="max-height: 300px; overflow-y: auto;">
+                                ${createLayoutTable(relatedLayouts)}
+                            </div>
+                        </div>
+
+                        <div id="fields-tab" class="file-tab" style="display: none;">
+                            <h6>Field Structure Analysis</h6>
+                            <div id="fileFieldStructure">
+                                ${relatedLayouts.length > 0 ? 'Loading field structure...' : 'No layout information available for field analysis.'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="analyzeFileMapping('${fileName}')">Analyze Field Mapping</button>
+                    <button class="btn btn-secondary" onclick="askAboutFile('${fileName}')">Ask AI About This</button>
+                    <button class="btn btn-secondary" onclick="closeFileModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Load field structure if layouts are available
+    if (relatedLayouts.length > 0) {
+        loadFileFieldStructure(fileName, relatedLayouts[0].layout_name);
+    }
+}
+
+// Helper functions for file details
+function getFileOperations(dependencies) {
+    const operations = new Set();
+    dependencies.forEach(dep => {
+        if (dep.analysis_details && dep.analysis_details.operations) {
+            dep.analysis_details.operations.forEach(op => operations.add(op));
+        }
+    });
+    return Array.from(operations).join(', ') || 'READ/WRITE';
+}
+
+function getTotalFields(layouts) {
+    return layouts.reduce((total, layout) => total + (layout.fields_count || 0), 0);
+}
+
+function createFileAccessTable(dependencies) {
+    if (dependencies.length === 0) {
+        return '<p class="text-muted">No program access information available.</p>';
+    }
+
+    let html = `<table class="data-table" style="font-size: 0.9rem;"><thead><tr><th>Program</th><th>Operation</th><th>Interface</th><th>Confidence</th></tr></thead><tbody>`;
+
+    dependencies.forEach(dep => {
+        const operations = dep.analysis_details?.operations?.join(', ') || 'Unknown';
+        const confidence = Math.round((dep.confidence_score || 0) * 100);
+        html += `<tr><td>${dep.source_component}</td><td>${operations}</td><td>${dep.interface_type || 'FILE'}</td><td>${confidence}%</td></tr>`;
+    });
+
+    html += '</tbody></table>';
+    return html;
+}
+
+function createLayoutTable(layouts) {
+    if (layouts.length === 0) {
+        return '<p class="text-muted">No record layouts found for this file.</p>';
+    }
+
+    let html = `<table class="data-table" style="font-size: 0.9rem;"><thead><tr><th>Layout Name</th><th>Program</th><th>Fields</th><th>Actions</th></tr></thead><tbody>`;
+
+    layouts.forEach(layout => {
+        html += `<tr><td><strong>${layout.layout_name}</strong>${layout.friendly_name ? `<br><small class="text-muted">${layout.friendly_name}</small>` : ''}</td><td>${layout.program_name || 'Unknown'}</td><td>${layout.fields_count || 0}</td><td><button class="btn btn-secondary" onclick="viewLayoutFields('${layout.layout_name}')" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">View Fields</button></td></tr>`;
+    });
+
+    html += '</tbody></table>';
+    return html;
+}
+
+// Tab switching functions
+function showProgramTab(tabName, button) {
+    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+    button.classList.add('active');
+    document.querySelectorAll('.program-tab').forEach(tab => tab.style.display = 'none');
+    document.getElementById(tabName + '-tab').style.display = 'block';
+}
+
+function showFileTab(tabName, button) {
+    document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+    button.classList.add('active');
+    document.querySelectorAll('.file-tab').forEach(tab => tab.style.display = 'none');
+    document.getElementById(tabName + '-tab').style.display = 'block';
+}
+
+// Modal close functions
+function closeProgramModal() {
+    const modals = document.querySelectorAll('.modal');
+    modals.forEach(modal => {
+        if (modal.style.zIndex === '10001') {
+            modal.remove();
+        }
+    });
+}
+
+function closeFileModal() {
+    closeProgramModal();
+}
+
+// Action functions
+function askAboutProgram(programName) {
+    closeProgramModal();
+    const chatInput = document.getElementById('chatInput');
+    chatInput.value = `Tell me about the ${programName} program. What does it do, what are its key functions, and how does it interact with other components?`;
+    chatInput.focus();
+}
+
+function askAboutFile(fileName) {
+    closeFileModal();
+    const chatInput = document.getElementById('chatInput');
+    chatInput.value = `Explain the ${fileName} file. What data does it contain, which programs access it, and what is its business purpose?`;
+    chatInput.focus();
+}
+
+function analyzeFileMapping(fileName) {
+    closeFileModal();
+    showTab({target: document.querySelector('.tab-btn:nth-child(5)')}, 'fieldMapping');
+    document.getElementById('targetFileInput').value = fileName;
+}
+
+function viewLayoutFields(layoutName) {
+    closeFileModal();
+    showTab({target: document.querySelector('.tab-btn:nth-child(4)')}, 'fieldMatrix');
+    document.getElementById('recordLayoutSelect').value = layoutName;
+    loadFieldMatrix();
+}
+
+// Fallback functions
+function showBasicProgramDetails(programName) {
+    alert(`Program Details: ${programName}\n\nDetailed information could not be loaded.\nPlease check the connection and try again.`);
+}
+
+function showBasicFileDetails(fileName) {
+    alert(`File Details: ${fileName}\n\nDetailed information could not be loaded.\nPlease check the connection and try again.`);
+}
+
+
 
         // Close modal when clicking outside
         window.onclick = function(event) {
