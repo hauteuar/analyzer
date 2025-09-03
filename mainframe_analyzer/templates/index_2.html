@@ -4107,6 +4107,85 @@ function createFileLayerWithLayouts(title, items, className) {
     flowContainer.innerHTML = flowHtml;
 }
 
+async function loadFileFieldStructure(fileName, layoutName) {
+    try {
+        const response = await fetch(`/api/field-matrix?session_id=${currentSessionId}&record_layout=${layoutName}`);
+        const data = await response.json();
+        
+        if (data.success && data.matrix_data) {
+            const fieldStructure = document.getElementById('fileFieldStructure');
+            fieldStructure.innerHTML = createFieldStructureDisplay(data.matrix_data);
+        }
+    } catch (error) {
+        console.error('Error loading field structure:', error);
+        const fieldStructure = document.getElementById('fileFieldStructure');
+        if (fieldStructure) {
+            fieldStructure.innerHTML = '<p class="text-muted">Error loading field structure information.</p>';
+        }
+    }
+}
+
+function createFieldStructureDisplay(matrixData) {
+    if (!matrixData.fields && !matrixData.program_layouts) {
+        return '<p class="text-muted">No field structure data available.</p>';
+    }
+
+    const fields = matrixData.fields || (matrixData.program_layouts && matrixData.program_layouts[0]?.fields) || [];
+    
+    if (fields.length === 0) {
+        return '<p class="text-muted">No fields found in layout.</p>';
+    }
+
+    let html = `
+        <table class="data-table" style="font-size: 0.8rem;">
+            <thead>
+                <tr>
+                    <th>Field Name</th>
+                    <th>Usage Type</th>
+                    <th>Data Type</th>
+                    <th>Purpose</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    fields.slice(0, 10).forEach(field => { // Show first 10 fields
+        html += `
+            <tr>
+                <td>
+                    <strong>${field.field_name}</strong>
+                    ${field.friendly_name ? `<br><small class="text-muted">${field.friendly_name}</small>` : ''}
+                </td>
+                <td><span class="badge ${getBadgeClass(field.usage_type)}">${field.usage_type || 'STATIC'}</span></td>
+                <td><code>${field.data_type || field.mainframe_data_type || 'UNKNOWN'}</code></td>
+                <td>${field.business_purpose || 'Field usage analysis'}</td>
+            </tr>
+        `;
+    });
+
+    html += '</tbody></table>';
+    
+    if (fields.length > 10) {
+        html += `<p style="margin-top: 1rem; color: #666; font-size: 0.9rem;">Showing first 10 of ${fields.length} fields. <a href="#" onclick="viewAllFields('${matrixData.layout_name || 'layout'}')">View all fields</a></p>`;
+    }
+
+    return html;
+}
+
+function viewAllFields(layoutName) {
+    viewLayoutFields(layoutName);
+}
+function viewLayoutFields(layoutName) {
+    closeFileModal();
+    // Switch to field matrix tab and pre-populate
+    showTab({target: document.querySelector('.tab-btn:nth-child(4)')}, 'fieldMatrix');
+    const recordLayoutSelect = document.getElementById('recordLayoutSelect');
+    if (recordLayoutSelect) {
+        recordLayoutSelect.value = layoutName;
+        loadFieldMatrix();
+    }
+}
+
         function displayEmptyDependencyFlow() {
             document.getElementById('dependencyFlowContent').innerHTML = 
                 '<p class="text-muted">Upload and analyze COBOL programs to see system architecture flow</p>';
