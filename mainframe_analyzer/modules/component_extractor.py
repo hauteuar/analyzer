@@ -2084,22 +2084,28 @@ File Content ({filename}):
              # After storing file dependencies, store file-layout associations
             file_layout_associations = self.db_manager.get_file_record_layout_associations(session_id)
 
+            
             for file_name, layout_info in file_layout_associations.items():
-                # Store as a special dependency type
-                dependencies.append({
-                    'source_component': layout_info['program_name'],
-                    'target_component': f"{file_name}::{layout_info['layout_name']}",
-                    'relationship_type': f"FILE_LAYOUT_{layout_info['io_type']}",
-                    'interface_type': 'RECORD_LAYOUT',
-                    'confidence_score': 0.95,
-                    'dependency_status': 'layout_association',
-                    'analysis_details_json': json.dumps({
-                        'file_name': file_name,
-                        'layout_name': layout_info['layout_name'],
-                        'io_type': layout_info['io_type'],
-                        'association_method': layout_info['method']
+                try:
+                    # Store as a special dependency type
+                    dependencies.append({
+                        'source_component': layout_info['program_name'],
+                        'target_component': f"{file_name}::{layout_info['layout_name']}",
+                        'relationship_type': f"FILE_LAYOUT_{layout_info['io_type']}",
+                        'interface_type': 'RECORD_LAYOUT',
+                        'confidence_score': 0.95,
+                        'dependency_status': 'layout_association',
+                        'analysis_details_json': json.dumps({
+                            'file_name': file_name,
+                            'layout_name': layout_info['layout_name'],
+                            'io_type': layout_info['io_type'],
+                            'association_method': layout_info.get('association_method', 'UNKNOWN')  # Use .get() with default
+                        })
                     })
-                })
+                except KeyError as e:
+                    logger.error(f"Missing key in layout_info: {e}. Available keys: {layout_info.keys()}")
+                    continue
+        
 
             logger.info(f"DEPENDENCY DEBUG: Found {len(dependencies)} dependencies to store")
             for dep in dependencies[:3]:  # Log first 3 for debugging
