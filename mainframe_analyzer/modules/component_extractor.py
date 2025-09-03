@@ -2115,6 +2115,77 @@ File Content ({filename}):
         except Exception as e:
             logger.error(f"Error in enhanced dependency extraction: {str(e)}")
 
+    def _is_valid_dependency_target(self, target_name: Optional[str], source_program: str) -> bool:
+        """Enhanced validation for dependency targets"""
+        if not target_name:
+            return False
+        
+        t = str(target_name).strip()
+        if not t or len(t) < 3:
+            return False
+
+        t_upper = t.upper()
+
+        # Ignore self-references
+        if t_upper == str(source_program).upper():
+            return False
+
+        # Enhanced COBOL keywords and operators to ignore
+        INVALID_KEYWORDS = {
+            # Comparison operators
+            'EQUAL', 'NOT', 'GREATER', 'LESS', 'THAN', 'OR', 'AND',
+            # COBOL reserved words
+            'VALUE', 'VALUES', 'PIC', 'PICTURE', 'USAGE', 'REDEFINES', 'OCCURS',
+            'COMP', 'COMP-3', 'BINARY', 'DISPLAY', 'PACKED-DECIMAL',
+            # Control flow
+            'IF', 'THEN', 'ELSE', 'END-IF', 'WHEN', 'OTHER', 'ALSO',
+            'PERFORM', 'UNTIL', 'VARYING', 'TIMES', 'THRU', 'THROUGH',
+            # Data movement
+            'MOVE', 'TO', 'FROM', 'INTO', 'GIVING',
+            # Arithmetic
+            'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE', 'COMPUTE',
+            # File operations  
+            'READ', 'WRITE', 'OPEN', 'CLOSE', 'REWRITE', 'DELETE',
+            # Common literals
+            'SPACES', 'ZEROS', 'HIGH-VALUES', 'LOW-VALUES', 'QUOTES',
+            # Program structure
+            'SECTION', 'PARAGRAPH', 'DIVISION', 'END', 'EXIT',
+            # Common single words that aren't dependencies
+            'THIS', 'THE', 'A', 'AN', 'IS', 'ARE', 'WAS', 'WERE',
+            'ON', 'OFF', 'YES', 'NO', 'TRUE', 'FALSE',
+            # Common COBOL suffixes that indicate keywords
+            'SIZE', 'LENGTH', 'COUNT', 'ERROR', 'STATUS'
+        }
+
+        # Check if it's an invalid keyword
+        if t_upper in INVALID_KEYWORDS:
+            return False
+
+        # Check if it contains only operators/punctuation
+        if re.match(r'^[=<>!&|+\-*/\(\)\.,;:\[\]{}]+$', t):
+            return False
+
+        # Check if it's a numeric literal
+        if re.match(r'^\d+(\.\d+)?$', t):
+            return False
+
+        # Check if it's a quoted string
+        if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
+            return False
+
+        # Must contain at least one letter (not just numbers and symbols)
+        if not re.search(r'[A-Za-z]', t):
+            return False
+
+        # Should look like a valid COBOL identifier
+        if not re.match(r'^[A-Za-z][A-Za-z0-9\-_]*[A-Za-z0-9]?$', t):
+            return False
+
+        # Additional length checks for realistic program/file names
+        if len(t) > 30:  # COBOL names typically <= 30 chars
+            return False
+
+        return True
 
     def _get_file_record_layout_association(self, session_id: str, file_name: str, program_name: str) -> Optional[Dict]:
         """Get record layout associated with a specific file"""
@@ -2141,7 +2212,7 @@ File Content ({filename}):
         except Exception as e:
             logger.error(f"Error getting file-layout association for {file_name}: {str(e)}")
             return None
-
+    
 
     def _create_dynamic_call_dependencies(self, session_id: str, program_name: str, 
                                    dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
