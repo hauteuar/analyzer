@@ -1555,7 +1555,8 @@
                             <option value="">Overall System View</option>
                         </select>
                         <button class="btn btn-secondary" onclick="refreshDependencyFlow()">Refresh</button>
-                        <button class="btn btn-secondary" onclick="loadEnhancedDependencies()">Load Enhanced View</button>
+                        <button class="btn btn-secondary" onclick="loadEnhancedDependencies()" id="enhancedViewBtn">Load Enhanced View</button>
+                        <button class="btn btn-secondary" onclick="restoreNormalView()" id="normalViewBtn" style="display: none;">Restore Normal View</button>
                     </div>
 
                     <!-- Dependency Status Summary -->
@@ -2375,21 +2376,27 @@
 
         // Enhanced Dependencies Flow with Fixed Core Component Display
         function createEnhancedDependencyFlowHTML(categorized, focusComponent) {
-            let html = '<div class="dependency-flow">';
-            
-            // Input Files Level
-            if (categorized.inputFiles && categorized.inputFiles.length > 0) {
-                html += createFileLayerWithLayouts('Input Sources', categorized.inputFiles, 'input-source');
-                html += '<div class="flow-arrow">↓</div>';
-            }
-            
-            // Core Programs Level - ALWAYS show this layer
-            const coreItems = focusComponent ? 
-                [{name: focusComponent, type: 'Core Program', confidence: 1.0}] : 
-                categorized.corePrograms && categorized.corePrograms.length > 0 ? categorized.corePrograms :
-                [{name: 'MAIN-PROGRAM', type: 'Core Program', confidence: 0.9}];
-            
-            html += createProgramLayer('Core Programs', coreItems, 'core-program');
+                let html = '<div class="dependency-flow">';
+                
+                // Input Files Level
+                if (categorized.inputFiles && categorized.inputFiles.length > 0) {
+                    html += createFileLayerWithLayouts('Input Sources', categorized.inputFiles, 'input-source');
+                    html += '<div class="flow-arrow">↓</div>';
+                }
+                
+                // Core Programs Level - Show all uploaded programs when no focus selected
+                let coreItems;
+                if (focusComponent) {
+                    coreItems = [{name: focusComponent, type: 'Focus Program', confidence: 1.0}];
+                } else if (categorized.corePrograms && categorized.corePrograms.length > 0) {
+                    coreItems = categorized.corePrograms;
+                } else {
+                    // Show ALL uploaded programs as core components
+                    coreItems = getAllUploadedPrograms() || [{name: 'MAIN-PROGRAM', type: 'Core Program', confidence: 0.9}];
+                }
+                
+                html += createProgramLayer('Core Programs', coreItems, 'core-program');
+
             
             // Add arrows to called programs if any exist
             if (categorized.calledPrograms && categorized.calledPrograms.length > 0) {
@@ -2429,6 +2436,19 @@
             return html;
         }
 
+        function getAllUploadedPrograms() {
+    if (componentsData && componentsData.length > 0) {
+        const programs = componentsData.filter(c => c.component_type === 'PROGRAM');
+        if (programs.length > 0) {
+            return programs.map(program => ({
+                name: program.component_name,
+                type: 'Core Program',
+                confidence: 0.9
+            }));
+        }
+    }
+    return null;
+}
         function createProgramCallArrows(calledPrograms) {
             let html = '<div class="program-call-arrows" style="display: flex; justify-content: center; align-items: center; gap: 1rem; height: 60px; margin: 1rem 0;">';
             
@@ -3725,35 +3745,53 @@ function createFileLayerWithLayouts(title, items, className) {
             loadDependencyFlow();
         }
 
+        function restoreNormalView() {
+    // Hide enhanced view
+    document.getElementById('enhancedDependenciesContainer').style.display = 'none';
+    
+    // Show normal view
+    document.getElementById('dependenciesVisualization').style.display = 'block';
+    
+    // Reload normal dependency flow
+    loadDependencyFlow();
+    
+    // Toggle buttons
+    document.getElementById('enhancedViewBtn').style.display = 'inline-block';
+    document.getElementById('normalViewBtn').style.display = 'none';
+}
         async function loadEnhancedDependencies() {
-            if (!currentSessionId) {
-                showError('No active session');
-                return;
-            }
+    if (!currentSessionId) {
+        showError('No active session');
+        return;
+    }
 
-            try {
-                showLoading('Loading enhanced dependencies...');
+    try {
+        showLoading('Loading enhanced dependencies...');
+        
+        const response = await fetch(`/api/dependencies-enhanced/${currentSessionId}`);
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+                displayEnhancedDependencies(data);
+                showDependencyStatusSummary(data.status_counts);
                 
-                const response = await fetch(`/api/dependencies-enhanced/${currentSessionId}`);
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success) {
-                        displayEnhancedDependencies(data);
-                        showDependencyStatusSummary(data.status_counts);
-                    } else {
-                        showError(data.error || 'Failed to load enhanced dependencies');
-                    }
-                } else {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-            } catch (error) {
-                console.error('Error loading enhanced dependencies:', error);
-                showError('Failed to load enhanced dependencies');
+                // Toggle buttons
+                document.getElementById('enhancedViewBtn').style.display = 'none';
+                document.getElementById('normalViewBtn').style.display = 'inline-block';
+            } else {
+                showError(data.error || 'Failed to load enhanced dependencies');
             }
-            
-            hideLoading();
+        } else {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
+    } catch (error) {
+        console.error('Error loading enhanced dependencies:', error);
+        showError('Failed to load enhanced dependencies');
+    }
+    
+    hideLoading();
+}
 
         function showDependencyStatusSummary(statusCounts) {
             document.getElementById('present-count').textContent = statusCounts.present || 0;
