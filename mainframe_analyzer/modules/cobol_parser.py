@@ -811,7 +811,7 @@ class COBOLParser:
             'components': self.extract_components(raw_lines),
             'record_layouts': self.extract_record_layouts(raw_lines),
             'file_operations': self.extract_file_operations(raw_lines),
-            'program_calls': self.extract_program_calls(raw_lines),
+            'program_calls': self.extract_program_calls(raw_lines, filename),
             'copybooks': self.extract_copybooks(raw_lines),
             'cics_operations': self.extract_cics_operations(raw_lines),
             'mq_operations': self.extract_mq_operations(raw_lines),
