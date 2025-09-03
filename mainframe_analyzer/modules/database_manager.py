@@ -2411,6 +2411,142 @@ class DatabaseManager:
         
         return associations
 
+    def _check_layouts_exist(self, session_id: str, layout_names: List[str]) -> bool:
+        """Check if record layouts exist as derived components"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check if any of the layouts exist
+                layout_conditions = ' OR '.join(['UPPER(component_name) LIKE UPPER(?)' for _ in layout_names])
+                layout_params = [f'%{layout}%' for layout in layout_names]
+                
+                cursor.execute(f'''
+                    SELECT COUNT(*) FROM derived_components 
+                    WHERE session_id = ? AND component_type = 'RECORD_LAYOUT'
+                    AND ({layout_conditions})
+                ''', [session_id] + layout_params)
+                
+                count = cursor.fetchone()[0]
+                return count > 0
+                
+        except Exception as e:
+            logger.error(f"Error checking layout existence: {str(e)}")
+            return False
+
+    def _get_call_arrow_direction(self, call_type: str) -> str:
+        """Get arrow direction for program calls"""
+        direction_map = {
+            'CALL': 'bidirectional',
+            'XCTL': 'outgoing', 
+            'LINK': 'bidirectional',
+            'CICS_LINK': 'bidirectional',
+            'CICS_XCTL': 'outgoing',
+            'DYNAMIC': 'outgoing'
+        }
+        return direction_map.get(call_type.upper(), 'bidirectional')
+
+    def _determine_display_status(self, dependency: Dict) -> str:
+        """Determine how dependency should be displayed in UI"""
+        interface_type = dependency.get('interface_type', '')
+        relationship_type = dependency.get('relationship_type', '')
+        dep_status = dependency.get('dependency_status', 'unknown')
+        
+        # Files are always considered available
+        if interface_type in ['FILE_SYSTEM', 'CICS'] and 'FILE' in relationship_type:
+            if dep_status == 'file_with_layout':
+                return 'file_with_layout'
+            else:
+                return 'file'
+        
+        # Programs can be missing
+        elif interface_type == 'COBOL' and relationship_type == 'PROGRAM_CALL':
+            return dep_status  # 'present' or 'missing'
+        
+        return 'unknown'
+
+
+    def get_dependencies_with_layout_resolution_complete(self, session_id: str) -> List[Dict]:
+        """Complete implementation of enhanced dependencies with layout resolution"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # First, ensure we have the dependency_status column
+                try:
+                    cursor.execute('''
+                        SELECT dependency_status FROM dependency_relationships LIMIT 1
+                    ''')
+                except sqlite3.OperationalError:
+                    # Add the column if it doesn't exist
+                    logger.info("Adding dependency_status column to dependency_relationships table")
+                    cursor.execute('''
+                        ALTER TABLE dependency_relationships 
+                        ADD COLUMN dependency_status TEXT DEFAULT 'unknown'
+                    ''')
+                
+                # Get dependencies with enhanced information
+                cursor.execute('''
+                    SELECT dr.source_component, dr.target_component, dr.relationship_type,
+                        dr.interface_type, dr.confidence_score, dr.analysis_details_json,
+                        dr.source_code_evidence, dr.created_at, 
+                        COALESCE(dr.dependency_status, 'unknown') as dependency_status,
+                        ca1.business_purpose as source_purpose,
+                        ca2.business_purpose as target_purpose
+                    FROM dependency_relationships dr
+                    LEFT JOIN component_analysis ca1 ON (dr.source_component = ca1.component_name AND ca1.session_id = ?)
+                    LEFT JOIN component_analysis ca2 ON (dr.target_component = ca2.component_name AND ca2.session_id = ?)
+                    WHERE dr.session_id = ?
+                    ORDER BY dr.source_component, dr.relationship_type, dr.target_component
+                ''', (session_id, session_id, session_id))
+                
+                dependencies = []
+                for row in cursor.fetchall():
+                    dep_dict = dict(row)
+                    
+                    # Parse and enhance analysis details
+                    analysis_details = {}
+                    try:
+                        analysis_json = dep_dict.get('analysis_details_json', '{}')
+                        analysis_details = json.loads(analysis_json) if analysis_json else {}
+                    except json.JSONDecodeError:
+                        analysis_details = {}
+                    
+                    dep_dict['analysis_details'] = analysis_details
+                    
+                    # Enhanced status determination for CICS files with layouts
+                    if (dep_dict.get('interface_type') == 'CICS' and 
+                        'FILE' in dep_dict.get('relationship_type', '')):
+                        
+                        associated_layouts = analysis_details.get('associated_layouts', [])
+                        layout_resolved = analysis_details.get('layout_resolved', False)
+                        
+                        if associated_layouts and layout_resolved:
+                            dep_dict['dependency_status'] = 'file_with_layout'
+                            dep_dict['display_status'] = 'file_with_layout'
+                        else:
+                            dep_dict['dependency_status'] = 'cics_file'
+                            dep_dict['display_status'] = 'file'
+                    else:
+                        # Set display status based on existing dependency_status
+                        dep_status = dep_dict.get('dependency_status', 'unknown')
+                        if dep_status == 'missing':
+                            dep_dict['display_status'] = 'missing'
+                        elif dep_status == 'present':
+                            dep_dict['display_status'] = 'present'
+                        elif dep_dict.get('interface_type') in ['FILE_SYSTEM', 'CICS']:
+                            dep_dict['display_status'] = 'file'
+                        else:
+                            dep_dict['display_status'] = 'unknown'
+                    
+                    dependencies.append(dep_dict)
+                
+                logger.info(f"Retrieved {len(dependencies)} enhanced dependencies with layout resolution")
+                return dependencies
+                
+        except Exception as e:
+            logger.error(f"Error getting dependencies with layout resolution: {str(e)}")
+            return []
 
     # Update database_manager.py to handle enhanced dependencies
     def get_enhanced_dependencies(self, session_id: str) -> List[Dict]:

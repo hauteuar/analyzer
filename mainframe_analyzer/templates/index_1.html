@@ -1199,6 +1199,64 @@
             border: 1px solid #ddd;
             border-radius: 4px;
         }
+
+        .field-mapping-table, .field-matrix-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .file-with-layout {
+    border-left: 4px solid #28a745 !important;
+    background: linear-gradient(135deg, #d4edda 0%, #ffffff 100%) !important;
+}
+
+.file-only {
+    border-left: 4px solid #ffc107 !important;
+    background: linear-gradient(135deg, #fff3cd 0%, #ffffff 100%) !important;
+}
+
+.program-call-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.call-arrow {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    color: #667eea;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.program-call-arrows {
+    animation: pulse 2s infinite;
+}
+
+.call-arrow-indicator {
+    color: #667eea;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.present-program {
+    border-color: #28a745 !important;
+    background: linear-gradient(135deg, #d4edda 0%, #ffffff 100%) !important;
+}
+
+.missing-dependency {
+    border-color: #dc3545 !important;
+    border-style: dashed !important;
+    background: linear-gradient(135deg, #f8d7da 0%, #ffffff 100%) !important;
+    opacity: 0.8;
+}
     </style>
 </head>
 <body>
@@ -2871,39 +2929,155 @@ function escapeForTemplate(str) {
         }
         // Enhanced Dependency Flow
         async function loadDependencyFlow() {
-            const selectedComponent = document.getElementById('dependencyComponentSelect').value;
+        const selectedComponent = document.getElementById('dependencyComponentSelect').value;
+        
+        try {
+            console.log('Loading enhanced dependency flow for:', selectedComponent || 'Overall System');
             
-            try {
-                console.log('Loading dependency flow for:', selectedComponent || 'Overall System');
+            await populateDependencyDropdown();
+            
+            const response = await fetch(`/api/dependencies/${currentSessionId}`);
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('Dependencies response:', data);
                 
-                // First, populate the dropdown with available components if it's empty
-                await populateDependencyDropdown();
-                
-                const response = await fetch(`/api/dependencies/${currentSessionId}`);
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('Dependencies response:', data);
+                if (data.success && data.dependencies && data.dependencies.length > 0) {
+                    // Use the new enhanced display function
+                    displayEnhancedDependencyFlowWithLayouts(data.dependencies, selectedComponent);
                     
-                    if (data.success && data.dependencies && data.dependencies.length > 0) {
-                        displayEnhancedDependencyFlow(data.dependencies, selectedComponent);
-                    } else {
-                        displayEmptyDependencyFlow();
-                    }
+                    // Update the dependency status summary
+                    updateDependencyStatusDisplay(data.dependencies);
                 } else {
-                    console.error('Dependencies API response not ok:', response.status);
                     displayEmptyDependencyFlow();
                 }
-            } catch (error) {
-                console.error('Error loading dependency flow:', error);
+            } else {
+                console.error('Dependencies API response not ok:', response.status);
                 displayEmptyDependencyFlow();
             }
+        } catch (error) {
+            console.error('Error loading dependency flow:', error);
+            displayEmptyDependencyFlow();
         }
+    }
+
+    function updateDependencyStatusDisplay(dependencies) {
+        const statusCounts = {
+            present: 0,
+            missing: 0,
+            file: 0,
+            file_with_layout: 0,
+            unknown: 0
+        };
+        
+        dependencies.forEach(dep => {
+            const status = dep.dependency_status || 'unknown';
+            statusCounts[status] = (statusCounts[status] || 0) + 1;
+        });
+        
+        // Update the status summary cards
+        document.getElementById('present-count').textContent = statusCounts.present || 0;
+        document.getElementById('missing-count').textContent = statusCounts.missing || 0;
+        document.getElementById('file-count').textContent = (statusCounts.file || 0) + (statusCounts.file_with_layout || 0);
+        document.getElementById('unknown-count').textContent = statusCounts.unknown || 0;
+        
+        // Show additional info for files with layouts
+        const fileCountElement = document.getElementById('file-count');
+        if (statusCounts.file_with_layout > 0) {
+            fileCountElement.title = `${statusCounts.file_with_layout} files have associated record layouts`;
+            fileCountElement.style.borderLeft = '4px solid #28a745';
+        }
+        
+        document.getElementById('dependencyStatusSummary').style.display = 'grid';
+    }
 
         function displayEmptyDependencyFlow() {
             document.getElementById('dependencyFlowContent').innerHTML = 
                 '<p class="text-muted">Upload and analyze COBOL programs to see system architecture flow</p>';
         }
+
+        function getDependencyStatusBadge(status) {
+    const badges = {
+        'present': '<span class="badge badge-success">Present</span>',
+        'missing': '<span class="badge badge-danger">Missing</span>',
+        'file': '<span class="badge badge-primary">File</span>',
+        'file_with_layout': '<span class="badge badge-success">File + Layout</span>',
+        'unknown': '<span class="badge badge-secondary">Unknown</span>'
+    };
+    
+    return badges[status] || badges['unknown'];
+}
+
+        function showEnhancedDependencyInfo(dependency) {
+        const analysis = dependency.analysis_details || {};
+        
+        let infoHtml = `
+            <div class="dependency-detail-modal">
+                <h4>${dependency.source_component} → ${dependency.target_component}</h4>
+                <div class="detail-grid">
+                    <div><strong>Type:</strong> ${dependency.relationship_type}</div>
+                    <div><strong>Interface:</strong> ${dependency.interface_type}</div>
+                    <div><strong>Status:</strong> ${getDependencyStatusBadge(dependency.dependency_status)}</div>
+                    <div><strong>Confidence:</strong> ${(dependency.confidence_score * 100).toFixed(1)}%</div>
+                </div>
+                
+                ${analysis.associated_layouts ? `
+                    <div class="layout-associations">
+                        <h5>Associated Record Layouts:</h5>
+                        <ul>
+                            ${analysis.associated_layouts.map(layout => `<li>${layout}</li>`).join('')}
+                        </ul>
+                    </div>
+                ` : ''}
+                
+                ${analysis.operations ? `
+                    <div class="operations-info">
+                        <h5>Operations:</h5>
+                        <div class="operation-tags">
+                            ${analysis.operations.map(op => `<span class="operation-tag">${op}</span>`).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+                
+                ${analysis.call_type ? `
+                    <div class="call-info">
+                        <h5>Call Information:</h5>
+                        <div><strong>Call Type:</strong> ${analysis.call_type} ${getCallArrowIcon(analysis.call_type)}</div>
+                        <div><strong>Direction:</strong> ${analysis.call_direction || 'bidirectional'}</div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+        
+        // Display in modal or tooltip
+        showDependencyModal(infoHtml);
+    }
+        function displayEnhancedDependencyFlowWithLayouts(dependencies, selectedComponent) {
+            console.log('Displaying enhanced flow with layout associations');
+            
+            const flowContainer = document.getElementById('dependencyFlowContent');
+            flowContainer.innerHTML = '';
+            
+            // Filter and categorize dependencies
+            let filteredDeps = dependencies;
+            if (selectedComponent) {
+                filteredDeps = dependencies.filter(dep => 
+                    dep.source_component === selectedComponent || dep.target_component === selectedComponent
+                );
+            }
+            
+            if (filteredDeps.length === 0) {
+                flowContainer.innerHTML = `<p class="text-muted">No dependencies found for ${selectedComponent || 'the system'}</p>`;
+                return;
+            }
+            
+            const categorizedDeps = categorizeDependenciesWithLayouts(filteredDeps, selectedComponent);
+            
+            // Create enhanced flow with combined file-layout boxes
+            const flowHtml = createEnhancedDependencyFlowHTML(categorizedDeps, selectedComponent);
+            flowContainer.innerHTML = flowHtml;
+        }
+
 
         function displayEnhancedDependencyFlow(dependencies, selectedComponent) {
     console.log('Displaying enhanced dependency flow with', dependencies.length, 'dependencies');
@@ -3032,7 +3206,95 @@ function updateTargetFileFromLayout() {
         targetInput.value = selector.value;
     }
 }
-
+function categorizeDependenciesWithLayouts(dependencies, focusComponent = null) {
+    const categorized = {
+        inputFiles: new Map(),        // Combined file + layout info
+        outputFiles: new Map(),
+        inputOutputFiles: new Map(),
+        corePrograms: new Map(),
+        calledPrograms: new Map(),    // Programs called from core
+        missingPrograms: new Map()
+    };
+    
+    dependencies.forEach(dep => {
+        const source = dep.source_component;
+        const target = dep.target_component;
+        const type = dep.relationship_type;
+        const analysis = dep.analysis_details || {};
+        
+        // Handle program dependencies with call direction
+        if (type === 'PROGRAM_CALL' || type === 'DYNAMIC_PROGRAM_CALL') {
+            const callType = analysis.call_type || 'CALL';
+            const isTarget = target === focusComponent;
+            
+            if (focusComponent && isTarget) {
+                // This program calls the focus component
+                categorized.corePrograms.set(source, {
+                    name: source,
+                    type: 'Calling Program',
+                    confidence: dep.confidence_score || 0.8,
+                    callDirection: 'incoming',
+                    callType: callType
+                });
+            } else {
+                // Focus component calls this program
+                categorized.calledPrograms.set(target, {
+                    name: target,
+                    type: 'Called Program',
+                    confidence: dep.confidence_score || 0.8,
+                    callDirection: getArrowDirection(callType),
+                    callType: callType,
+                    status: dep.dependency_status || 'unknown'
+                });
+            }
+        }
+        
+        // Handle file dependencies with layout associations
+        else if (type.includes('FILE')) {
+            const ioDirection = analysis.io_direction || 'UNKNOWN';
+            const associatedLayouts = analysis.associated_layouts || [];
+            const hasLayout = analysis.has_layout_association || false;
+            
+            const fileInfo = {
+                name: target,
+                type: getFileTypeLabel(type),
+                confidence: dep.confidence_score || 0.8,
+                ioDirection: ioDirection,
+                associatedLayouts: associatedLayouts,
+                hasLayoutAssociation: hasLayout,
+                interface: dep.interface_type || 'FILE',
+                operations: analysis.operations || []
+            };
+            
+            // Categorize by I/O direction
+            if (ioDirection === 'INPUT') {
+                categorized.inputFiles.set(target, fileInfo);
+            } else if (ioDirection === 'OUTPUT') {
+                categorized.outputFiles.set(target, fileInfo);
+            } else if (ioDirection === 'INPUT_OUTPUT') {
+                categorized.inputOutputFiles.set(target, fileInfo);
+            }
+        }
+        
+        // Handle missing dependencies
+        if (dep.dependency_status === 'missing') {
+            categorized.missingPrograms.set(target, {
+                name: target,
+                type: 'Missing Program',
+                confidence: dep.confidence_score || 0.3,
+                reason: 'Program not uploaded',
+                calledFrom: source
+            });
+        }
+    });
+    
+    // Convert Maps to Arrays
+    Object.keys(categorized).forEach(key => {
+        categorized[key] = Array.from(categorized[key].values());
+    });
+    
+    return categorized;
+}
 
         function categorizeDependenciesForFlow(dependencies, focusComponent = null) {
     const categorized = {
@@ -4442,6 +4704,208 @@ function closeFieldDetailsModal() {
             document.getElementById('configModal').style.display = 'block';
             document.body.style.overflow = 'hidden';
         }
+        function createEnhancedDependencyFlowHTML(categorized, focusComponent) {
+    let html = '<div class="dependency-flow">';
+    
+    // Input Files Level (with combined file-layout display)
+    if (categorized.inputFiles.length > 0) {
+        html += createFileLayerWithLayouts('Input Sources', categorized.inputFiles, 'input-source');
+        html += '<div class="flow-arrow">↓</div>';
+    }
+    
+    // Core Programs Level
+    if (categorized.corePrograms.length > 0 || focusComponent) {
+        const coreItems = focusComponent ? 
+            [{name: focusComponent, type: 'Core Program', confidence: 1.0}] : 
+            categorized.corePrograms;
+        html += createProgramLayer('Core Programs', coreItems, 'core-program');
+        
+        // Add arrows to called programs if any exist
+        if (categorized.calledPrograms.length > 0) {
+            html += createProgramCallArrows(categorized.calledPrograms);
+        }
+        
+        html += '<div class="flow-arrow">↓</div>';
+    }
+    
+    // Called Programs Level (with directional arrows)
+    if (categorized.calledPrograms.length > 0) {
+        html += createProgramLayerWithArrows('Called Programs', categorized.calledPrograms, 'called-program');
+        html += '<div class="flow-arrow">↓</div>';
+    }
+    
+    // Input/Output Files Level
+    if (categorized.inputOutputFiles.length > 0) {
+        html += createFileLayerWithLayouts('Input/Output Files', categorized.inputOutputFiles, 'input-output-file');
+        html += '<div class="flow-arrow">↓</div>';
+    }
+    
+    // Output Files Level
+    if (categorized.outputFiles.length > 0) {
+        html += createFileLayerWithLayouts('Output Files', categorized.outputFiles, 'output-file');
+    }
+    
+    // Missing Dependencies Level (separate section)
+    if (categorized.missingPrograms.length > 0) {
+        html += '<div style="margin-top: 3rem; padding-top: 2rem; border-top: 3px dashed #dc3545;">';
+        html += '<h4 style="color: #dc3545; text-align: center; margin-bottom: 2rem;">⚠️ Missing Dependencies</h4>';
+        html += createProgramLayer('Missing Programs', categorized.missingPrograms, 'missing-dependency');
+        html += '</div>';
+    }
+    
+    html += '</div>';
+    return html;
+}
+
+function createFileLayerWithLayouts(title, items, className) {
+    let html = `
+        <div class="flow-level">
+            <div class="flow-level-title">${title}</div>
+            <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-left: 160px;">
+    `;
+    
+    items.forEach(item => {
+        const layoutInfo = item.hasLayoutAssociation && item.associatedLayouts.length > 0 ?
+            `<div style="font-size: 0.7rem; color: #666; margin-top: 0.5rem;">
+                📋 Layouts: ${item.associatedLayouts.slice(0, 2).join(', ')}
+                ${item.associatedLayouts.length > 2 ? ` (+${item.associatedLayouts.length - 2} more)` : ''}
+            </div>` : '';
+            
+        const interfaceIcon = item.interface === 'CICS' ? '🏦' : '📁';
+        const statusClass = item.hasLayoutAssociation ? 'file-with-layout' : 'file-only';
+        
+        html += `
+            <div class="flow-component ${className} ${statusClass}" onclick="showFileDetails('${item.name}')">
+                <div class="component-name">${interfaceIcon} ${item.name}</div>
+                <div class="component-type-badge">${item.type}</div>
+                <div class="component-description">
+                    Operations: ${item.operations.join(', ') || 'Unknown'}
+                    <br>Interface: ${item.interface}
+                    ${layoutInfo}
+                </div>
+                <div class="confidence-indicator ${getConfidenceClass(item.confidence)}">
+                    ${(item.confidence * 100).toFixed(0)}%
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div></div>';
+    return html;
+}
+
+function createProgramLayerWithArrows(title, items, className) {
+    let html = `
+        <div class="flow-level">
+            <div class="flow-level-title">${title}</div>
+            <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-left: 160px;">
+    `;
+    
+    items.forEach(item => {
+        const arrowIcon = getCallArrowIcon(item.callType);
+        const statusClass = item.status === 'missing' ? 'missing-dependency' : 'present-program';
+        
+        html += `
+            <div class="program-call-container">
+                <div class="call-arrow">${arrowIcon}</div>
+                <div class="flow-component ${className} ${statusClass}" onclick="showProgramDetails('${item.name}')">
+                    <div class="component-name">${item.name}</div>
+                    <div class="component-type-badge">${item.type}</div>
+                    <div class="component-description">
+                        Call Type: ${item.callType}
+                        <br>Status: ${item.status || 'Present'}
+                    </div>
+                    <div class="confidence-indicator ${getConfidenceClass(item.confidence)}">
+                        ${(item.confidence * 100).toFixed(0)}%
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div></div>';
+    return html;
+}
+
+function getCallArrowIcon(callType) {
+    const arrowMap = {
+        'CALL': '↔️',        // Bi-directional (CALL can return)
+        'XCTL': '→',         // Single direction (XCTL transfers control)
+        'LINK': '↔️',        // Bi-directional (LINK returns)
+        'DYNAMIC': '⤴️',     // Dynamic call
+        'CICS_LINK': '↔️',   // CICS LINK is bi-directional
+        'CICS_XCTL': '→'     // CICS XCTL is single direction
+    };
+    
+    return arrowMap[callType] || '→';
+}
+
+function getArrowDirection(callType) {
+    const directionMap = {
+        'CALL': 'bidirectional',
+        'XCTL': 'outgoing',
+        'LINK': 'bidirectional',
+        'DYNAMIC': 'outgoing',
+        'CICS_LINK': 'bidirectional',
+        'CICS_XCTL': 'outgoing'
+    };
+    
+    return directionMap[callType] || 'outgoing';
+}
+
+function getFileTypeLabel(relationshipType) {
+    if (relationshipType.includes('CICS')) {
+        return 'CICS File';
+    } else if (relationshipType.includes('INPUT_OUTPUT')) {
+        return 'I/O File';
+    } else if (relationshipType.includes('INPUT')) {
+        return 'Input File';
+    } else if (relationshipType.includes('OUTPUT')) {
+        return 'Output File';
+    }
+    return 'File';
+}
+
+function createProgramCallArrows(calledPrograms) {
+    let html = '<div class="program-call-arrows" style="display: flex; justify-content: center; margin: 1rem 0;">';
+    
+    calledPrograms.slice(0, 5).forEach(program => {
+        const arrowIcon = getCallArrowIcon(program.callType);
+        html += `<span class="call-arrow-indicator" style="margin: 0 1rem; font-size: 1.5rem;">${arrowIcon}</span>`;
+    });
+    
+    html += '</div>';
+    return html;
+}
+function showDependencyModal(content) {
+    // Create or update modal with dependency details
+    let modal = document.getElementById('dependencyDetailModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'dependencyDetailModal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Dependency Details</h3>
+                    <button class="close" onclick="closeDependencyModal()">&times;</button>
+                </div>
+                <div class="modal-body" id="dependencyModalBody"></div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+    
+    document.getElementById('dependencyModalBody').innerHTML = content;
+    modal.style.display = 'block';
+}
+
+function closeDependencyModal() {
+    const modal = document.getElementById('dependencyDetailModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
 
         // Add CSS animations
         const style = document.createElement('style');

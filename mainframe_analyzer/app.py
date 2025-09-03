@@ -1110,147 +1110,175 @@ def get_components(session_id):
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/dependencies/<session_id>')
-def get_dependencies(session_id):
-    """Get dependency relationships with enhanced I/O categorization and friendly names"""
+def get_dependencies_enhanced_complete(session_id):
+    """Complete enhanced dependency endpoint with CICS layout resolution"""
     try:
-        logger.info(f"Getting dependencies for session: {session_id}")
+        logger.info(f"Getting complete enhanced dependencies for session: {session_id}")
         
-        with analyzer.db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Enhanced query with proper I/O direction analysis
-            cursor.execute('''
-                SELECT dr.source_component, dr.target_component, dr.relationship_type,
-                       dr.interface_type, dr.confidence_score, dr.analysis_details_json,
-                       dr.source_code_evidence, dr.created_at,
-                       ca.business_purpose as source_purpose,
-                       ca2.business_purpose as target_purpose
-                FROM dependency_relationships dr
-                LEFT JOIN component_analysis ca ON (dr.source_component = ca.component_name AND ca.session_id = ?)
-                LEFT JOIN component_analysis ca2 ON (dr.target_component = ca2.component_name AND ca2.session_id = ?)
-                WHERE dr.session_id = ?
-                ORDER BY dr.source_component, dr.relationship_type, dr.target_component
-            ''', (session_id, session_id, session_id))
-            
-            raw_dependencies = cursor.fetchall()
+        # Use the complete enhanced method
+        dependencies = analyzer.db_manager.get_dependencies_with_layout_resolution_complete(session_id)
         
-        if not raw_dependencies:
+        if not dependencies:
             components = analyzer.db_manager.get_session_components(session_id)
             return jsonify({
                 'success': True, 
                 'dependencies': [],
-                'dependency_groups': {},
-                'categorized_dependencies': {},
+                'enhanced_features': True,
+                'cics_layout_resolution': True,
                 'total_count': 0,
                 'debug_info': f"No dependencies found. Session has {len(components)} components."
             })
         
-        # Process and categorize dependencies
-        transformed_deps = []
-        cics_files = {}  # Track CICS files for I/O categorization
+        # Enhanced categorization with complete layout resolution
+        categorized_dependencies = {
+            'input_files': [],
+            'output_files': [],
+            'input_output_files': [],
+            'cics_files_with_layouts': [],
+            'cics_files_only': [],
+            'program_calls': [],
+            'missing_programs': []
+        }
         
-        for dep in raw_dependencies:
-            details = {}
-            if dep[5]:  # analysis_details_json
-                try:
-                    details = json.loads(dep[5])
-                except:
-                    pass
-            
-            # Generate friendly names using the parser's method
-            target_friendly = analyzer.cobol_parser.generate_friendly_name(dep[1], 'Component')
-            source_friendly = analyzer.cobol_parser.generate_friendly_name(dep[0], 'Program')
-            
-            # Determine I/O direction for CICS files
-            io_direction = 'UNKNOWN'
-            if dep[2].startswith('CICS') and 'FILE' in dep[2]:
-                if 'INPUT' in dep[2]:
-                    io_direction = 'INPUT'
-                elif 'OUTPUT' in dep[2]:
-                    io_direction = 'OUTPUT'
-                else:
-                    # Analyze from details
-                    io_direction = details.get('io_direction', 'UNKNOWN')
-            elif dep[2] in ['INPUT_FILE', 'OUTPUT_FILE', 'INPUT_OUTPUT_FILE']:
-                io_direction = dep[2].replace('_FILE', '')
-            
-            # Track CICS files for deduplication
-            if dep[3] == 'CICS':
-                file_key = dep[1]  # target_component (file name)
-                if file_key not in cics_files:
-                    cics_files[file_key] = {
-                        'file_name': dep[1],
-                        'friendly_name': target_friendly,
-                        'operations': [],
-                        'io_directions': set(),
-                        'source_programs': set()
-                    }
-                
-                cics_files[file_key]['operations'].append(dep[2])
-                cics_files[file_key]['io_directions'].add(io_direction)
-                cics_files[file_key]['source_programs'].add(dep[0])
-            
-            transformed_dep = {
-                'source_component': dep[0],
-                'source_friendly': source_friendly,
-                'target_component': dep[1],
-                'target_friendly': target_friendly,
-                'relationship_type': dep[2],
-                'interface_type': dep[3],
-                'io_direction': io_direction,
-                'confidence_score': dep[4] or 0.0,
-                'details': details,
-                'source_code_evidence': dep[6],
-                'created_at': dep[7]
-            }
-            transformed_deps.append(transformed_dep)
+        status_counts = {
+            'present': 0,
+            'missing': 0,
+            'file': 0,
+            'file_with_layout': 0,
+            'unknown': 0
+        }
         
-        # Create categorized view of CICS files
-        cics_categorized = {}
-        for file_info in cics_files.values():
-            directions = file_info['io_directions']
-            if 'INPUT' in directions and 'OUTPUT' in directions:
-                category = 'INPUT_OUTPUT'
-            elif 'INPUT' in directions:
-                category = 'INPUT'
-            elif 'OUTPUT' in directions:
-                category = 'OUTPUT'
-            else:
-                category = 'UNKNOWN'
+        # Process each dependency with enhanced categorization
+        for dep in dependencies:
+            status = dep.get('dependency_status', 'unknown')
+            status_counts[status] = status_counts.get(status, 0) + 1
             
-            if category not in cics_categorized:
-                cics_categorized[category] = []
-            
-            cics_categorized[category].append({
-                'file_name': file_info['file_name'],
-                'friendly_name': file_info['friendly_name'],
-                'operations': list(file_info['operations']),
-                'source_programs': list(file_info['source_programs'])
-            })
-        
-        # Group dependencies by type
-        dependency_groups = {}
-        for dep in transformed_deps:
             rel_type = dep['relationship_type']
-            if rel_type not in dependency_groups:
-                dependency_groups[rel_type] = []
-            dependency_groups[rel_type].append(dep)
+            interface_type = dep['interface_type']
+            analysis = dep.get('analysis_details', {})
+            
+            # Enhanced CICS file processing
+            if interface_type == 'CICS' and 'FILE' in rel_type:
+                file_info = {
+                    'file_name': dep['target_component'],
+                    'source_program': dep['source_component'],
+                    'operations': analysis.get('operations', []),
+                    'io_direction': analysis.get('io_direction', 'UNKNOWN'),
+                    'associated_layouts': analysis.get('associated_layouts', []),
+                    'has_layout_resolution': analysis.get('layout_resolved', False),
+                    'interface': 'CICS',
+                    'relationship_type': rel_type,
+                    'confidence': dep.get('confidence_score', 0.9)
+                }
+                
+                if file_info['has_layout_resolution']:
+                    categorized_dependencies['cics_files_with_layouts'].append(file_info)
+                else:
+                    categorized_dependencies['cics_files_only'].append(file_info)
+                    
+                # Also categorize by I/O direction
+                io_dir = file_info['io_direction']
+                if io_dir == 'INPUT':
+                    categorized_dependencies['input_files'].append(file_info)
+                elif io_dir == 'OUTPUT':
+                    categorized_dependencies['output_files'].append(file_info)
+                elif io_dir == 'INPUT_OUTPUT':
+                    categorized_dependencies['input_output_files'].append(file_info)
+            
+            # Program call processing with direction arrows
+            elif rel_type == 'PROGRAM_CALL':
+                call_info = {
+                    'source': dep['source_component'],
+                    'target': dep['target_component'],
+                    'call_type': analysis.get('call_type', 'CALL'),
+                    'call_direction': analysis.get('call_direction', 'bidirectional'),
+                    'arrow_direction': analysis.get('arrow_direction', 'bidirectional'),
+                    'status': status,
+                    'confidence': dep.get('confidence_score', 0.9),
+                    'line_number': analysis.get('line_number', 0)
+                }
+                
+                if status == 'missing':
+                    categorized_dependencies['missing_programs'].append(call_info)
+                else:
+                    categorized_dependencies['program_calls'].append(call_info)
         
-        logger.info(f"Returning {len(transformed_deps)} dependencies with {len(cics_categorized)} CICS file categories")
+        logger.info(f"Enhanced categorization complete: "
+                   f"{len(categorized_dependencies['cics_files_with_layouts'])} CICS files with layouts, "
+                   f"{len(categorized_dependencies['missing_programs'])} missing programs")
         
         return jsonify({
             'success': True, 
-            'dependencies': transformed_deps,
-            'dependency_groups': dependency_groups,
-            'cics_categorized': cics_categorized,
-            'total_count': len(transformed_deps),
-            'cics_file_count': len(cics_files)
+            'dependencies': dependencies,
+            'categorized_dependencies': categorized_dependencies,
+            'status_counts': status_counts,
+            'enhanced_features': True,
+            'cics_layout_resolution': True,
+            'total_count': len(dependencies),
+            'layout_resolution_count': len(categorized_dependencies['cics_files_with_layouts'])
         })
         
     except Exception as e:
-        logger.error(f"Error getting dependencies: {str(e)}")
+        logger.error(f"Error in complete enhanced dependencies: {str(e)}")
+        return jsonify({
+            'success': False, 
+            'error': str(e),
+            'enhanced_features': True
+        })
+
+@app.route('/api/dependency-details/<session_id>/<source>/<target>')
+def get_dependency_details(session_id, source, target):
+    """Get detailed information about a specific dependency"""
+    try:
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT dr.*, ca1.source_content as source_program_content
+                FROM dependency_relationships dr
+                LEFT JOIN component_analysis ca1 ON (dr.source_component = ca1.component_name AND ca1.session_id = ?)
+                WHERE dr.session_id = ? AND dr.source_component = ? AND dr.target_component = ?
+                ORDER BY dr.created_at DESC LIMIT 1
+            ''', (session_id, session_id, source, target))
+            
+            result = cursor.fetchone()
+            
+            if result:
+                dependency_detail = dict(result)
+                
+                # Parse analysis details
+                if dependency_detail['analysis_details_json']:
+                    dependency_detail['analysis_details'] = json.loads(dependency_detail['analysis_details_json'])
+                
+                # Extract relevant source code context
+                source_content = dependency_detail.get('source_program_content', '')
+                if source_content and target.upper() in source_content.upper():
+                    context_lines = []
+                    for i, line in enumerate(source_content.split('\n')):
+                        if target.upper() in line.upper():
+                            start_idx = max(0, i-2)
+                            end_idx = min(len(source_content.split('\n')), i+3)
+                            context_lines.extend([
+                                f"{j+1}: {source_content.split('\n')[j]}" 
+                                for j in range(start_idx, end_idx)
+                            ])
+                            break
+                    
+                    dependency_detail['source_context'] = '\n'.join(context_lines[:10])  # Limit context
+                
+                return jsonify({
+                    'success': True,
+                    'dependency_detail': dependency_detail
+                })
+            
+            return jsonify({
+                'success': False,
+                'error': f'Dependency not found: {source} -> {target}'
+            })
+            
+    except Exception as e:
+        logger.error(f"Error getting dependency details: {str(e)}")
         return jsonify({'success': False, 'error': str(e)})
-        
+
 @app.route('/api/session-metrics/<session_id>')
 def get_session_metrics(session_id):
     """Get session metrics"""

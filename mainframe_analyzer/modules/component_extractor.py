@@ -148,20 +148,26 @@ class ComponentExtractor:
     
     def _extract_cobol_components(self, session_id: str, content: str, filename: str) -> List[Dict]:
         """Extract COBOL components with proper record layout separation"""
-        logger.info(f"Starting COBOL analysis for {filename}")
-        
         try:
+            # Parse COBOL structure (your existing code)
             parsed_data = self.cobol_parser.parse_cobol_file(content, filename)
             
-            # Get record-level classifications
-            record_classifications = self._analyze_record_level_operations(content, parsed_data['record_layouts'])
-            
-            # Generate program summary
-            program_summary = self._generate_component_summary(session_id, parsed_data, 'PROGRAM')
-            
+            # CRITICAL ADDITION: Replace basic CICS operations with enhanced version
             program_name = filename.replace('.cbl', '').replace('.CBL', '').replace('.cob', '').replace('.COB', '')
             
-            # Create main program component
+            # Use the safe enhanced CICS extraction
+            enhanced_cics_ops = self._safe_enhanced_cics_extraction(content, program_name)
+            parsed_data['cics_operations'] = enhanced_cics_ops
+            
+            # Log CICS processing results
+            layout_associated_count = len([op for op in enhanced_cics_ops if op.get('has_layout_association')])
+            logger.info(f"CICS processing: {len(enhanced_cics_ops)} operations, {layout_associated_count} with layouts")
+            
+            # Continue with your existing record layout processing...
+            record_classifications = self._analyze_record_level_operations(content, parsed_data['record_layouts'])
+            program_summary = self._generate_component_summary(session_id, parsed_data, 'PROGRAM')
+            
+            # Create main program component (your existing code continues...)
             program_component = {
                 'name': program_name,
                 'friendly_name': parsed_data['friendly_name'],
@@ -178,10 +184,10 @@ class ComponentExtractor:
                 'file_operations': parsed_data['file_operations'],
                 'program_calls': parsed_data['program_calls'],
                 'copybooks': parsed_data['copybooks'],
-                'cics_operations': parsed_data['cics_operations'],
-                'derived_components': [],  # Will contain layout names
-                'record_layouts': [],      # Will contain layout data
-                'fields': []               # All fields from all layouts
+                'cics_operations': enhanced_cics_ops,  # Use enhanced operations
+                'derived_components': [],
+                'record_layouts': [],
+                'fields': []
             }
             
             components = [program_component]  # Start with main program
@@ -1994,7 +2000,7 @@ File Content ({filename}):
         return components
     
     def _extract_and_store_enhanced_dependencies(self, session_id: str, components: List[Dict], filename: str):
-        """Enhanced dependency extraction with dynamic call resolution and missing detection"""
+        """Enhanced dependency extraction with CICS file-layout resolution"""
         try:
             main_program = None
             for component in components:
@@ -2002,8 +2008,6 @@ File Content ({filename}):
                     main_program = component
                     break
             
-            logger.info(f"DEPENDENCY DEBUG: Processing program: {main_program['name']}")
-        
             dependencies = []
             program_name = main_program['name']
             
@@ -2013,7 +2017,6 @@ File Content ({filename}):
             
             # Enhanced program calls with dynamic resolution
             program_calls = main_program.get('program_calls', [])
-            
             for call in program_calls:
                 call_type = call.get('call_type', 'static')
                 
@@ -2023,16 +2026,16 @@ File Content ({filename}):
                         session_id, program_name, call, uploaded_programs
                     ))
                 else:
-                    # Handle static calls
+                    # Handle static calls with enhanced call type information
                     target_prog = call.get('program_name')
                     if target_prog and self._is_valid_dependency_target(target_prog, program_name):
-                        dependency = self._create_program_call_dependency(
+                        dependency = self._create_enhanced_program_call_dependency(
                             program_name, call, uploaded_programs
                         )
                         if dependency:
                             dependencies.append(dependency)
             
-            # File dependencies (unchanged logic)
+            # File dependencies (batch files)
             file_operations = main_program.get('file_operations', [])
             file_classifications = self._classify_file_io_direction_enhanced(file_operations)
             processed_files = set()
@@ -2049,77 +2052,540 @@ File Content ({filename}):
                         'relationship_type': self._map_io_to_relationship_type(io_direction),
                         'interface_type': 'FILE_SYSTEM',
                         'confidence_score': 0.95,
-                        'dependency_status': 'file',  # Files don't have upload status
+                        'dependency_status': 'file',
                         'analysis_details_json': json.dumps({
                             'io_direction': io_direction,
-                            'operations': [op.get('operation') for op in file_operations if op.get('file_name') == file_name]
+                            'operations': [op.get('operation') for op in file_operations if op.get('file_name') == file_name],
+                            'file_type': 'BATCH_FILE'
                         })
                     })
             
-            # CICS dependencies with I/O classification
+            # Enhanced CICS dependencies with layout resolution
             cics_operations = main_program.get('cics_operations', [])
-            processed_cics_files = set()
+            if cics_operations:
+                enhanced_cics_deps = self._resolve_cics_file_dependencies_with_layouts(
+                    session_id, cics_operations, program_name, uploaded_programs
+                )
+                dependencies.extend(enhanced_cics_deps)
             
-            for cics_op in cics_operations:
-                file_name = cics_op.get('file_name')
-                if file_name and file_name not in processed_cics_files and self._is_valid_dependency_target(file_name, program_name):
-                    processed_cics_files.add(file_name)
-                    
-                    cics_file_ops = [op for op in cics_operations if op.get('file_name') == file_name]
-                    io_classification = self._classify_cics_io_operations(cics_file_ops)
-                    
-                    dependencies.append({
-                        'source_component': program_name,
-                        'target_component': file_name,
-                        'relationship_type': io_classification['relationship_type'],
-                        'interface_type': 'CICS',
-                        'confidence_score': 0.95,
-                        'dependency_status': 'cics_file',  # CICS files don't have upload status
-                        'analysis_details_json': json.dumps({
-                            'io_direction': io_classification['io_direction'],
-                            'operations': [op.get('operation') for op in cics_file_ops]
-                        })
-                    })
-            
-             # After storing file dependencies, store file-layout associations
-            file_layout_associations = self.db_manager.get_file_record_layout_associations(session_id)
-
-            
-            for file_name, layout_info in file_layout_associations.items():
-                try:
-                    # Store as a special dependency type
-                    dependencies.append({
-                        'source_component': layout_info['program_name'],
-                        'target_component': f"{file_name}::{layout_info['layout_name']}",
-                        'relationship_type': f"FILE_LAYOUT_{layout_info['io_type']}",
-                        'interface_type': 'RECORD_LAYOUT',
-                        'confidence_score': 0.95,
-                        'dependency_status': 'layout_association',
-                        'analysis_details_json': json.dumps({
-                            'file_name': file_name,
-                            'layout_name': layout_info['layout_name'],
-                            'io_type': layout_info['io_type'],
-                            'association_method': layout_info.get('association_method', 'UNKNOWN')  # Use .get() with default
-                        })
-                    })
-                except KeyError as e:
-                    logger.error(f"Missing key in layout_info: {e}. Available keys: {layout_info.keys()}")
-                    continue
-        
-
-            logger.info(f"DEPENDENCY DEBUG: Found {len(dependencies)} dependencies to store")
-            for dep in dependencies[:3]:  # Log first 3 for debugging
-                logger.info(f"DEPENDENCY DEBUG: Sample dependency: {dep['source_component']} -> {dep['target_component']} ({dep['relationship_type']})")
-
             # Store enhanced dependencies
             if dependencies:
                 self.db_manager._store_enhanced_dependencies_with_status(session_id, dependencies)
                 logger.info(f"Stored {len(dependencies)} enhanced dependencies for {program_name}")
 
-           
-
         except Exception as e:
             logger.error(f"Error in enhanced dependency extraction: {str(e)}")
+
+    # Add this method to integrate CICS parsing into the main COBOL extraction process
+# This should be added to component_extractor.py
+
+    def _extract_enhanced_cics_operations(self, source_content: str, program_name: str) -> List[Dict]:
+        """Extract CICS operations with enhanced layout association detection"""
+        try:
+            logger.info(f"Extracting enhanced CICS operations from {program_name}")
+            
+            # Use the enhanced parser
+            cics_operations = self._parse_cics_operations_enhanced(source_content, program_name)
+            
+            if not cics_operations:
+                return []
+            
+            # Enhance with business context
+            enhanced_operations = self._enhance_cics_operations_with_context(cics_operations, source_content)
+            
+            # Get file-layout associations from FD statements for additional context
+            fd_associations = self._get_file_layout_associations_from_fd(source_content)
+            
+            # Cross-reference CICS files with FD associations
+            for cics_op in enhanced_operations:
+                file_name = cics_op.get('file_name')
+                if file_name and file_name in fd_associations:
+                    # If we found a layout via FD association, but not in CICS statement
+                    if not cics_op.get('layout_name') and fd_associations[file_name]:
+                        cics_op['layout_name'] = fd_associations[file_name]
+                        cics_op['has_layout_association'] = True
+                        cics_op['association_source'] = 'FD_STATEMENT'
+                        logger.info(f"Enhanced CICS operation {file_name} with FD layout: {fd_associations[file_name]}")
+            
+            logger.info(f"Extracted {len(enhanced_operations)} enhanced CICS operations")
+            return enhanced_operations
+            
+        except Exception as e:
+            logger.error(f"Error extracting enhanced CICS operations: {str(e)}")
+            return []
+
+# Update the main _extract_cobol_components method to use enhanced CICS extraction
+    # Replace the existing CICS operations line with:
+
+    def _update_cobol_extraction_for_enhanced_cics(self, parsed_data: Dict, content: str, filename: str):
+        """Update the parsed COBOL data with enhanced CICS operations"""
+        program_name = filename.replace('.cbl', '').replace('.CBL', '').replace('.cob', '').replace('.COB', '')
+        
+        # Replace the basic CICS operations with enhanced version
+        enhanced_cics_ops = self._extract_enhanced_cics_operations(content, program_name)
+        parsed_data['cics_operations'] = enhanced_cics_ops
+        
+        # Also update any existing legacy CICS operations format for compatibility
+        legacy_cics_ops = []
+        for enhanced_op in enhanced_cics_ops:
+            legacy_op = {
+                'operation': enhanced_op.get('operation'),
+                'file_name': enhanced_op.get('file_name'),
+                'line_number': enhanced_op.get('line_number'),
+                'business_context': enhanced_op.get('business_context', ''),
+                'io_direction': enhanced_op.get('io_direction', 'UNKNOWN')
+            }
+            legacy_cics_ops.append(legacy_op)
+        
+        # Keep both formats for compatibility
+        parsed_data['cics_operations_legacy'] = legacy_cics_ops
+        
+        return parsed_data
+
+    # Integration point: Call this in your main _extract_cobol_components method
+    # After you get parsed_data from self.cobol_parser.parse_cobol_file(content, filename)
+    # Add this line:
+    # parsed_data = self._update_cobol_extraction_for_enhanced_cics(parsed_data, content, filename)
+
+    def _debug_cics_extraction(self, cics_operations: List[Dict], program_name: str):
+        """Debug helper to log CICS extraction results"""
+        logger.info(f"=== CICS Extraction Debug for {program_name} ===")
+        
+        for i, cics_op in enumerate(cics_operations, 1):
+            logger.info(f"CICS Op {i}:")
+            logger.info(f"  Operation: {cics_op.get('operation')}")
+            logger.info(f"  File: {cics_op.get('file_name')}")
+            logger.info(f"  Layout: {cics_op.get('layout_name', 'None')}")
+            logger.info(f"  Has Layout: {cics_op.get('has_layout_association', False)}")
+            logger.info(f"  I/O Direction: {cics_op.get('io_direction')}")
+            logger.info(f"  Source: {cics_op.get('source_line', '')[:60]}...")
+            logger.info(f"  ---")
+        
+        files_with_layouts = [op for op in cics_operations if op.get('has_layout_association')]
+        logger.info(f"Summary: {len(cics_operations)} CICS operations, {len(files_with_layouts)} with layout associations")
+
+    # Error handling wrapper for the enhanced extraction
+    def _safe_enhanced_cics_extraction(self, source_content: str, program_name: str) -> List[Dict]:
+        """Safe wrapper for enhanced CICS extraction with fallback"""
+        try:
+            # Try enhanced extraction first
+            enhanced_ops = self._extract_enhanced_cics_operations(source_content, program_name)
+            
+            # Debug logging if needed
+            if enhanced_ops and logger.isEnabledFor(logging.DEBUG):
+                self._debug_cics_extraction(enhanced_ops, program_name)
+            
+            return enhanced_ops
+            
+        except Exception as e:
+            logger.error(f"Enhanced CICS extraction failed for {program_name}: {str(e)}")
+            logger.info(f"Falling back to basic CICS extraction for {program_name}")
+            
+            # Fallback to basic CICS extraction
+            try:
+                return self._extract_basic_cics_operations(source_content, program_name)
+            except Exception as fallback_error:
+                logger.error(f"Fallback CICS extraction also failed: {str(fallback_error)}")
+                return []
+
+    def _extract_basic_cics_operations(self, source_content: str, program_name: str) -> List[Dict]:
+        """Basic CICS operation extraction as fallback"""
+        cics_operations = []
+        lines = source_content.split('\n')
+        
+        for i, line in enumerate(lines):
+            line_upper = line.upper().strip()
+            if 'EXEC CICS' in line_upper:
+                # Simple extraction without advanced parsing
+                operation_match = re.search(r'EXEC\s+CICS\s+(\w+)', line_upper)
+                file_match = re.search(r'(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]+)[\'"]?\s*\)', line_upper)
+                
+                if operation_match:
+                    cics_op = {
+                        'operation': operation_match.group(1),
+                        'file_name': file_match.group(1) if file_match else 'UNKNOWN',
+                        'line_number': i + 1,
+                        'source_line': line.strip(),
+                        'has_layout_association': False,
+                        'io_direction': 'UNKNOWN',
+                        'extraction_method': 'basic_fallback'
+                    }
+                    cics_operations.append(cics_op)
+        
+        return cics_operations
+
+    def _classify_file_io_direction_enhanced(self, file_operations: List[Dict]) -> Dict[str, str]:
+        """Enhanced file I/O direction classification with better operation analysis"""
+        file_directions = {}
+        
+        for op in file_operations:
+            file_name = op.get('file_name')
+            operation = op.get('operation', '').upper()
+            io_direction = op.get('io_direction', 'UNKNOWN')
+            
+            if not file_name:
+                continue
+                
+            if file_name not in file_directions:
+                file_directions[file_name] = set()
+            
+            # Enhanced operation mapping with more specific patterns
+            if operation in ['READ', 'ACCEPT'] or 'INPUT' in operation:
+                file_directions[file_name].add('INPUT')
+            elif operation in ['WRITE', 'REWRITE', 'DISPLAY'] or 'OUTPUT' in operation:
+                file_directions[file_name].add('OUTPUT')
+            elif operation in ['OPEN I-O', 'OPEN IO', 'UPDATE']:
+                file_directions[file_name].add('INPUT_OUTPUT')
+            elif operation.startswith('OPEN'):
+                # Parse OPEN statements more carefully
+                if 'INPUT' in operation:
+                    file_directions[file_name].add('INPUT')
+                elif 'OUTPUT' in operation or 'EXTEND' in operation:
+                    file_directions[file_name].add('OUTPUT')
+                elif 'I-O' in operation or 'IO' in operation:
+                    file_directions[file_name].add('INPUT_OUTPUT')
+            else:
+                # Use the io_direction from the operation if available
+                if io_direction == 'INPUT':
+                    file_directions[file_name].add('INPUT')
+                elif io_direction == 'OUTPUT':
+                    file_directions[file_name].add('OUTPUT')
+                elif io_direction == 'INPUT_OUTPUT':
+                    file_directions[file_name].add('INPUT_OUTPUT')
+        
+        # Determine final classification
+        classifications = {}
+        for file_name, directions in file_directions.items():
+            if 'INPUT_OUTPUT' in directions or ('INPUT' in directions and 'OUTPUT' in directions):
+                classifications[file_name] = 'INPUT_OUTPUT'
+            elif 'INPUT' in directions:
+                classifications[file_name] = 'INPUT'
+            elif 'OUTPUT' in directions:
+                classifications[file_name] = 'OUTPUT'
+            else:
+                classifications[file_name] = 'UNKNOWN'
+        
+        logger.info(f"File I/O classification: {classifications}")
+        return classifications
+
+    def _resolve_cics_file_dependencies_with_layouts(self, session_id: str, cics_operations: List[Dict], 
+                                                    program_name: str, uploaded_programs: set) -> List[Dict]:
+        """Enhanced CICS dependency resolution considering record layout associations"""
+        dependencies = []
+        
+        try:
+            # Get all record layouts for this session to check associations
+            record_layouts = self.db_manager.get_derived_components(session_id)
+            layout_names = set()
+            
+            for comp in record_layouts:
+                if comp.get('component_type') == 'RECORD_LAYOUT':
+                    # Extract the actual layout name (remove program prefix if present)
+                    comp_name = comp['component_name']
+                    if '_' in comp_name:
+                        # Handle names like "PROGRAM_LAYOUT_NAME"
+                        layout_name = comp_name.split('_', 1)[-1]
+                    else:
+                        layout_name = comp_name
+                    layout_names.add(layout_name.upper())
+            
+            logger.info(f"Found {len(layout_names)} record layouts for layout resolution")
+            
+            processed_files = {}
+            
+            for cics_op in cics_operations:
+                file_name = cics_op.get('file_name')
+                operation = cics_op.get('operation', '').upper()
+                source_line = cics_op.get('source_line', '')
+                
+                if not file_name or not self._is_valid_dependency_target(file_name, program_name):
+                    continue
+                    
+                # Extract record layout from CICS statement
+                associated_layout = self._extract_cics_record_layout_enhanced(cics_op, source_line)
+                
+                # Check if the associated layout exists as a component
+                layout_exists = False
+                if associated_layout:
+                    layout_upper = associated_layout.upper()
+                    layout_exists = any(layout_upper in layout_name or layout_name in layout_upper 
+                                    for layout_name in layout_names)
+                
+                # Determine dependency status based on layout existence
+                if layout_exists:
+                    dependency_status = 'file_with_layout'
+                    logger.info(f"CICS file {file_name} has resolved layout: {associated_layout}")
+                else:
+                    dependency_status = 'cics_file'
+                    if associated_layout:
+                        logger.warning(f"CICS file {file_name} references layout {associated_layout} but layout not found in components")
+                    
+                # Classify I/O direction
+                io_direction = self._classify_cics_operation_io_enhanced(operation)
+                
+                # Create or update file dependency
+                file_key = file_name.upper()
+                if file_key not in processed_files:
+                    processed_files[file_key] = {
+                        'file_name': file_name,
+                        'operations': [],
+                        'io_directions': set(),
+                        'associated_layouts': set(),
+                        'dependency_status': dependency_status,
+                        'layout_resolved': layout_exists
+                    }
+                
+                file_info = processed_files[file_key]
+                file_info['operations'].append(operation)
+                file_info['io_directions'].add(io_direction)
+                
+                if associated_layout:
+                    file_info['associated_layouts'].add(associated_layout)
+                
+                # Update status (file_with_layout takes precedence)
+                if dependency_status == 'file_with_layout':
+                    file_info['dependency_status'] = 'file_with_layout'
+                    file_info['layout_resolved'] = True
+            
+            # Create dependencies from processed files
+            for file_info in processed_files.values():
+                file_name = file_info['file_name']
+                io_directions = file_info['io_directions']
+                associated_layouts = list(file_info['associated_layouts'])
+                
+                # Determine final I/O classification
+                if 'INPUT' in io_directions and 'OUTPUT' in io_directions:
+                    relationship_type = 'CICS_INPUT_OUTPUT_FILE'
+                    display_category = 'INPUT_OUTPUT'
+                elif 'INPUT' in io_directions:
+                    relationship_type = 'CICS_INPUT_FILE'
+                    display_category = 'INPUT'
+                elif 'OUTPUT' in io_directions:
+                    relationship_type = 'CICS_OUTPUT_FILE' 
+                    display_category = 'OUTPUT'
+                else:
+                    relationship_type = 'CICS_FILE'
+                    display_category = 'UNKNOWN'
+                
+                # Create enhanced dependency
+                dependency = {
+                    'source_component': program_name,
+                    'target_component': file_name,
+                    'relationship_type': relationship_type,
+                    'interface_type': 'CICS',
+                    'confidence_score': 0.95,
+                    'dependency_status': file_info['dependency_status'],
+                    'display_category': display_category,
+                    'analysis_details_json': json.dumps({
+                        'io_direction': display_category,
+                        'operations': list(set(file_info['operations'])),  # Remove duplicates
+                        'associated_layouts': associated_layouts,
+                        'has_layout_association': len(associated_layouts) > 0,
+                        'layout_resolved': file_info['layout_resolved'],
+                        'file_type': 'CICS_FILE'
+                    }),
+                    'source_code_evidence': f"CICS {', '.join(set(file_info['operations']))} operations on {file_name}"
+                }
+                
+                dependencies.append(dependency)
+            
+            logger.info(f"Created {len(dependencies)} CICS dependencies, "
+                    f"{len([d for d in dependencies if d['dependency_status'] == 'file_with_layout'])} with resolved layouts")
+            
+            return dependencies
+            
+        except Exception as e:
+            logger.error(f"Error resolving CICS file dependencies with layouts: {str(e)}")
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            return []
+
+    def _extract_cics_record_layout_enhanced(self, cics_op: Dict, source_line: str) -> Optional[str]:
+        """Enhanced extraction of record layout name from CICS INTO/FROM clause"""
+        try:
+            # First try to get from the operation dict
+            if cics_op.get('layout_name'):
+                return cics_op['layout_name']
+            
+            # Parse the source line for INTO/FROM clauses
+            line_upper = source_line.upper()
+            
+            # Enhanced patterns for INTO clause
+            into_patterns = [
+                r'INTO\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)',  # INTO(LAYOUT-NAME)
+                r'INTO\s+([A-Z][A-Z0-9\-]+)',             # INTO LAYOUT-NAME
+            ]
+            
+            for pattern in into_patterns:
+                into_match = re.search(pattern, line_upper)
+                if into_match:
+                    layout_name = into_match.group(1)
+                    logger.debug(f"Extracted layout from INTO clause: {layout_name}")
+                    return layout_name
+            
+            # Enhanced patterns for FROM clause
+            from_patterns = [
+                r'FROM\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)',  # FROM(LAYOUT-NAME)
+                r'FROM\s+([A-Z][A-Z0-9\-]+)',             # FROM LAYOUT-NAME
+            ]
+            
+            for pattern in from_patterns:
+                from_match = re.search(pattern, line_upper)
+                if from_match:
+                    layout_name = from_match.group(1)
+                    logger.debug(f"Extracted layout from FROM clause: {layout_name}")
+                    return layout_name
+            
+            # Check for RIDFLD clause which might contain layout reference
+            ridfld_match = re.search(r'RIDFLD\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)', line_upper)
+            if ridfld_match:
+                # This might be a field within a layout, try to infer layout name
+                field_name = ridfld_match.group(1)
+                if '-' in field_name:
+                    # Extract potential layout prefix (e.g., TMS00CRU-CODE from TMS00CRU-CODE-SET-REC)
+                    parts = field_name.split('-')
+                    if len(parts) >= 2:
+                        potential_layout = '-'.join(parts[:2])
+                        logger.debug(f"Inferred potential layout from RIDFLD: {potential_layout}")
+                        return potential_layout
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error extracting CICS record layout: {str(e)}")
+            return None
+
+    def _classify_cics_operation_io_enhanced(self, operation: str) -> str:
+        """Enhanced classification of CICS operation I/O direction"""
+        operation_upper = operation.upper()
+        
+        # Input operations
+        if any(op in operation_upper for op in ['READ', 'READNEXT', 'READPREV', 'BROWSE', 'RECEIVE']):
+            return 'INPUT'
+        
+        # Output operations  
+        elif any(op in operation_upper for op in ['WRITE', 'WRITEQ', 'SEND', 'CONVERSE']):
+            return 'OUTPUT'
+        
+        # Input/Output operations (modify existing data)
+        elif any(op in operation_upper for op in ['REWRITE', 'UPDATE', 'DELETE']):
+            return 'INPUT_OUTPUT'  # These read then modify
+        
+        # Specific CICS file operations
+        elif 'STARTBR' in operation_upper or 'ENDBR' in operation_upper:
+            return 'INPUT'  # Browse operations are read-only
+        
+        elif 'UNLOCK' in operation_upper:
+            return 'INPUT_OUTPUT'  # Usually part of read-modify sequence
+        
+        else:
+            return 'UNKNOWN'
+
+    def _validate_layout_association(self, session_id: str, file_name: str, layout_name: str) -> bool:
+        """Validate that a file-layout association is reasonable"""
+        try:
+            # Basic name similarity check
+            file_upper = file_name.upper()
+            layout_upper = layout_name.upper()
+            
+            # Check if layout name contains file identifier
+            # E.g., TMS00CRO file should be associated with TMS00CRU-* layouts
+            if file_upper in layout_upper or layout_upper[:6] in file_upper:
+                return True
+            
+            # Check for common naming patterns
+            # Remove common suffixes/prefixes for comparison
+            file_base = file_upper.replace('FILE', '').replace('TBL', '').replace('MST', '')
+            layout_base = layout_upper.split('-')[0] if '-' in layout_upper else layout_upper
+            
+            if file_base in layout_base or layout_base in file_base:
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error validating layout association: {str(e)}")
+            return False
+
+    def _parse_cics_statement_enhanced(self, cics_line: str) -> Dict:
+        """Enhanced CICS statement parsing to extract file and layout associations"""
+        cics_upper = cics_line.upper().strip()
+        
+        # Extract operation type
+        operation_match = re.search(r'EXEC\s+CICS\s+(\w+)', cics_upper)
+        operation = operation_match.group(1) if operation_match else 'UNKNOWN'
+        
+        # Extract file/dataset name
+        file_patterns = [
+            r'(?:FILE|DATASET)\s*\(\s*[\'"]?([A-Z0-9\-]+)[\'"]?\s*\)',
+            r'(?:FILE|DATASET)\s*\(\s*([A-Z0-9\-]+)\s*\)'
+        ]
+        
+        file_name = None
+        for pattern in file_patterns:
+            file_match = re.search(pattern, cics_upper)
+            if file_match:
+                file_name = file_match.group(1)
+                break
+        
+        # Extract record layout from INTO/FROM clause
+        layout_name = None
+        into_match = re.search(r'INTO\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)', cics_upper)
+        if into_match:
+            layout_name = into_match.group(1)
+        else:
+            from_match = re.search(r'FROM\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)', cics_upper)
+            if from_match:
+                layout_name = from_match.group(1)
+        
+        # Extract additional clauses
+        resp_match = re.search(r'RESP\s*\(\s*([A-Z0-9\-]+)\s*\)', cics_upper)
+        resp_field = resp_match.group(1) if resp_match else None
+        
+        return {
+            'operation': operation,
+            'file_name': file_name,
+            'layout_name': layout_name,
+            'resp_field': resp_field,
+            'source_line': cics_line.strip(),
+            'has_layout_association': layout_name is not None
+        }
+
+    def _create_enhanced_program_call_dependency(self, program_name: str, call: Dict, uploaded_programs: set) -> Optional[Dict]:
+        """Create enhanced program call dependency with call type information"""
+        target_prog = call.get('program_name')
+        if not target_prog:
+            return None
+        
+        call_type = call.get('call_type', 'CALL')  # CALL, XCTL, LINK, etc.
+        operation = call.get('operation', 'CALL').upper()
+        
+        # Determine call direction based on operation type
+        if 'XCTL' in operation:
+            call_direction = 'outgoing'  # Single direction
+        elif 'LINK' in operation:
+            call_direction = 'bidirectional'  # Returns to caller
+        else:  # Regular CALL
+            call_direction = 'bidirectional'
+        
+        # Check if target program is uploaded
+        dependency_status = 'present' if target_prog.upper() in uploaded_programs else 'missing'
+        
+        return {
+            'source_component': program_name,
+            'target_component': target_prog,
+            'relationship_type': 'PROGRAM_CALL',
+            'interface_type': 'COBOL',
+            'confidence_score': call.get('confidence_score', 0.98),
+            'dependency_status': dependency_status,
+            'analysis_details_json': json.dumps({
+                'call_type': call_type,
+                'call_direction': call_direction,
+                'operation': operation,
+                'line_number': call.get('line_number', 0),
+                'business_context': call.get('business_context', 'Program call')
+            }),
+            'source_code_evidence': f"Line {call.get('line_number', 0)}: {operation} {target_prog}"
+        }
 
     def _is_valid_dependency_target(self, target_name: Optional[str], source_program: str) -> bool:
         """Enhanced validation for dependency targets"""

@@ -355,6 +355,22 @@ class COBOLParser:
         
         return operations
     
+    def _extract_cics_record_layout(self, cics_op: Dict) -> Optional[str]:
+        """Extract record layout name from CICS INTO/FROM clause"""
+        source_line = cics_op.get('source_line', '')
+        
+        # Extract INTO clause
+        into_match = re.search(r'INTO\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)', source_line.upper())
+        if into_match:
+            return into_match.group(1)
+        
+        # Extract FROM clause  
+        from_match = re.search(r'FROM\s*\(\s*([A-Z][A-Z0-9\-]+)\s*\)', source_line.upper())
+        if from_match:
+            return from_match.group(1)
+        
+        return None
+    
     def _extract_cics_programs(self, cics_command: str, line_number: int) -> List[Dict]:
         """Extract program names from CICS LINK/XCTL commands"""
         programs = []
