@@ -1,0 +1,209 @@
+<mxfile host="app.diagrams.net" modified="2025-09-03T00:00:00.000Z" agent="Claude" etag="example" version="24.7.17">
+  <diagram name="Opulence AI Agent Flow" id="flowchart">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- User -->
+        <mxCell id="user" value="User&#xa;(Ops Team / FAs)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1565c0;strokeWidth=2;fontColor=#0d47a1;" vertex="1" parent="1">
+          <mxGeometry x="500" y="40" width="120" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- AI Agent -->
+        <mxCell id="agent" value="Opulence AI Agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ede7f6;strokeColor=#512da8;strokeWidth=2;fontColor=#311b92;" vertex="1" parent="1">
+          <mxGeometry x="480" y="140" width="160" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Cache Check Decision -->
+        <mxCell id="cache_check" value="Check Cache?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#ef6c00;strokeWidth=2;fontColor=#e65100;" vertex="1" parent="1">
+          <mxGeometry x="500" y="240" width="120" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Cache Hit Path -->
+        <mxCell id="cache_retrieve" value="Retrieve Answer&#xa;from Cache" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f8e9;strokeColor=#33691e;strokeWidth=1.5;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="280" y="260" width="120" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="cache_summarizer" value="Summarizer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f8e9;strokeColor=#33691e;strokeWidth=1.5;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="280" y="360" width="120" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="cache_response" value="Response Generator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f8e9;strokeColor=#33691e;strokeWidth=1.5;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="280" y="460" width="120" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Cache Miss Path -->
+        <mxCell id="memory" value="Check Chat Session Memory" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce4ec;strokeColor=#ad1457;strokeWidth=2;fontColor=#880e4f;" vertex="1" parent="1">
+          <mxGeometry x="720" y="260" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="enriched" value="Enriched Query" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f8e9;strokeColor=#33691e;strokeWidth=1.5;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="730" y="360" width="120" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Model Selection -->
+        <mxCell id="selector" value="LLM / SLM Selector" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#ef6c00;strokeWidth=2;fontColor=#e65100;" vertex="1" parent="1">
+          <mxGeometry x="710" y="460" width="160" height="80" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="slm" value="Small Language Model" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9fbe7;strokeColor=#827717;strokeWidth=2;fontColor=#33691e;" vertex="1" parent="1">
+          <mxGeometry x="560" y="580" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="llm" value="Large Language Model" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ede7f6;strokeColor=#4527a0;strokeWidth=2;fontColor=#311b92;" vertex="1" parent="1">
+          <mxGeometry x="820" y="580" width="140" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Query Routing -->
+        <mxCell id="route" value="Query Type?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#ef6c00;strokeWidth=2;fontColor=#e65100;" vertex="1" parent="1">
+          <mxGeometry x="710" y="680" width="160" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Data Sources -->
+        <mxCell id="oracle_db" value="Oracle DB&#xa;Pricing Data" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#e0f7fa;strokeColor=#00838f;strokeWidth=2;fontColor=#006064;" vertex="1" parent="1">
+          <mxGeometry x="540" y="800" width="120" height="80" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="docs" value="Document Knowledge Base" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#e0f7fa;strokeColor=#00838f;strokeWidth=2;fontColor=#006064;" vertex="1" parent="1">
+          <mxGeometry x="880" y="800" width="120" height="80" as="geometry" />
+        </mxCell>
+        
+        <!-- Retrieval Results -->
+        <mxCell id="retrieve1" value="Retrieve Results" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f8e9;strokeColor=#33691e;strokeWidth=1.5;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="540" y="920" width="120" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="retrieve2" value="Retrieve Results via RAG" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f8e9;strokeColor=#33691e;strokeWidth=1.5;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="880" y="920" width="120" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Final Processing -->
+        <mxCell id="final_summarizer" value="Summarizer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f8e9;strokeColor=#33691e;strokeWidth=1.5;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="710" y="1020" width="120" height="60" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="final_response" value="Response Generator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f8e9;strokeColor=#33691e;strokeWidth=1.5;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="710" y="1120" width="120" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Cache Storage -->
+        <mxCell id="cache_store" value="Store in Cache for Reuse" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#eeeeee;strokeColor=#424242;strokeWidth=2;fontColor=#212121;" vertex="1" parent="1">
+          <mxGeometry x="480" y="1220" width="160" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Connections -->
+        <mxCell id="edge1" value="Query" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="user" target="agent">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="agent" target="cache_check">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge3" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="cache_check" target="cache_retrieve">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge4" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="cache_check" target="memory">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="cache_retrieve" target="cache_summarizer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="cache_summarizer" target="cache_response">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="cache_response" target="user">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="340" y="560" />
+              <mxPoint x="200" y="560" />
+              <mxPoint x="200" y="70" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="edge8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="memory" target="enriched">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="enriched" target="selector">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge10" value="Simple" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="selector" target="slm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge11" value="Complex" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="selector" target="llm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="slm" target="route">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="llm" target="route">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge14" value="Pricing Query" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="route" target="oracle_db">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge15" value="Business Logic Query" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="route" target="docs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge16" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="oracle_db" target="retrieve1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge17" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="docs" target="retrieve2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge18" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="retrieve1" target="final_summarizer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge19" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="retrieve2" target="final_summarizer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge20" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="final_summarizer" target="final_response">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge21" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="final_response" target="user">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="770" y="1200" />
+              <mxPoint x="1080" y="1200" />
+              <mxPoint x="1080" y="70" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <mxCell id="edge22" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="final_response" target="cache_store">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="edge23" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="cache_store" target="cache_check">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="560" y="1300" />
+              <mxPoint x="120" y="1300" />
+              <mxPoint x="120" y="280" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
