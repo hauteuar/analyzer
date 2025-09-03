@@ -357,6 +357,7 @@ class DatabaseManager:
                             confidence_score REAL DEFAULT 0.0,
                             analysis_details_json TEXT,
                             source_code_evidence TEXT,
+                            dependency_status TEXT DEFAULT 'unknown',  -- ADD THIS LINE
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
                         )
@@ -1391,6 +1392,8 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error generating friendly name for {technical_name}: {str(e)}")
             return self._fallback_friendly_name(technical_name, context)
+        
+    
 
     def _get_cached_friendly_name_from_db(self, technical_name: str, context: str) -> Optional[str]:
         """Retrieve cached friendly name from database"""
@@ -2220,6 +2223,60 @@ class DatabaseManager:
         
         return mainframe_length, oracle_length, oracle_type
 
+    def _store_enhanced_dependencies_with_status(self, session_id: str, dependencies: List[Dict]):
+        """Store dependencies with enhanced status tracking"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                for dep in dependencies:
+                    try:
+                        # Check for existing dependency
+                        cursor.execute('''
+                            SELECT id, confidence_score FROM dependency_relationships
+                            WHERE session_id = ? AND source_component = ? AND target_component = ? 
+                                AND relationship_type = ?
+                        ''', (session_id, dep['source_component'], dep['target_component'], dep['relationship_type']))
+                        
+                        existing = cursor.fetchone()
+                        
+                        if existing:
+                            # Update existing with enhanced information
+                            cursor.execute('''
+                                UPDATE dependency_relationships
+                                SET confidence_score = ?, analysis_details_json = ?, 
+                                    source_code_evidence = ?, dependency_status = ?
+                                WHERE id = ?
+                            ''', (
+                                max(existing[1] or 0, dep.get('confidence_score', 0)),
+                                dep.get('analysis_details_json', '{}'),
+                                dep.get('source_code_evidence', ''),
+                                dep.get('dependency_status', 'unknown'),
+                                existing[0]
+                            ))
+                        else:
+                            # Insert new dependency
+                            cursor.execute('''
+                                INSERT INTO dependency_relationships 
+                                (session_id, source_component, target_component, relationship_type,
+                                interface_type, confidence_score, analysis_details_json, 
+                                source_code_evidence, dependency_status)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                session_id, dep['source_component'], dep['target_component'], 
+                                dep['relationship_type'], dep.get('interface_type', ''),
+                                dep.get('confidence_score', 0.0), dep.get('analysis_details_json', '{}'),
+                                dep.get('source_code_evidence', ''), dep.get('dependency_status', 'unknown')
+                            ))
+                            
+                    except Exception as store_error:
+                        logger.error(f"Error storing enhanced dependency: {store_error}")
+                        logger.error(f"Problematic dependency: {dep}")
+                        continue
+                            
+        except Exception as e:
+            logger.error(f"Error in enhanced dependency storage: {str(e)}")
+            raise
 
     # Add method to get missing dependencies summary
     def get_missing_dependencies_summary(self, session_id: str) -> Dict:

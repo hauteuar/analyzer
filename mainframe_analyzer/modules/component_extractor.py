@@ -2002,9 +2002,8 @@ File Content ({filename}):
                     main_program = component
                     break
             
-            if not main_program:
-                return
-            
+            logger.info(f"DEPENDENCY DEBUG: Processing program: {main_program['name']}")
+        
             dependencies = []
             program_name = main_program['name']
             
@@ -2102,11 +2101,13 @@ File Content ({filename}):
                     })
                 })
 
-
+            logger.info(f"DEPENDENCY DEBUG: Found {len(dependencies)} dependencies to store")
+            for dep in dependencies[:3]:  # Log first 3 for debugging
+                logger.info(f"DEPENDENCY DEBUG: Sample dependency: {dep['source_component']} -> {dep['target_component']} ({dep['relationship_type']})")
 
             # Store enhanced dependencies
             if dependencies:
-                self._store_enhanced_dependencies_with_status(session_id, dependencies)
+                self.db_manager._store_enhanced_dependencies_with_status(session_id, dependencies)
                 logger.info(f"Stored {len(dependencies)} enhanced dependencies for {program_name}")
 
            
