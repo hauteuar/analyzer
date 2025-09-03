@@ -2375,78 +2375,102 @@
         }
 
         // Enhanced Dependencies Flow with Fixed Core Component Display
-        function createEnhancedDependencyFlowHTML(categorized, focusComponent) {
-                let html = '<div class="dependency-flow">';
-                
-                // Input Files Level
-                if (categorized.inputFiles && categorized.inputFiles.length > 0) {
-                    html += createFileLayerWithLayouts('Input Sources', categorized.inputFiles, 'input-source');
-                    html += '<div class="flow-arrow">↓</div>';
-                }
-                
-                // Core Programs Level - Show all uploaded programs when no focus selected
-                let coreItems;
-                if (focusComponent) {
-                    coreItems = [{name: focusComponent, type: 'Focus Program', confidence: 1.0}];
-                } else if (categorized.corePrograms && categorized.corePrograms.length > 0) {
-                    coreItems = categorized.corePrograms;
-                } else {
-                    // Show ALL uploaded programs as core components
-                    coreItems = getAllUploadedPrograms() || [{name: 'MAIN-PROGRAM', type: 'Core Program', confidence: 0.9}];
-                }
-                
-                html += createProgramLayer('Core Programs', coreItems, 'core-program');
+        async function createEnhancedDependencyFlowHTML(categorized, focusComponent) {
+    let html = '<div class="dependency-flow">';
+    
+    // Input Files Level
+    if (categorized.inputFiles && categorized.inputFiles.length > 0) {
+        html += createFileLayerWithLayouts('Input Sources', categorized.inputFiles, 'input-source');
+        html += '<div class="flow-arrow">↓</div>';
+    }
+    
+    // Core Programs Level - ALWAYS show this layer with actual program names
+    let coreItems;
+    if (focusComponent) {
+        coreItems = [{name: focusComponent, type: 'Focus Program', confidence: 1.0}];
+    } else if (categorized.corePrograms && categorized.corePrograms.length > 0) {
+        coreItems = categorized.corePrograms;
+    } else {
+        // Get ALL uploaded programs instead of just first one
+        coreItems = await getAllUploadedPrograms() || [{name: 'MAIN-PROGRAM', type: 'Core Program', confidence: 0.9}];
+    }
+    
+    html += createProgramLayer('Core Programs', coreItems, 'core-program');
+    
+    // Add arrows to called programs if any exist
+    if (categorized.calledPrograms && categorized.calledPrograms.length > 0) {
+        html += '<div style="position: relative; height: 80px; display: flex; justify-content: center; align-items: center;">';
+        html += createProgramCallArrows(categorized.calledPrograms);
+        html += '</div>';
+    } else {
+        html += '<div class="flow-arrow">↓</div>';
+    }
+    
+    // Called Programs Level
+    if (categorized.calledPrograms && categorized.calledPrograms.length > 0) {
+        html += createProgramLayerWithArrows('Called Programs', categorized.calledPrograms, 'called-program');
+        html += '<div class="flow-arrow">↓</div>';
+    }
+    
+    // Input/Output Files Level
+    if (categorized.inputOutputFiles && categorized.inputOutputFiles.length > 0) {
+        html += createFileLayerWithLayouts('Input/Output Files', categorized.inputOutputFiles, 'input-output-file');
+        html += '<div class="flow-arrow">↓</div>';
+    }
+    
+    // Output Files Level
+    if (categorized.outputFiles && categorized.outputFiles.length > 0) {
+        html += createFileLayerWithLayouts('Output Files', categorized.outputFiles, 'output-file');
+    }
+    
+    // Missing Dependencies Level
+    if (categorized.missingPrograms && categorized.missingPrograms.length > 0) {
+        html += '<div style="margin-top: 3rem; padding-top: 2rem; border-top: 3px dashed #dc3545;">';
+        html += '<h4 style="color: #dc3545; text-align: center; margin-bottom: 2rem;">⚠️ Missing Dependencies</h4>';
+        html += createProgramLayer('Missing Programs', categorized.missingPrograms, 'missing-dependency');
+        html += '</div>';
+    }
+    
+    html += '</div>';
+    return html;
+}
 
-            
-            // Add arrows to called programs if any exist
-            if (categorized.calledPrograms && categorized.calledPrograms.length > 0) {
-                html += '<div style="position: relative; height: 80px; display: flex; justify-content: center; align-items: center;">';
-                html += createProgramCallArrows(categorized.calledPrograms);
-                html += '</div>';
-            } else {
-                html += '<div class="flow-arrow">↓</div>';
+    async function getAllUploadedPrograms() {
+    try {
+        // Get actual components from the API instead of relying on local data
+        const response = await fetch(`/api/components/${currentSessionId}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.components) {
+                const programs = data.components.filter(c => c.component_type === 'PROGRAM');
+                if (programs.length > 0) {
+                    console.log('Found uploaded programs:', programs.map(p => p.component_name));
+                    return programs.map(program => ({
+                        name: program.component_name,
+                        friendly_name: program.friendly_name || program.component_name,
+                        type: 'Core Program',
+                        confidence: 0.9
+                    }));
+                }
             }
-            
-            // Called Programs Level
-            if (categorized.calledPrograms && categorized.calledPrograms.length > 0) {
-                html += createProgramLayerWithArrows('Called Programs', categorized.calledPrograms, 'called-program');
-                html += '<div class="flow-arrow">↓</div>';
-            }
-            
-            // Input/Output Files Level
-            if (categorized.inputOutputFiles && categorized.inputOutputFiles.length > 0) {
-                html += createFileLayerWithLayouts('Input/Output Files', categorized.inputOutputFiles, 'input-output-file');
-                html += '<div class="flow-arrow">↓</div>';
-            }
-            
-            // Output Files Level
-            if (categorized.outputFiles && categorized.outputFiles.length > 0) {
-                html += createFileLayerWithLayouts('Output Files', categorized.outputFiles, 'output-file');
-            }
-            
-            // Missing Dependencies Level
-            if (categorized.missingPrograms && categorized.missingPrograms.length > 0) {
-                html += '<div style="margin-top: 3rem; padding-top: 2rem; border-top: 3px dashed #dc3545;">';
-                html += '<h4 style="color: #dc3545; text-align: center; margin-bottom: 2rem;">⚠️ Missing Dependencies</h4>';
-                html += createProgramLayer('Missing Programs', categorized.missingPrograms, 'missing-dependency');
-                html += '</div>';
-            }
-            
-            html += '</div>';
-            return html;
         }
-
-        function getAllUploadedPrograms() {
+    } catch (error) {
+        console.error('Error fetching uploaded programs:', error);
+    }
+    
+    // Fallback - try componentsData if API fails
     if (componentsData && componentsData.length > 0) {
         const programs = componentsData.filter(c => c.component_type === 'PROGRAM');
         if (programs.length > 0) {
             return programs.map(program => ({
                 name: program.component_name,
+                friendly_name: program.friendly_name || program.component_name,
                 type: 'Core Program',
                 confidence: 0.9
             }));
         }
     }
+    
     return null;
 }
         function createProgramCallArrows(calledPrograms) {
@@ -3440,6 +3464,19 @@ function displayFieldMatrix(matrixData) {
 }
 
 function displayProgramDetailsModal(programData, programName) {
+    // Safety check and defaults
+    if (!programData) {
+        programData = {
+            component_name: programName,
+            friendly_name: programName.replace('-', ' '),
+            component_type: 'COBOL Program',
+            total_lines: 'Unknown',
+            total_fields: 'Unknown',
+            business_purpose: 'Program analysis information not available',
+            source_for_chat: 'Source code not available'
+        };
+    }
+
     const modalHtml = `
         <div class="modal" style="display: block; z-index: 10001;">
             <div class="modal-content" style="width: 80%; max-width: 900px;">
@@ -4046,29 +4083,29 @@ function createFileLayerWithLayouts(title, items, className) {
             }
         }
 
-        function displayEnhancedDependencyFlowWithLayouts(dependencies, selectedComponent) {
-            console.log('Displaying enhanced flow with layout associations');
-            
-            const flowContainer = document.getElementById('dependencyFlowContent');
-            flowContainer.innerHTML = '';
-            
-            let filteredDeps = dependencies;
-            if (selectedComponent) {
-                filteredDeps = dependencies.filter(dep => 
-                    dep.source_component === selectedComponent || dep.target_component === selectedComponent
-                );
-            }
-            
-            if (filteredDeps.length === 0) {
-                flowContainer.innerHTML = `<p class="text-muted">No dependencies found for ${selectedComponent || 'the system'}</p>`;
-                return;
-            }
-            
-            const categorizedDeps = categorizeDependenciesWithLayouts(filteredDeps, selectedComponent);
-            
-            const flowHtml = createEnhancedDependencyFlowHTML(categorizedDeps, selectedComponent);
-            flowContainer.innerHTML = flowHtml;
-        }
+        async function displayEnhancedDependencyFlowWithLayouts(dependencies, selectedComponent) {
+    console.log('Displaying enhanced flow with layout associations');
+    
+    const flowContainer = document.getElementById('dependencyFlowContent');
+    flowContainer.innerHTML = '';
+    
+    let filteredDeps = dependencies;
+    if (selectedComponent) {
+        filteredDeps = dependencies.filter(dep => 
+            dep.source_component === selectedComponent || dep.target_component === selectedComponent
+        );
+    }
+    
+    if (filteredDeps.length === 0) {
+        flowContainer.innerHTML = `<p class="text-muted">No dependencies found for ${selectedComponent || 'the system'}</p>`;
+        return;
+    }
+    
+    const categorizedDeps = categorizeDependenciesWithLayouts(filteredDeps, selectedComponent);
+    
+    const flowHtml = await createEnhancedDependencyFlowHTML(categorizedDeps, selectedComponent);
+    flowContainer.innerHTML = flowHtml;
+}
 
         function displayEmptyDependencyFlow() {
             document.getElementById('dependencyFlowContent').innerHTML = 
