@@ -1526,20 +1526,25 @@ Rules:
             variable_values = {}
         
         # Second pass: Find dynamic CICS calls
-        for i, line in enumerate(lines, 1):
+        # FIXED:
+        i = 0
+        while i < len(lines):
+            line = lines[i]
             line_upper = line.upper().strip()
             
-            if not line_upper or line_upper.startswith('*'):
-                continue
+            if 'EXEC CICS' in line_upper and ('XCTL' in line_upper or 'LINK' in line_upper):
+                # Extract complete multi-line CICS command
+                complete_cics_command, end_line = self._extract_complete_cics_command_enhanced(lines, i)
                 
-            # Look for CICS XCTL/LINK with variables
-            try:
-                dynamic_call = self._analyze_dynamic_cics_call(line_upper, i, variable_values)
-                if dynamic_call:
-                    dynamic_calls.append(dynamic_call)
-            except Exception as e:
-                logger.error(f"Error analyzing dynamic CICS call at line {i}: {str(e)}")
-                continue
+                if complete_cics_command:
+                    logger.debug(f"Complete CICS command: {complete_cics_command}")
+                    dynamic_call = self._analyze_dynamic_cics_call(complete_cics_command, i + 1, variable_values)
+                    if dynamic_call:
+                        dynamic_calls.append(dynamic_call)
+                
+                i = end_line + 1
+            else:
+                i += 1
         
         logger.info(f"Extracted {len(dynamic_calls)} dynamic program calls")
         return dynamic_calls
@@ -1687,11 +1692,11 @@ Rules:
         for pattern in patterns:
             match = re.search(pattern, line)
             if match:
+                logger.info(f"Pattern matched: {pattern}")
+                logger.info(f"Groups: {match.groups()}")
                 operation = match.group(1)
                 variable_name = match.group(2)
-                
-                logger.debug(f"Found dynamic CICS call: {operation} PROGRAM({variable_name})")
-                
+                logger.info(f"Found: operation={operation} variable={variable_name}")
                 # Resolve variable to possible program names
                 try:
                     resolved_programs = self._resolve_variable_to_programs(variable_name, variable_map)
