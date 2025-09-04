@@ -306,6 +306,7 @@ class COBOLParser:
         logger.info(f"Total program calls extracted: {len(program_calls)}")
         return program_calls
 
+
     def _extract_cics_program_calls(self, lines: List[str]) -> List[Dict]:
         """
         Extract CICS LINK and XCTL program calls
@@ -1715,6 +1716,7 @@ Rules:
                     return None
         
         return None
+
 
     def _resolve_variable_to_programs(self, variable_name: str, variable_map: Dict) -> List[Dict]:
         """
