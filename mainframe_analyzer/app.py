@@ -1303,7 +1303,7 @@ def get_layout_summary(session_id, layout_name):
                        SUM(CASE WHEN fad.usage_type = 'OUTPUT' THEN 1 ELSE 0 END) as output_fields,
                        SUM(CASE WHEN fad.usage_type = 'STATIC' THEN 1 ELSE 0 END) as static_fields,
                        SUM(CASE WHEN fad.usage_type = 'UNUSED' OR fad.total_program_references = 0 THEN 1 ELSE 0 END) as unused_fields,
-                       SUM(CASE WHEN fad.usage_type = 'DERIVED' THEN 1 ELSE 0 END) as derived_fields
+                       SUM(CASE WHEN fad.usage_type = 'INPUT_OUTPUT' THEN 1 ELSE 0 END) as io_fields
                 FROM record_layouts rl
                 LEFT JOIN field_analysis_details fad ON rl.id = fad.field_id
                 WHERE rl.session_id = ? AND rl.layout_name = ?
@@ -1327,7 +1327,7 @@ def get_layout_summary(session_id, layout_name):
                 'output_fields': result[5], 
                 'static_fields': result[6],
                 'unused_fields': result[7],
-                'derived_fields': result[8]
+                'io_fields': result[8]
             }
             
             return jsonify({

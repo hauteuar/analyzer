@@ -452,7 +452,7 @@ class ComponentExtractor:
             return self._create_fallback_field_dict(field, str(e))
 
     def _process_regular_field(self, field, program_content: str, program_name: str) -> Dict:
-        """Process regular fields with full source analysis"""
+        """Process regular fields with full source analysis and proper mainframe data type"""
         try:
             field_name = field.name
             
@@ -463,6 +463,9 @@ class ComponentExtractor:
             mainframe_length, oracle_length, oracle_type = self.cobol_parser._calculate_field_lengths_fixed(
                 field.picture, field.usage
             )
+            
+            # FIXED: Build proper mainframe data type
+            mainframe_data_type = self._build_mainframe_data_type(field)
             
             return {
                 'name': field_name,
@@ -482,11 +485,11 @@ class ComponentExtractor:
                 'source_field': source_analysis.get('primary_source_field', ''),
                 'target_field': field_name if source_analysis.get('receives_data', False) else '',
                 
-                # Proper field length calculation
+                # FIXED: Proper field length calculation with correct mainframe type
                 'mainframe_length': mainframe_length,
                 'oracle_length': oracle_length,
                 'oracle_data_type': oracle_type,
-                'mainframe_data_type': f"PIC {field.picture}" if field.picture else "UNKNOWN",
+                'mainframe_data_type': mainframe_data_type,  # Now properly constructed
                 
                 # Complete source code analysis
                 'definition_line_number': source_analysis.get('definition_line', field.line_number),
@@ -505,8 +508,59 @@ class ComponentExtractor:
             logger.error(f"Error processing regular field {field.name}: {str(e)}")
             return self._create_fallback_field_dict(field, str(e))
 
+    def _build_mainframe_data_type(self, field) -> str:
+        """
+        Build proper mainframe data type string from field definition
+        """
+        try:
+            # Start with level and field name
+            data_type_parts = [f"{field.level:02d} {field.name}"]
+            
+            # Add PIC clause if present
+            if field.picture:
+                data_type_parts.append(f"PIC {field.picture}")
+            
+            # Add USAGE clause if present and not DISPLAY (default)
+            if field.usage and field.usage.upper() != 'DISPLAY':
+                data_type_parts.append(f"USAGE {field.usage}")
+            
+            # Add OCCURS clause if present
+            if hasattr(field, 'occurs') and field.occurs and field.occurs > 0:
+                data_type_parts.append(f"OCCURS {field.occurs}")
+            
+            # Add REDEFINES clause if present
+            if hasattr(field, 'redefines') and field.redefines:
+                data_type_parts.append(f"REDEFINES {field.redefines}")
+            
+            # Add VALUE clause if present
+            if hasattr(field, 'value') and field.value:
+                if field.value.isdigit() or (field.value.startswith('-') and field.value[1:].isdigit()):
+                    # Numeric value
+                    data_type_parts.append(f"VALUE {field.value}")
+                else:
+                    # String value
+                    data_type_parts.append(f"VALUE '{field.value}'")
+            
+            return " ".join(data_type_parts)
+            
+        except Exception as e:
+            logger.error(f"Error building mainframe data type for {field.name}: {str(e)}")
+            # Fallback to basic format
+            if hasattr(field, 'picture') and field.picture:
+                return f"{getattr(field, 'level', 5):02d} {field.name} PIC {field.picture}"
+            else:
+                return f"{getattr(field, 'level', 5):02d} {field.name}"
+
     def _create_fallback_field_dict(self, field, error_msg: str) -> Dict:
-        """Create fallback field dictionary when processing fails"""
+        """Create fallback field dictionary when processing fails - UPDATED"""
+        # Build a basic mainframe data type even for fallback
+        try:
+            basic_mainframe_type = f"{getattr(field, 'level', 5):02d} {getattr(field, 'name', 'UNKNOWN_FIELD')}"
+            if hasattr(field, 'picture') and field.picture:
+                basic_mainframe_type += f" PIC {field.picture}"
+        except:
+            basic_mainframe_type = 'UNKNOWN FIELD DEFINITION'
+        
         return {
             'name': getattr(field, 'name', 'UNKNOWN_FIELD'),
             'friendly_name': getattr(field, 'friendly_name', 'Unknown Field'),
@@ -519,7 +573,7 @@ class ComponentExtractor:
             'mainframe_length': 1,  # Minimum valid length
             'oracle_length': 50,    # Safe default
             'oracle_data_type': 'VARCHAR2(50)',
-            'mainframe_data_type': 'UNKNOWN',
+            'mainframe_data_type': basic_mainframe_type,  # FIXED: Proper mainframe type
             'confidence': 0.1,
             'error': error_msg,
             'field_references_json': '[]',
@@ -530,6 +584,8 @@ class ComponentExtractor:
             'conditional_count': 0,
             'cics_count': 0
         }
+
+    
 
     def generate_friendly_names_batch(self, session_id: str, items: List[Dict], context: str) -> Dict[str, str]:
         """Generate friendly names for multiple items efficiently"""
@@ -907,6 +963,7 @@ class ComponentExtractor:
 
     PROGRAM ANALYSIS:
     - Type: {component_type}
+    - Source Code Snippet: {source_content[:5000]}  # First 1000 chars
     - Total Lines: {context_info['total_lines']} ({context_info['executable_lines']} executable)
     - Data Structures: {context_info['record_layouts']} record layouts
     - File Operations: {len(context_info['file_operations'])} operations
