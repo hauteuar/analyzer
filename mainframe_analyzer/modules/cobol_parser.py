@@ -1721,14 +1721,45 @@ Rules:
     def _resolve_variable_to_programs(self, variable_name: str, variable_map: Dict) -> List[Dict]:
         """
         Resolve a variable to its possible program name values
-        Handles group fields with filler constants and computed values
+        Handles group fields with filler constants, computed values, and HOLD-field patterns
         """
         resolved_programs = []
         
         if variable_name not in variable_map:
+            # NEW: Check for HOLD-xxx pattern (for dynamic CICS calls like PROGRAM(TRANX) -> HOLD-TRANX)
+            hold_field_name = f"HOLD-{variable_name}"
+            if hold_field_name in variable_map:
+                logger.debug(f"Found HOLD field for {variable_name}: {hold_field_name}")
+                hold_var_info = variable_map[hold_field_name]
+                
+                # Direct constant value in HOLD field
+                if 'constant_value' in hold_var_info:
+                    resolved_programs.append({
+                        'program_name': hold_var_info['constant_value'],
+                        'resolution': 'hold_field_constant',
+                        'confidence': 1.0,
+                        'source': f"HOLD field {hold_field_name} VALUE '{hold_var_info['constant_value']}'"
+                    })
+                
+                # Possible values from MOVE operations to HOLD field
+                for value in hold_var_info.get('possible_values', []):
+                    if value not in [p['program_name'] for p in resolved_programs]:
+                        resolved_programs.append({
+                            'program_name': value,
+                            'resolution': 'hold_field_move',
+                            'confidence': 0.9,
+                            'source': f"MOVE '{value}' TO {hold_field_name}"
+                        })
+                
+                if resolved_programs:
+                    logger.debug(f"Resolved {variable_name} via HOLD field to {len(resolved_programs)} programs")
+                    return resolved_programs
+            
+            logger.debug(f"Variable {variable_name} not found in map and no HOLD field available")
             return [{'program_name': variable_name, 'resolution': 'unresolved', 'confidence': 0.1}]
         
         var_info = variable_map[variable_name]
+        logger.debug(f"Found variable {variable_name} in map: {var_info.get('type', 'unknown type')}")
         
         # Direct constant value
         if 'constant_value' in var_info:
@@ -1753,6 +1784,21 @@ Rules:
         if var_info.get('type') == 'group' and 'children' in var_info:
             group_programs = self._resolve_group_field_programs(variable_name, var_info, variable_map)
             resolved_programs.extend(group_programs)
+            
+            # ENHANCED: Also check if this group contains a HOLD-xxx field
+            hold_child_name = f"HOLD-{variable_name}"
+            if hold_child_name in var_info.get('children', {}):
+                logger.debug(f"Group {variable_name} contains HOLD field: {hold_child_name}")
+                if hold_child_name in variable_map:
+                    hold_child_info = variable_map[hold_child_name]
+                    for value in hold_child_info.get('possible_values', []):
+                        if value not in [p['program_name'] for p in resolved_programs]:
+                            resolved_programs.append({
+                                'program_name': value,
+                                'resolution': 'group_hold_child',
+                                'confidence': 0.9,
+                                'source': f"Group child {hold_child_name} = '{value}'"
+                            })
         
         # Handle parent group resolution
         if var_info.get('parent') and var_info['parent'] in variable_map:
@@ -1768,10 +1814,14 @@ Rules:
                         'source': f"Group {var_info['parent']} filler '{filler_value}' + {variable_name}"
                     })
         
+        if resolved_programs:
+            logger.debug(f"Successfully resolved {variable_name} to {len(resolved_programs)} programs")
+        else:
+            logger.debug(f"No resolution found for {variable_name}")
+        
         return resolved_programs if resolved_programs else [
             {'program_name': variable_name, 'resolution': 'unresolved', 'confidence': 0.1}
         ]
-
     
 
     def _calculate_resolution_confidence(self, variable_name: str, variable_map: Dict, resolved_programs: List[Dict]) -> float:
