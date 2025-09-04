@@ -1437,13 +1437,21 @@ Rules:
     def extract_dynamic_program_calls(self, content: str, filename: str) -> List[Dict]:
         """
         Extract dynamic CICS program calls that use variables (XCTL, LINK)
-        Resolves variable values from working storage when possible
+        FIXED: Add error handling for variable map building
         """
         dynamic_calls = []
         lines = content.split('\n')
         
-        # First pass: Build variable value map from working storage
-        variable_values = self._build_variable_value_map(lines)
+        try:
+            # First pass: Build variable value map from working storage
+            variable_values = self._build_variable_value_map(lines)
+            logger.debug(f"Built variable map with {len(variable_values)} variables")
+            
+        except Exception as e:
+            logger.error(f"Error building variable value map: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            # Continue with empty variable map
+            variable_values = {}
         
         # Second pass: Find dynamic CICS calls
         for i, line in enumerate(lines, 1):
@@ -1453,16 +1461,21 @@ Rules:
                 continue
                 
             # Look for CICS XCTL/LINK with variables
-            dynamic_call = self._analyze_dynamic_cics_call(line_upper, i, variable_values)
-            if dynamic_call:
-                dynamic_calls.append(dynamic_call)
+            try:
+                dynamic_call = self._analyze_dynamic_cics_call(line_upper, i, variable_values)
+                if dynamic_call:
+                    dynamic_calls.append(dynamic_call)
+            except Exception as e:
+                logger.error(f"Error analyzing dynamic CICS call at line {i}: {str(e)}")
+                continue
         
+        logger.info(f"Extracted {len(dynamic_calls)} dynamic program calls")
         return dynamic_calls
-
     def _build_variable_value_map(self, lines: List[str]) -> Dict[str, Any]:
         """
         Build map of working storage variables and their possible values
         Handles group fields, fillers with values, and computed values
+        FIXED: Properly initialize children dictionary
         """
         variable_map = {}
         current_group = None
@@ -1491,13 +1504,17 @@ Rules:
                             variable_map[field_name] = {
                                 'type': 'group',
                                 'level': level,
-                                'children': {},
+                                'children': {},  # ALWAYS initialize children
                                 'line': i,
                                 'possible_values': []
                             }
                         else:
-                            # Sub-field of group
+                            # Sub-field of group - FIXED: Check if current_group exists and has children
                             if current_group and current_group in variable_map:
+                                # Ensure children dict exists
+                                if 'children' not in variable_map[current_group]:
+                                    variable_map[current_group]['children'] = {}
+                                
                                 variable_map[current_group]['children'][field_name] = {
                                     'type': 'field',
                                     'level': level,
@@ -1505,6 +1522,7 @@ Rules:
                                     'parent': current_group
                                 }
                             
+                            # Also add to main variable map
                             variable_map[field_name] = {
                                 'type': 'field',
                                 'level': level,
@@ -1522,9 +1540,10 @@ Rules:
                             
                             # For fillers with values in groups
                             if 'FILLER' in field_content and current_group:
-                                if 'filler_values' not in variable_map[current_group]:
-                                    variable_map[current_group]['filler_values'] = []
-                                variable_map[current_group]['filler_values'].append(value)
+                                if current_group in variable_map:
+                                    if 'filler_values' not in variable_map[current_group]:
+                                        variable_map[current_group]['filler_values'] = []
+                                    variable_map[current_group]['filler_values'].append(value)
             
             # Look for MOVE statements that populate variables
             move_match = re.search(r'MOVE\s+([A-Z0-9\-\'\"]+)\s+TO\s+([A-Z0-9\-]+)', line_upper)
@@ -1533,10 +1552,49 @@ Rules:
                 target_var = move_match.group(2)
                 
                 if target_var in variable_map:
+                    if 'possible_values' not in variable_map[target_var]:
+                        variable_map[target_var]['possible_values'] = []
                     if source_val not in variable_map[target_var]['possible_values']:
                         variable_map[target_var]['possible_values'].append(source_val)
         
         return variable_map
+
+    def _resolve_group_field_programs(self, group_name: str, group_info: Dict, variable_map: Dict) -> List[Dict]:
+        """
+        Resolve program names from group field structure
+        FIXED: Add defensive checks for children dictionary
+        """
+        resolved_programs = []
+        filler_values = group_info.get('filler_values', [])
+        
+        # FIXED: Check if children key exists before accessing
+        children = group_info.get('children', {})
+        if not isinstance(children, dict):
+            logger.warning(f"Group {group_name} has invalid children structure: {type(children)}")
+            return resolved_programs
+        
+        # Look for sub-fields that could contain program suffixes
+        for child_name, child_info in children.items():
+            if child_name != 'FILLER' and child_name in variable_map:
+                child_var_info = variable_map[child_name]
+                
+                # Combine filler constants with child variable possible values
+                for filler_val in filler_values:
+                    child_possible_values = child_var_info.get('possible_values', [child_name])
+                    for child_val in child_possible_values:
+                        if child_val != child_name:  # Skip if it's just the variable name
+                            combined_program = f"{filler_val}{child_val}"
+                        else:
+                            combined_program = filler_val  # Just the filler constant
+                        
+                        resolved_programs.append({
+                            'program_name': combined_program,
+                            'resolution': 'group_field_combination',
+                            'confidence': 0.8,
+                            'source': f"Group {group_name}: '{filler_val}' + {child_name}"
+                        })
+        
+        return resolved_programs
 
     def _analyze_dynamic_cics_call(self, line: str, line_number: int, variable_map: Dict) -> Optional[Dict]:
         """
@@ -1624,35 +1682,7 @@ Rules:
             {'program_name': variable_name, 'resolution': 'unresolved', 'confidence': 0.1}
         ]
 
-    def _resolve_group_field_programs(self, group_name: str, group_info: Dict, variable_map: Dict) -> List[Dict]:
-        """
-        Resolve program names from group field structure
-        Example: WA-TRANX group with FILLER 'TMST' + WA-HOLD-TRANX variable
-        """
-        resolved_programs = []
-        filler_values = group_info.get('filler_values', [])
-        
-        # Look for sub-fields that could contain program suffixes
-        for child_name, child_info in group_info.get('children', {}).items():
-            if child_name != 'FILLER' and child_name in variable_map:
-                child_var_info = variable_map[child_name]
-                
-                # Combine filler constants with child variable possible values
-                for filler_val in filler_values:
-                    for child_val in child_var_info.get('possible_values', [child_name]):
-                        if child_val != child_name:  # Skip if it's just the variable name
-                            combined_program = f"{filler_val}{child_val}"
-                        else:
-                            combined_program = filler_val  # Just the filler constant
-                        
-                        resolved_programs.append({
-                            'program_name': combined_program,
-                            'resolution': 'group_field_combination',
-                            'confidence': 0.8,
-                            'source': f"Group {group_name}: '{filler_val}' + {child_name}"
-                        })
-        
-        return resolved_programs
+    
 
     def _calculate_resolution_confidence(self, variable_name: str, variable_map: Dict, resolved_programs: List[Dict]) -> float:
         """Calculate confidence in variable resolution"""
