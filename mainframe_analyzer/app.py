@@ -517,7 +517,7 @@ class MainframeAnalyzer:
     def _get_db2_table_mapping(self, session_id: str, field_name: str) -> Dict:
         """Get DB2 table mapping for a field"""
         # Check if field appears in SQL operations
-        with self.get_connection() as conn:
+        with self.db_manager.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT ca.component_name, ca.analysis_result_json
@@ -1226,10 +1226,12 @@ def get_dependencies_enhanced_complete(session_id):
             'input_files': [],
             'output_files': [],
             'input_output_files': [],
+            'physical_file_mappings': [], 
             'cics_files_with_layouts': [],
             'cics_files_only': [],
             'db2_input_tables': [],    # NEW
             'db2_output_tables': [],   # NEW
+            'jcl_confirmed_calls': [], 
             'program_calls': [],
             'missing_programs': []
         }
@@ -1312,6 +1314,20 @@ def get_dependencies_enhanced_complete(session_id):
                 categorized_dependencies['db2_input_tables'].append(table_info)
             elif rel_type == 'DB2_OUTPUT_TABLE':
                 categorized_dependencies['db2_output_tables'].append(table_info)
+
+            if dep.get('relationship_type') == 'PHYSICAL_FILE_MAPPING':
+                    categorized_dependencies['physical_file_mappings'].append({
+                    'logical_file': dep.get('logical_name'),
+                    'physical_dataset': dep['target_component'],
+                    'dd_name': analysis.get('jcl_dd_name'),
+                    'io_direction': analysis.get('io_direction')
+                })
+            elif dep.get('relationship_type') == 'PROGRAM_CALL':
+                analysis = dep.get('analysis_details', {})
+                if analysis.get('jcl_confirmation'):
+                    categorized_dependencies['jcl_confirmed_calls'].append(dep)
+                else:
+                    categorized_dependencies['program_calls'].append(dep)
         
         logger.info(f"Enhanced categorization complete: "
                    f"{len(categorized_dependencies['cics_files_with_layouts'])} CICS files with layouts, "

@@ -185,6 +185,7 @@ class ComponentExtractor:
                 'program_calls': parsed_data['program_calls'],
                 'copybooks': parsed_data['copybooks'],
                 'cics_operations': enhanced_cics_ops,  # Use enhanced operations
+                'db2_operations': parsed_data['db2_operations', ''], 
                 'derived_components': [],
                 'record_layouts': [],
                 'fields': []
@@ -1648,6 +1649,28 @@ Return only the business purpose description (1-2 sentences).
                 jcl_component['job_steps'].append(current_step)
             
             components.append(jcl_component)
+
+            cobol_components = self.db_manager.get_session_components(session_id)
+            cobol_programs = [c for c in cobol_components if c.get('component_type') == 'PROGRAM']
+            
+            if cobol_programs:
+                # Add correlation information
+                jcl_component['correlated_programs'] = []
+                
+                for program_call in jcl_component.get('programs_called', []):
+                    pgm_name = program_call.get('program_name')
+                    
+                    # Check if this program exists in uploaded COBOL programs
+                    matching_cobol = next((p for p in cobol_programs if p['component_name'] == pgm_name), None)
+                    
+                    if matching_cobol:
+                        program_call['cobol_program_uploaded'] = True
+                        program_call['cobol_analysis_available'] = True
+                        jcl_component['correlated_programs'].append(pgm_name)
+                    else:
+                        program_call['cobol_program_uploaded'] = False
+            
+    
             
         except Exception as e:
             logger.error(f"Error extracting JCL components: {str(e)}")
@@ -2228,6 +2251,67 @@ File Content ({filename}):
                     dependencies.append(dependency)
         
         return dependencies
+    
+    def _correlate_jcl_with_cobol_dependencies(self, session_id: str, jcl_component: Dict, cobol_components: List[Dict]) -> List[Dict]:
+        """Correlate JCL physical files with COBOL logical files"""
+        enhanced_dependencies = []
+        
+        # Get JCL datasets
+        jcl_datasets = jcl_component.get('datasets', [])
+        
+        for cobol_comp in cobol_components:
+            if cobol_comp.get('type') != 'PROGRAM':
+                continue
+                
+            # Get COBOL file operations
+            file_operations = cobol_comp.get('file_operations', [])
+            
+            for file_op in file_operations:
+                logical_file = file_op.get('file_name')  # e.g., CUSTOMER-FILE
+                
+                # Try to find matching JCL dataset
+                physical_dataset = self._find_matching_dataset(logical_file, jcl_datasets)
+                
+                if physical_dataset:
+                    enhanced_dependencies.append({
+                        'source_component': cobol_comp['name'],
+                        'target_component': physical_dataset['dsn'],
+                        'logical_name': logical_file,
+                        'physical_name': physical_dataset['dsn'],
+                        'relationship_type': 'PHYSICAL_FILE_MAPPING',
+                        'interface_type': 'JCL_DATASET',
+                        'io_direction': file_op.get('io_direction', 'UNKNOWN'),
+                        'analysis_details_json': json.dumps({
+                            'jcl_dd_name': physical_dataset.get('dd_name'),
+                            'cobol_logical_file': logical_file,
+                            'mapping_confidence': 0.8
+                        })
+                    })
+        
+        return enhanced_dependencies
+
+    def _find_matching_dataset(self, logical_file: str, jcl_datasets: List[Dict]) -> Dict:
+        """Find JCL dataset that matches COBOL logical file"""
+        logical_upper = logical_file.upper()
+        
+        for dataset in jcl_datasets:
+            dd_name = dataset.get('dd_name', '').upper()
+            dsn = dataset.get('dsn', '').upper()
+            
+            # Matching strategies:
+            # 1. DD name matches logical file name
+            if logical_upper in dd_name or dd_name in logical_upper:
+                return dataset
+                
+            # 2. DSN contains logical file indicator
+            if any(part in dsn for part in logical_upper.split('-')):
+                return dataset
+                
+            # 3. Common patterns (CUSTFILE -> CUSTOMER.FILE)
+            if self._matches_naming_pattern(logical_file, dsn):
+                return dataset
+        
+        return None
 
     def _extract_table_names_from_sql(self, sql_statement: str) -> List[Tuple[str, str]]:
         """Extract table names and operation types from SQL statements"""
@@ -3168,6 +3252,42 @@ File Content ({filename}):
             logger.error(f"Error merging analysis details: {str(e)}")
             return new_json if new_json else existing_json
     
+    def _deduplicate_program_dependencies(self, session_id: str, all_dependencies: List[Dict]) -> List[Dict]:
+        """Remove duplicate program dependencies from COBOL and JCL"""
+    
+        # Group dependencies by target program
+        program_deps = {}
+        other_deps = []
+        
+        for dep in all_dependencies:
+            if dep.get('relationship_type') == 'PROGRAM_CALL':
+                target = dep['target_component']
+                if target not in program_deps:
+                    program_deps[target] = []
+                program_deps[target].append(dep)
+            else:
+                other_deps.append(dep)
+        
+        # For each program, keep the highest confidence dependency
+        deduplicated_program_deps = []
+        for target_program, deps in program_deps.items():
+            if len(deps) == 1:
+                deduplicated_program_deps.append(deps[0])
+            else:
+                # Multiple sources calling same program - consolidate
+                best_dep = max(deps, key=lambda d: d.get('confidence_score', 0))
+                
+                # Enhance with multiple source information
+                all_sources = [d['source_component'] for d in deps]
+                analysis_details = json.loads(best_dep.get('analysis_details_json', '{}'))
+                analysis_details['called_from_multiple_sources'] = all_sources
+                analysis_details['jcl_confirmation'] = any('JCL' in d.get('interface_type', '') for d in deps)
+                
+                best_dep['analysis_details_json'] = json.dumps(analysis_details)
+                deduplicated_program_deps.append(best_dep)
+        
+        return other_deps + deduplicated_program_deps
+
     def _store_field_operation(self, session_id: str, field_name: str, program_name: str,
                              operation_type: str, line_number: int, code_snippet: str):
         """Store individual field operation"""

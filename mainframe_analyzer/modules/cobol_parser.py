@@ -891,6 +891,7 @@ class COBOLParser:
             'xml_operations': self.extract_xml_operations(raw_lines),
             'db2_operations': self.extract_db2_operations(raw_lines),
             'data_movements': self.extract_data_movements(raw_lines),
+            'db2_operations': self.extract_db2_operations(raw_lines),
             'total_lines': len(raw_lines),
             'executable_lines': sum(1 for l in raw_lines if self.extract_program_area_only(l)),
             'comment_lines': sum(1 for l in raw_lines if len(l)>6 and l[6] in ['*','/','C','c','D','d']),
@@ -1206,7 +1207,77 @@ Rules:
             return item.get('line_content', item.get('source_code', ''))
         return ''
 
-  
+    def extract_db2_operations(self, lines: List[str]) -> List[Dict]:
+        """Enhanced DB2 SQL operations extraction with table identification"""
+        operations = []
+        in_exec_sql = False
+        buffer = []
+        start_line = 0
+        
+        for i, raw_line in enumerate(lines):
+            program_area = self.extract_program_area_only(raw_line)
+            if not program_area:
+                continue
+                
+            program_upper = program_area.upper()
+            
+            if re.search(r'EXEC\s+SQL', program_upper):
+                in_exec_sql = True
+                buffer = [program_area]
+                start_line = i + 1
+                
+                if re.search(r'END-EXEC', program_upper):
+                    in_exec_sql = False
+                    complete_sql = ' '.join(buffer)
+                    sql_operation = self._analyze_sql_operation(complete_sql, start_line)
+                    if sql_operation:
+                        operations.append(sql_operation)
+                    buffer = []
+                    
+            elif in_exec_sql:
+                buffer.append(program_area)
+                if re.search(r'END-EXEC', program_upper):
+                    in_exec_sql = False
+                    complete_sql = ' '.join(buffer)
+                    sql_operation = self._analyze_sql_operation(complete_sql, start_line)
+                    if sql_operation:
+                        operations.append(sql_operation)
+                    buffer = []
+            else:
+                # Look for inline SQL statements
+                if re.search(r'\bSELECT\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b', program_upper):
+                    sql_operation = self._analyze_sql_operation(program_area.strip(), i + 1)
+                    if sql_operation:
+                        operations.append(sql_operation)
+        
+        return operations
+
+    def _analyze_sql_operation(self, sql_statement: str, line_number: int) -> Dict:
+        """Analyze SQL statement to extract tables and operation type"""
+        sql_upper = sql_statement.upper()
+        
+        # Determine operation type
+        operation_type = 'UNKNOWN'
+        if 'SELECT' in sql_upper:
+            operation_type = 'SELECT'
+        elif 'INSERT' in sql_upper:
+            operation_type = 'INSERT'
+        elif 'UPDATE' in sql_upper:
+            operation_type = 'UPDATE'
+        elif 'DELETE' in sql_upper:
+            operation_type = 'DELETE'
+        
+        # Extract table names
+        table_names = self._extract_table_names_from_sql(sql_statement)
+        
+        return {
+            'sql': sql_statement,
+            'line_number': line_number,
+            'operation_type': operation_type,
+            'tables': [table[0] for table in table_names],  # Just table names
+            'table_operations': table_names,  # Table name + operation pairs
+            'io_direction': 'INPUT' if operation_type == 'SELECT' else 'OUTPUT' if operation_type in ['INSERT', 'UPDATE', 'DELETE'] else 'UNKNOWN'
+        }
     
     def _calculate_field_lengths_fixed(self, picture: str, usage: str = "") -> Tuple[int, int, str]:
         """Fixed field length calculation from PIC clause with proper validation"""
