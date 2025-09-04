@@ -513,6 +513,34 @@ class MainframeAnalyzer:
         except Exception as e:
             logger.error(f"Error generating dynamic call summary: {str(e)}")
             return "Dynamic call analysis available but summary generation failed"
+        
+    def _get_db2_table_mapping(self, session_id: str, field_name: str) -> Dict:
+        """Get DB2 table mapping for a field"""
+        # Check if field appears in SQL operations
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT ca.component_name, ca.analysis_result_json
+                FROM component_analysis ca
+                WHERE ca.session_id = ? AND ca.analysis_result_json LIKE ?
+            ''', (session_id, f'%{field_name}%'))
+            
+            results = cursor.fetchall()
+            
+            for row in results:
+                analysis = json.loads(row[1])
+                db2_ops = analysis.get('db2_operations', [])
+                
+                for op in db2_ops:
+                    if field_name.upper() in op.get('sql', '').upper():
+                        return {
+                            'mapped_to_db2': True,
+                            'table_operations': self._extract_table_names_from_sql(op['sql']),
+                            'sql_context': op['sql'][:200]
+                        }
+        
+        return {'mapped_to_db2': False}
+    
 # Initialize analyzer
 analyzer = MainframeAnalyzer()
 
@@ -897,8 +925,8 @@ def analyze_field_mapping():
                     'source_count': move_source_count,
                     'target_count': move_target_count
                 },
-                'db2_table_mapping': self._get_db2_table_mapping(session_id, field_name),
-                'sql_operations': self._get_field_sql_operations(session_id, field_name)
+                'db2_table_mapping': analyzer._get_db2_table_mapping(session_id, row[0]),
+                'sql_operations': analyzer._get_field_sql_operations(session_id, row[0])
             }
             
             field_mappings.append(field_mapping)
@@ -928,32 +956,7 @@ def analyze_field_mapping():
             'error': str(e)
         })
     
-def _get_db2_table_mapping(self, session_id: str, field_name: str) -> Dict:
-        """Get DB2 table mapping for a field"""
-        # Check if field appears in SQL operations
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT ca.component_name, ca.analysis_result_json
-                FROM component_analysis ca
-                WHERE ca.session_id = ? AND ca.analysis_result_json LIKE ?
-            ''', (session_id, f'%{field_name}%'))
-            
-            results = cursor.fetchall()
-            
-            for row in results:
-                analysis = json.loads(row[1])
-                db2_ops = analysis.get('db2_operations', [])
-                
-                for op in db2_ops:
-                    if field_name.upper() in op.get('sql', '').upper():
-                        return {
-                            'mapped_to_db2': True,
-                            'table_operations': self._extract_table_names_from_sql(op['sql']),
-                            'sql_context': op['sql'][:200]
-                        }
-        
-        return {'mapped_to_db2': False}
+
 
 @app.route('/api/field-matrix', methods=['GET'])
 def get_field_matrix():
