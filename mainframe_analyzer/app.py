@@ -541,6 +541,66 @@ class MainframeAnalyzer:
         
         return {'mapped_to_db2': False}
     
+    def _get_field_sql_operations(self, session_id: str, field_name: str) -> List[Dict]:
+        """Get SQL operations involving a specific field"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT ca.component_name, ca.analysis_result_json
+                    FROM component_analysis ca
+                    WHERE ca.session_id = ? AND ca.analysis_result_json LIKE ?
+                ''', (session_id, f'%{field_name}%'))
+                
+                sql_operations = []
+                for row in cursor.fetchall():
+                    try:
+                        analysis = json.loads(row[1])
+                        db2_ops = analysis.get('db2_operations', [])
+                        
+                        for op in db2_ops:
+                            if field_name.upper() in op.get('sql', '').upper():
+                                sql_operations.append({
+                                    'program': row[0],
+                                    'sql_operation': op.get('operation_type', 'UNKNOWN'),
+                                    'sql_statement': op.get('sql', ''),
+                                    'table_name': self._extract_table_from_sql(op.get('sql', '')),
+                                    'field_context': self._extract_field_context(op.get('sql', ''), field_name)
+                                })
+                    except Exception as e:
+                        logger.warning(f"Error parsing SQL operations for {row[0]}: {e}")
+                        continue
+                
+                return sql_operations
+        except Exception as e:
+            logger.error(f"Error getting SQL operations for field {field_name}: {e}")
+            return []
+
+    def _extract_table_from_sql(self, sql: str) -> str:
+        """Extract table name from SQL statement"""
+        import re
+        # Simple regex to extract table names from FROM, UPDATE, INSERT INTO clauses
+        patterns = [
+            r'FROM\s+([A-Z0-9_]+)',
+            r'UPDATE\s+([A-Z0-9_]+)',
+            r'INSERT\s+INTO\s+([A-Z0-9_]+)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, sql.upper())
+            if match:
+                return match.group(1)
+        
+        return 'UNKNOWN_TABLE'
+
+    def _extract_field_context(self, sql: str, field_name: str) -> str:
+        """Extract context around field usage in SQL"""
+        lines = sql.split('\n')
+        for line in lines:
+            if field_name.upper() in line.upper():
+                return line.strip()
+        return ''
+    
 # Initialize analyzer
 analyzer = MainframeAnalyzer()
 

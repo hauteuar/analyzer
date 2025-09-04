@@ -1228,6 +1228,39 @@
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
 
+                /* DB2 Table Styles */
+        .flow-component.db2-input-table {
+            border-color: #007bff;
+            background: linear-gradient(135deg, #cce5ff 0%, #ffffff 100%);
+        }
+
+        .flow-component.db2-output-table {
+            border-color: #28a745;
+            background: linear-gradient(135deg, #d4edda 0%, #ffffff 100%);
+        }
+
+        .flow-component.db2-io-table {
+            border-color: #ffc107;
+            background: linear-gradient(135deg, #fff3cd 0%, #ffffff 100%);
+        }
+
+        .db2-operations {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 0.5rem;
+        }
+
+        .sql-operation {
+            display: inline-block;
+            background: #007bff;
+            color: white;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.7rem;
+            margin: 0.1rem;
+        }
+
+
         /* Utility Classes */
         .hidden {
             display: none !important;
@@ -2378,20 +2411,39 @@
         async function createEnhancedDependencyFlowHTML(categorized, focusComponent) {
     let html = '<div class="dependency-flow">';
     
-    // Input Files Level
-    if (categorized.inputFiles && categorized.inputFiles.length > 0) {
-        html += createFileLayerWithLayouts('Input Sources', categorized.inputFiles, 'input-source');
+    // Input Sources Level (Files + DB2 Input Tables)
+    if ((categorized.inputFiles && categorized.inputFiles.length > 0) || 
+        (categorized.db2InputTables && categorized.db2InputTables.length > 0)) {
+        
+        html += '<div class="flow-level">';
+        html += '<div class="flow-level-title">Input Sources</div>';
+        html += '<div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-left: 160px;">';
+        
+        // Regular input files
+        if (categorized.inputFiles) {
+            categorized.inputFiles.forEach(file => {
+                html += createFileComponent(file, 'input-source');
+            });
+        }
+        
+        // DB2 input tables
+        if (categorized.db2InputTables) {
+            categorized.db2InputTables.forEach(table => {
+                html += createDB2Component(table, 'db2-input-table');
+            });
+        }
+        
+        html += '</div></div>';
         html += '<div class="flow-arrow">↓</div>';
     }
     
-    // Core Programs Level - ALWAYS show this layer with actual program names
+    // Core Programs Level
     let coreItems;
     if (focusComponent) {
         coreItems = [{name: focusComponent, type: 'Focus Program', confidence: 1.0}];
     } else if (categorized.corePrograms && categorized.corePrograms.length > 0) {
         coreItems = categorized.corePrograms;
     } else {
-        // Get ALL uploaded programs instead of just first one
         coreItems = await getAllUploadedPrograms() || [{name: 'MAIN-PROGRAM', type: 'Core Program', confidence: 0.9}];
     }
     
@@ -2412,15 +2464,45 @@
         html += '<div class="flow-arrow">↓</div>';
     }
     
-    // Input/Output Files Level
-    if (categorized.inputOutputFiles && categorized.inputOutputFiles.length > 0) {
-        html += createFileLayerWithLayouts('Input/Output Files', categorized.inputOutputFiles, 'input-output-file');
-        html += '<div class="flow-arrow">↓</div>';
-    }
-    
-    // Output Files Level
-    if (categorized.outputFiles && categorized.outputFiles.length > 0) {
-        html += createFileLayerWithLayouts('Output Files', categorized.outputFiles, 'output-file');
+    // Output Destinations Level (Files + DB2 Output Tables)
+    if ((categorized.outputFiles && categorized.outputFiles.length > 0) || 
+        (categorized.inputOutputFiles && categorized.inputOutputFiles.length > 0) ||
+        (categorized.db2OutputTables && categorized.db2OutputTables.length > 0) ||
+        (categorized.db2IOTables && categorized.db2IOTables.length > 0)) {
+        
+        html += '<div class="flow-level">';
+        html += '<div class="flow-level-title">Output Destinations</div>';
+        html += '<div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-left: 160px;">';
+        
+        // Regular output files
+        if (categorized.outputFiles) {
+            categorized.outputFiles.forEach(file => {
+                html += createFileComponent(file, 'output-file');
+            });
+        }
+        
+        // Input/Output files
+        if (categorized.inputOutputFiles) {
+            categorized.inputOutputFiles.forEach(file => {
+                html += createFileComponent(file, 'input-output-file');
+            });
+        }
+        
+        // DB2 output tables
+        if (categorized.db2OutputTables) {
+            categorized.db2OutputTables.forEach(table => {
+                html += createDB2Component(table, 'db2-output-table');
+            });
+        }
+        
+        // DB2 I/O tables
+        if (categorized.db2IOTables) {
+            categorized.db2IOTables.forEach(table => {
+                html += createDB2Component(table, 'db2-io-table');
+            });
+        }
+        
+        html += '</div></div>';
     }
     
     // Missing Dependencies Level
@@ -2433,6 +2515,192 @@
     
     html += '</div>';
     return html;
+}
+
+function createDB2Component(table, className) {
+    const tableIcon = '🗃️';
+    const operationIcon = getDB2OperationIcon(table.sqlOperation);
+    
+    return `
+        <div class="flow-component ${className}" onclick="showDB2TableDetails('${table.name}', '${table.sourceProgram}')">
+            <div class="component-name">${tableIcon} ${table.name}</div>
+            <div class="component-type-badge">${table.tableType}</div>
+            <div class="component-description">
+                ${operationIcon} ${table.sqlOperation}
+                <br>Source: ${table.sourceProgram}
+                <br>Interface: DB2
+            </div>
+            <div class="confidence-indicator ${getConfidenceClass(table.confidence)}">
+                ${(table.confidence * 100).toFixed(0)}%
+            </div>
+        </div>
+    `;
+}
+
+// Helper function to get DB2 operation icons
+function getDB2OperationIcon(sqlOperation) {
+    if (sqlOperation.includes('SELECT')) return '📥';
+    if (sqlOperation.includes('INSERT')) return '📤';
+    if (sqlOperation.includes('UPDATE')) return '🔄';
+    if (sqlOperation.includes('DELETE')) return '🗑️';
+    return '💾';
+}
+
+// Helper function to create file components (updated to work with existing code)
+function createFileComponent(file, className) {
+    const layoutInfo = file.hasLayoutAssociation && file.associatedLayouts.length > 0 ?
+        `<div style="font-size: 0.7rem; color: #666; margin-top: 0.5rem;">
+            📋 Layouts: ${file.associatedLayouts.slice(0, 2).join(', ')}
+            ${file.associatedLayouts.length > 2 ? ` (+${file.associatedLayouts.length - 2} more)` : ''}
+        </div>` : '';
+        
+    const interfaceIcon = file.interface === 'CICS' ? '🏦' : '📁';
+    const statusClass = file.hasLayoutAssociation ? 'file-with-layout' : 'file-only';
+    
+    return `
+        <div class="flow-component ${className} ${statusClass}" onclick="showFileDetails('${file.name}')">
+            <div class="component-name">${interfaceIcon} ${file.name}</div>
+            <div class="component-type-badge">${file.type}</div>
+            <div class="component-description">
+                Operations: ${file.operations.join(', ') || 'Unknown'}
+                <br>Interface: ${file.interface}
+                ${layoutInfo}
+            </div>
+            <div class="confidence-indicator ${getConfidenceClass(file.confidence)}">
+                ${(file.confidence * 100).toFixed(0)}%
+            </div>
+        </div>
+    `;
+}
+
+// Function to show DB2 table details (modal)
+function showDB2TableDetails(tableName, sourceProgram) {
+    const modalHtml = `
+        <div class="modal" style="display: block; z-index: 10001;">
+            <div class="modal-content" style="width: 70%; max-width: 800px;">
+                <div class="modal-header">
+                    <h3 class="modal-title">🗃️ ${tableName} - DB2 Table Details</h3>
+                    <button class="close" onclick="closeDB2Modal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+                        <div>
+                            <h5>Table Information</h5>
+                            <table style="width: 100%; font-size: 0.9rem;">
+                                <tr><td><strong>Table Name:</strong></td><td>${tableName}</td></tr>
+                                <tr><td><strong>Interface:</strong></td><td>DB2 Database</td></tr>
+                                <tr><td><strong>Source Program:</strong></td><td>${sourceProgram}</td></tr>
+                                <tr><td><strong>Access Type:</strong></td><td>SQL Operations</td></tr>
+                            </table>
+                        </div>
+                        <div>
+                            <h5>SQL Operations</h5>
+                            <div id="db2SqlOperations">Loading SQL operations...</div>
+                        </div>
+                    </div>
+                    <div>
+                        <h5>Field Mappings</h5>
+                        <div id="db2FieldMappings">Loading field mapping information...</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="analyzeDB2Table('${tableName}')">Analyze Table Fields</button>
+                    <button class="btn btn-secondary" onclick="askAboutDB2Table('${tableName}')">Ask AI About This</button>
+                    <button class="btn btn-secondary" onclick="closeDB2Modal()">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    loadDB2TableDetails(tableName, sourceProgram);
+}
+
+// Function to load DB2 table details
+async function loadDB2TableDetails(tableName, sourceProgram) {
+    try {
+        const response = await fetch(`/api/dependencies/${currentSessionId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            const db2Deps = data.dependencies.filter(dep => 
+                dep.target_component === tableName && 
+                (dep.interface_type === 'DB2' || dep.relationship_type.includes('DB2'))
+            );
+            
+            displayDB2Operations(db2Deps);
+        }
+    } catch (error) {
+        console.error('Error loading DB2 table details:', error);
+        document.getElementById('db2SqlOperations').innerHTML = 'Error loading SQL operations';
+        document.getElementById('db2FieldMappings').innerHTML = 'Error loading field mappings';
+    }
+}
+
+function displayDB2Operations(db2Dependencies) {
+    const operationsContainer = document.getElementById('db2SqlOperations');
+    const fieldMappingsContainer = document.getElementById('db2FieldMappings');
+    
+    if (db2Dependencies.length === 0) {
+        operationsContainer.innerHTML = '<p class="text-muted">No SQL operations found</p>';
+        fieldMappingsContainer.innerHTML = '<p class="text-muted">No field mappings available</p>';
+        return;
+    }
+    
+    // Display SQL operations
+    let operationsHtml = '<div style="max-height: 200px; overflow-y: auto;">';
+    db2Dependencies.forEach(dep => {
+        const analysis = dep.analysis_details || {};
+        const sqlOp = analysis.sql_operation || 'Unknown SQL';
+        const icon = getDB2OperationIcon(sqlOp);
+        
+        operationsHtml += `
+            <div style="padding: 0.5rem; margin-bottom: 0.5rem; background: #f8f9fa; border-left: 3px solid #007bff; border-radius: 4px;">
+                <strong>${icon} ${sqlOp}</strong>
+                <br><small>Program: ${dep.source_component}</small>
+                ${analysis.sql_context ? `<br><small>Context: ${analysis.sql_context.substring(0, 100)}...</small>` : ''}
+            </div>
+        `;
+    });
+    operationsHtml += '</div>';
+    operationsContainer.innerHTML = operationsHtml;
+    
+    // Display field mappings info
+    fieldMappingsContainer.innerHTML = `
+        <p>To see detailed field mappings for this DB2 table, use the Field Mapping Analysis tab.</p>
+        <button class="btn btn-primary" onclick="analyzeDB2TableFields('${db2Dependencies[0].target_component}')">
+            Analyze DB2 Field Mappings
+        </button>
+    `;
+}
+
+function closeDB2Modal() {
+    const modals = document.querySelectorAll('.modal');
+    modals.forEach(modal => {
+        if (modal.style.zIndex === '10001') {
+            modal.remove();
+        }
+    });
+}
+
+function analyzeDB2Table(tableName) {
+    closeDB2Modal();
+    showTab('fieldMapping');
+    document.getElementById('targetFileInput').value = tableName;
+}
+
+function askAboutDB2Table(tableName) {
+    closeDB2Modal();
+    const chatInput = document.getElementById('chatInput');
+    chatInput.value = `Tell me about the ${tableName} DB2 table. What data does it contain, which programs access it, and what SQL operations are performed on it?`;
+    chatInput.focus();
+}
+
+function analyzeDB2TableFields(tableName) {
+    closeDB2Modal();
+    showTab('fieldMapping');
+    document.getElementById('targetFileInput').value = tableName;
+    analyzeFieldMapping();
 }
 
     async function getAllUploadedPrograms() {
@@ -2788,6 +3056,13 @@ function displayFieldMatrix(matrixData) {
                             <span class="badge ${getBadgeClass(normalizedUsageType)}">${normalizedUsageType}</span>
                             <br><small style="font-size: 0.75rem;">${mapping.business_logic_description || ''}</small>
                         </div>
+                              ${mapping.sql_operations && mapping.sql_operations.length > 0 ? 
+                            `<br><div class="db2-operations">
+                                <strong>DB2:</strong> 
+                                ${mapping.sql_operations.map(op => 
+                                    `<span class="sql-operation">${op.sql_operation}</span>`
+                                ).join(' ')}
+                            </div>` : ''}
                     </td>
                     <td>
                         <div style="min-width: 100px;">
@@ -3946,82 +4221,136 @@ function createFileLayerWithLayouts(title, items, className) {
         }
 
         function categorizeDependenciesWithLayouts(dependencies, focusComponent = null) {
-            const categorized = {
-                inputFiles: [],
-                outputFiles: [],
-                inputOutputFiles: [],
-                corePrograms: [],
-                calledPrograms: [],
-                missingPrograms: []
+    const categorized = {
+        inputFiles: [],
+        outputFiles: [],
+        inputOutputFiles: [],
+        db2InputTables: [],      // NEW: DB2 input tables
+        db2OutputTables: [],     // NEW: DB2 output tables
+        db2IOTables: [],         // NEW: DB2 input/output tables
+        corePrograms: [],
+        calledPrograms: [],
+        missingPrograms: []
+    };
+    
+    dependencies.forEach(dep => {
+        const source = dep.source_component;
+        const target = dep.target_component;
+        const type = dep.relationship_type;
+        const analysis = dep.analysis_details || {};
+        const interfaceType = dep.interface_type;
+        
+        if (type === 'PROGRAM_CALL' || type === 'DYNAMIC_PROGRAM_CALL') {
+            const callType = analysis.call_type || 'CALL';
+            const isTarget = target === focusComponent;
+            
+            if (focusComponent && isTarget) {
+                categorized.corePrograms.push({
+                    name: source,
+                    type: 'Calling Program',
+                    confidence: dep.confidence_score || 0.8,
+                    callDirection: 'incoming',
+                    callType: callType
+                });
+            } else {
+                categorized.calledPrograms.push({
+                    name: target,
+                    type: 'Called Program',
+                    confidence: dep.confidence_score || 0.8,
+                    callDirection: getArrowDirection(callType),
+                    callType: callType,
+                    status: dep.dependency_status || 'unknown'
+                });
+            }
+        }
+        // Handle DB2 table operations
+        else if (interfaceType === 'DB2' || type.includes('DB2')) {
+            const sqlOperation = analysis.sql_operation || 'UNKNOWN';
+            const ioDirection = analysis.io_direction || 'UNKNOWN';
+            
+            const db2Info = {
+                name: target,
+                type: 'DB2 Table',
+                confidence: dep.confidence_score || 0.95,
+                sqlOperation: sqlOperation,
+                ioDirection: ioDirection,
+                interface: 'DB2',
+                operations: analysis.operations || [sqlOperation],
+                sourceProgram: source,
+                tableType: getDB2TableType(sqlOperation)
             };
             
-            dependencies.forEach(dep => {
-                const source = dep.source_component;
-                const target = dep.target_component;
-                const type = dep.relationship_type;
-                const analysis = dep.analysis_details || {};
-                
-                if (type === 'PROGRAM_CALL' || type === 'DYNAMIC_PROGRAM_CALL') {
-                    const callType = analysis.call_type || 'CALL';
-                    const isTarget = target === focusComponent;
-                    
-                    if (focusComponent && isTarget) {
-                        categorized.corePrograms.push({
-                            name: source,
-                            type: 'Calling Program',
-                            confidence: dep.confidence_score || 0.8,
-                            callDirection: 'incoming',
-                            callType: callType
-                        });
-                    } else {
-                        categorized.calledPrograms.push({
-                            name: target,
-                            type: 'Called Program',
-                            confidence: dep.confidence_score || 0.8,
-                            callDirection: getArrowDirection(callType),
-                            callType: callType,
-                            status: dep.dependency_status || 'unknown'
-                        });
-                    }
+            // Categorize by SQL operation type
+            if (type === 'DB2_INPUT_TABLE' || sqlOperation.includes('SELECT') || sqlOperation.includes('FETCH')) {
+                categorized.db2InputTables.push(db2Info);
+            } else if (type === 'DB2_OUTPUT_TABLE' || sqlOperation.includes('INSERT') || sqlOperation.includes('UPDATE') || sqlOperation.includes('DELETE')) {
+                categorized.db2OutputTables.push(db2Info);
+            } else if (ioDirection === 'INPUT_OUTPUT') {
+                categorized.db2IOTables.push(db2Info);
+            } else {
+                // Default categorization based on SQL keywords
+                if (sqlOperation.includes('SELECT')) {
+                    categorized.db2InputTables.push(db2Info);
+                } else if (sqlOperation.includes('INSERT') || sqlOperation.includes('UPDATE') || sqlOperation.includes('DELETE')) {
+                    categorized.db2OutputTables.push(db2Info);
+                } else {
+                    categorized.db2IOTables.push(db2Info);
                 }
-                else if (type.includes('FILE')) {
-                    const ioDirection = analysis.io_direction || 'UNKNOWN';
-                    const associatedLayouts = analysis.associated_layouts || [];
-                    const hasLayout = analysis.has_layout_association || false;
-                    
-                    const fileInfo = {
-                        name: target,
-                        type: getFileTypeLabel(type),
-                        confidence: dep.confidence_score || 0.8,
-                        ioDirection: ioDirection,
-                        associatedLayouts: associatedLayouts,
-                        hasLayoutAssociation: hasLayout,
-                        interface: dep.interface_type || 'FILE',
-                        operations: analysis.operations || []
-                    };
-                    
-                    if (ioDirection === 'INPUT') {
-                        categorized.inputFiles.push(fileInfo);
-                    } else if (ioDirection === 'OUTPUT') {
-                        categorized.outputFiles.push(fileInfo);
-                    } else if (ioDirection === 'INPUT_OUTPUT') {
-                        categorized.inputOutputFiles.push(fileInfo);
-                    }
-                }
-                
-                if (dep.dependency_status === 'missing') {
-                    categorized.missingPrograms.push({
-                        name: target,
-                        type: 'Missing Program',
-                        confidence: dep.confidence_score || 0.3,
-                        reason: 'Program not uploaded',
-                        calledFrom: source
-                    });
-                }
-            });
-            
-            return categorized;
+            }
         }
+        // Handle regular file operations
+        else if (type.includes('FILE')) {
+            const ioDirection = analysis.io_direction || 'UNKNOWN';
+            const associatedLayouts = analysis.associated_layouts || [];
+            const hasLayout = analysis.has_layout_association || false;
+            
+            const fileInfo = {
+                name: target,
+                type: getFileTypeLabel(type),
+                confidence: dep.confidence_score || 0.8,
+                ioDirection: ioDirection,
+                associatedLayouts: associatedLayouts,
+                hasLayoutAssociation: hasLayout,
+                interface: dep.interface_type || 'FILE',
+                operations: analysis.operations || []
+            };
+            
+            if (ioDirection === 'INPUT') {
+                categorized.inputFiles.push(fileInfo);
+            } else if (ioDirection === 'OUTPUT') {
+                categorized.outputFiles.push(fileInfo);
+            } else if (ioDirection === 'INPUT_OUTPUT') {
+                categorized.inputOutputFiles.push(fileInfo);
+            }
+        }
+        
+        if (dep.dependency_status === 'missing') {
+            categorized.missingPrograms.push({
+                name: target,
+                type: 'Missing Program',
+                confidence: dep.confidence_score || 0.3,
+                reason: 'Program not uploaded',
+                calledFrom: source
+            });
+        }
+    });
+    
+    return categorized;
+}
+
+// Helper function to determine DB2 table type based on SQL operation
+function getDB2TableType(sqlOperation) {
+    if (sqlOperation.includes('SELECT') || sqlOperation.includes('FETCH')) {
+        return 'Source Table';
+    } else if (sqlOperation.includes('INSERT')) {
+        return 'Target Table';
+    } else if (sqlOperation.includes('UPDATE')) {
+        return 'Update Target';
+    } else if (sqlOperation.includes('DELETE')) {
+        return 'Delete Target';
+    }
+    return 'Data Table';
+}
 
         function getArrowDirection(callType) {
             const directionMap = {
@@ -4342,6 +4671,15 @@ function viewLayoutFields(layoutName) {
             
             if (categorizedDeps.file_operations && categorizedDeps.file_operations.length > 0) {
                 html += createDependencySection('📁 File Operations', categorizedDeps.file_operations, 'file');
+            }
+
+            // Add DB2 section to enhanced view
+            if (categorizedDeps.db2_input_tables && categorizedDeps.db2_input_tables.length > 0) {
+                html += createDependencySection('🗃️ DB2 Input Tables', categorizedDeps.db2_input_tables, 'db2_input');
+            }
+
+            if (categorizedDeps.db2_output_tables && categorizedDeps.db2_output_tables.length > 0) {
+                html += createDependencySection('🗃️ DB2 Output Tables', categorizedDeps.db2_output_tables, 'db2_output');
             }
             
             container.innerHTML = html;
