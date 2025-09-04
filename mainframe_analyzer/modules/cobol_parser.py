@@ -255,33 +255,89 @@ class COBOLParser:
 
     def extract_program_calls(self, content: str, filename: str) -> List[Dict]:
         """
-        Enhanced program call extraction including dynamic calls
+        Enhanced program call extraction including CICS LINK/XCTL calls
+        FIXED: Now properly calls CICS program parsing methods
         """
         program_calls = []
+        lines = content.split('\n')
         
-        # Extract static calls (existing logic)
-        static_calls = self._extract_static_program_calls(content, filename)
-        program_calls.extend(static_calls)
+        logger.info(f"Starting program call extraction from {filename}")
         
-        # Extract dynamic calls (new logic)
-        dynamic_calls = self.extract_dynamic_program_calls(content, filename)
+        try:
+            # Extract static calls (existing logic)
+            static_calls = self._extract_static_program_calls(content, filename)
+            program_calls.extend(static_calls)
+            logger.info(f"Found {len(static_calls)} static program calls")
+            
+            # FIXED: Extract CICS program calls (LINK/XCTL) - this was missing!
+            cics_program_calls = self._extract_cics_program_calls(lines)
+            program_calls.extend(cics_program_calls)
+            logger.info(f"Found {len(cics_program_calls)} CICS program calls")
+            
+            # Extract dynamic calls (with improved error handling)
+            try:
+                dynamic_calls = self.extract_dynamic_program_calls(content, filename)
+                
+                # Convert dynamic calls to program call format
+                for dynamic_call in dynamic_calls:
+                    for resolved_program in dynamic_call['resolved_programs']:
+                        program_calls.append({
+                            'operation': dynamic_call['operation'],
+                            'program_name': resolved_program['program_name'],
+                            'line_number': dynamic_call['line_number'],
+                            'call_type': 'dynamic',
+                            'variable_name': dynamic_call['variable_name'],
+                            'resolution_method': resolved_program['resolution'],
+                            'confidence_score': resolved_program['confidence'],
+                            'source_info': resolved_program.get('source', ''),
+                            'business_context': f"Dynamic call via {dynamic_call['variable_name']} variable"
+                        })
+                
+                logger.info(f"Found {len(dynamic_calls)} dynamic program calls")
+                
+            except Exception as e:
+                logger.error(f"Dynamic program call extraction failed: {str(e)}")
+                # Continue without dynamic calls
         
-        # Convert dynamic calls to program call format
-        for dynamic_call in dynamic_calls:
-            for resolved_program in dynamic_call['resolved_programs']:
-                program_calls.append({
-                    'operation': dynamic_call['operation'],
-                    'program_name': resolved_program['program_name'],
-                    'line_number': dynamic_call['line_number'],
-                    'call_type': 'dynamic',
-                    'variable_name': dynamic_call['variable_name'],
-                    'resolution_method': resolved_program['resolution'],
-                    'confidence_score': resolved_program['confidence'],
-                    'source_info': resolved_program.get('source', ''),
-                    'business_context': f"Dynamic call via {dynamic_call['variable_name']} variable"
-                })
+        except Exception as e:
+            logger.error(f"Program call extraction failed: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
         
+        logger.info(f"Total program calls extracted: {len(program_calls)}")
         return program_calls
+
+    def _extract_cics_program_calls(self, lines: List[str]) -> List[Dict]:
+        """
+        Extract CICS LINK and XCTL program calls
+        FIXED: More comprehensive CICS program call detection
+        """
+        cics_calls = []
+        
+        for i, line in enumerate(lines):
+            program_area = self.extract_program_area_only(line)
+            if not program_area:
+                continue
+            
+            line_upper = program_area.upper()
+            
+            # Multi-line CICS command handling
+            if 'EXEC CICS' in line_upper and ('LINK' in line_upper or 'XCTL' in line_upper):
+                logger.debug(f"Found potential CICS program call at line {i+1}: {program_area[:80]}...")
+                
+                # Extract complete CICS command across multiple lines
+                cics_command = self._extract_complete_cics_command(lines, i)
+                
+                if cics_command:
+                    logger.debug(f"Complete CICS command: {cics_command[:150]}...")
+                    
+                    # Parse the complete command for program calls
+                    parsed_calls = self._parse_cics_program_calls(cics_command, i + 1)
+                    
+                    if parsed_calls:
+                        cics_calls.extend(parsed_calls)
+                        logger.debug(f"Extracted {len(parsed_calls)} program calls from CICS command")
+        
+        return cics_calls
     
     def _extract_static_program_calls(self, content: str, filename: str) -> List[Dict]:
         """Extract static/literal program calls (existing functionality)"""
@@ -325,6 +381,8 @@ class COBOLParser:
         operations = []
         cics_upper = cics_command.upper()
         
+        logger.debug(f"Parsing CICS command for program calls: {cics_command[:100]}...")
+        
         # Enhanced patterns for CICS program calls (LINK/XCTL)
         cics_program_patterns = [
             # LINK patterns with various formats
@@ -337,11 +395,21 @@ class COBOLParser:
             
             # START patterns for started transactions
             (r'EXEC\s+CICS\s+START\s+.*?TRANSID\s*\(\s*[\'"]?\s*([A-Z0-9\-]{3,})\s*[\'"]?\s*\)', 'CICS_START'),
+            
+            # Handle spacing variations - PROGRAM ( 'TMST9P4' )
+            (r'EXEC\s+CICS\s+LINK\s+.*?PROGRAM\s*\(\s*[\'"]?\s*([A-Z0-9\-]{3,})\s*[\'"]?\s*\)', 'CICS_LINK'),
+            (r'EXEC\s+CICS\s+XCTL\s+.*?PROGRAM\s*\(\s*[\'"]?\s*([A-Z0-9\-]{3,})\s*[\'"]?\s*\)', 'CICS_XCTL'),
+            
+            # Dynamic program calls with variables
+            (r'EXEC\s+CICS\s+LINK\s+.*?PROGRAM\s*\(\s*([A-Z0-9\-]{3,})\s*\)', 'CICS_LINK_DYNAMIC'),
+            (r'EXEC\s+CICS\s+XCTL\s+.*?PROGRAM\s*\(\s*([A-Z0-9\-]{3,})\s*\)', 'CICS_XCTL_DYNAMIC'),
         ]
         
         for pattern, operation in cics_program_patterns:
             matches = re.findall(pattern, cics_upper, re.DOTALL)
             for program_name in matches:
+                program_name = program_name.strip()
+                
                 if self._is_valid_cobol_filename(program_name):
                     operations.append({
                         'operation': operation,
@@ -349,8 +417,11 @@ class COBOLParser:
                         'call_type': 'CICS',
                         'line_number': line_number,
                         'line_content': cics_command[:100],
-                        'relationship_type': operation
+                        'relationship_type': operation,
+                        'confidence_score': 0.95,
+                        'business_context': f"CICS {operation.split('_')[1]} call to {program_name}"
                     })
+                    logger.debug(f"Found CICS program call: {operation} -> {program_name}")
         
         return operations
     
@@ -812,7 +883,7 @@ class COBOLParser:
             'components': self.extract_components(raw_lines),
             'record_layouts': self.extract_record_layouts(raw_lines),
             'file_operations': self.extract_file_operations(raw_lines),
-            'program_calls': self.extract_program_calls(raw_lines, filename),
+            'program_calls': self.extract_program_calls(content, filename),
             'copybooks': self.extract_copybooks(raw_lines),
             'cics_operations': self.extract_cics_operations(raw_lines),
             'mq_operations': self.extract_mq_operations(raw_lines),
@@ -1599,7 +1670,12 @@ Rules:
     def _analyze_dynamic_cics_call(self, line: str, line_number: int, variable_map: Dict) -> Optional[Dict]:
         """
         Analyze a line for dynamic CICS XCTL/LINK calls
+        FIXED: Better error handling and validation
         """
+        if not variable_map:
+            logger.debug("No variable map available for dynamic call analysis")
+            return None
+        
         # Patterns for dynamic CICS calls
         patterns = [
             r'EXEC\s+CICS\s+(XCTL|LINK)\s+PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)',
@@ -1613,18 +1689,30 @@ Rules:
                 operation = match.group(1)
                 variable_name = match.group(2)
                 
-                # Resolve variable to possible program names
-                resolved_programs = self._resolve_variable_to_programs(variable_name, variable_map)
+                logger.debug(f"Found dynamic CICS call: {operation} PROGRAM({variable_name})")
                 
-                return {
-                    'operation': f'CICS_{operation}',
-                    'variable_name': variable_name,
-                    'resolved_programs': resolved_programs,
-                    'line_number': line_number,
-                    'line_content': line.strip(),
-                    'call_type': 'dynamic',
-                    'resolution_confidence': self._calculate_resolution_confidence(variable_name, variable_map, resolved_programs)
-                }
+                # Resolve variable to possible program names
+                try:
+                    resolved_programs = self._resolve_variable_to_programs(variable_name, variable_map)
+                    
+                    if resolved_programs:
+                        return {
+                            'operation': f'CICS_{operation}',
+                            'variable_name': variable_name,
+                            'resolved_programs': resolved_programs,
+                            'line_number': line_number,
+                            'line_content': line.strip(),
+                            'call_type': 'dynamic',
+                            'resolution_confidence': self._calculate_resolution_confidence(
+                                variable_name, variable_map, resolved_programs
+                            )
+                        }
+                    else:
+                        logger.debug(f"Could not resolve variable {variable_name}")
+                        
+                except Exception as e:
+                    logger.error(f"Error resolving dynamic call variable {variable_name}: {str(e)}")
+                    return None
         
         return None
 
