@@ -2125,6 +2125,13 @@ File Content ({filename}):
                 )
                 dependencies.extend(enhanced_cics_deps)
             
+            db2_operations = main_program.get('db2_operations', [])
+            if db2_operations:
+                db2_deps = self._extract_db2_table_dependencies(
+                    session_id, db2_operations, program_name
+                )
+                dependencies.extend(db2_deps)
+
             # Store enhanced dependencies
             if dependencies:
                 self.db_manager._store_enhanced_dependencies_with_status(session_id, dependencies)
@@ -2173,6 +2180,85 @@ File Content ({filename}):
 
 # Update the main _extract_cobol_components method to use enhanced CICS extraction
     # Replace the existing CICS operations line with:
+
+    def _extract_db2_table_dependencies(self, session_id: str, db2_operations: List[Dict], program_name: str) -> List[Dict]:
+        """Extract DB2 table dependencies from SQL operations"""
+        dependencies = []
+        processed_tables = set()
+        
+        for db2_op in db2_operations:
+            sql_statement = db2_op.get('sql', '')
+            line_number = db2_op.get('line_number', 0)
+            
+            # Extract table names from SQL
+            table_names = self._extract_table_names_from_sql(sql_statement)
+            
+            for table_name, operation_type in table_names:
+                if table_name and table_name not in processed_tables:
+                    processed_tables.add(table_name)
+                    
+                    # Determine I/O direction
+                    if operation_type in ['SELECT', 'FETCH']:
+                        relationship_type = 'DB2_INPUT_TABLE'
+                        io_direction = 'INPUT'
+                    elif operation_type in ['INSERT', 'UPDATE', 'DELETE']:
+                        relationship_type = 'DB2_OUTPUT_TABLE'
+                        io_direction = 'OUTPUT'
+                    else:
+                        relationship_type = 'DB2_TABLE'
+                        io_direction = 'UNKNOWN'
+                    
+                    dependency = {
+                        'source_component': program_name,
+                        'target_component': table_name,
+                        'relationship_type': relationship_type,
+                        'interface_type': 'DB2',
+                        'confidence_score': 0.95,
+                        'dependency_status': 'db2_table',
+                        'analysis_details_json': json.dumps({
+                            'sql_operation': operation_type,
+                            'io_direction': io_direction,
+                            'line_number': line_number,
+                            'sql_snippet': sql_statement[:100],
+                            'table_type': 'DB2_TABLE'
+                        }),
+                        'source_code_evidence': f"Line {line_number}: {operation_type} on {table_name}"
+                    }
+                    
+                    dependencies.append(dependency)
+        
+        return dependencies
+
+    def _extract_table_names_from_sql(self, sql_statement: str) -> List[Tuple[str, str]]:
+        """Extract table names and operation types from SQL statements"""
+        tables = []
+        sql_upper = sql_statement.upper()
+        
+        # SELECT operations
+        select_pattern = r'SELECT\s+.*?\s+FROM\s+([A-Z][A-Z0-9_\.]{2,})'
+        for match in re.finditer(select_pattern, sql_upper):
+            table_name = match.group(1).split('.')[0]  # Remove schema if present
+            tables.append((table_name, 'SELECT'))
+        
+        # INSERT operations
+        insert_pattern = r'INSERT\s+INTO\s+([A-Z][A-Z0-9_\.]{2,})'
+        for match in re.finditer(insert_pattern, sql_upper):
+            table_name = match.group(1).split('.')[0]
+            tables.append((table_name, 'INSERT'))
+        
+        # UPDATE operations
+        update_pattern = r'UPDATE\s+([A-Z][A-Z0-9_\.]{2,})\s+SET'
+        for match in re.finditer(update_pattern, sql_upper):
+            table_name = match.group(1).split('.')[0]
+            tables.append((table_name, 'UPDATE'))
+        
+        # DELETE operations
+        delete_pattern = r'DELETE\s+FROM\s+([A-Z][A-Z0-9_\.]{2,})'
+        for match in re.finditer(delete_pattern, sql_upper):
+            table_name = match.group(1).split('.')[0]
+            tables.append((table_name, 'DELETE'))
+        
+        return tables
 
     def _update_cobol_extraction_for_enhanced_cics(self, parsed_data: Dict, content: str, filename: str):
         """Update the parsed COBOL data with enhanced CICS operations"""

@@ -896,7 +896,9 @@ def analyze_field_mapping():
                 'move_operations': {
                     'source_count': move_source_count,
                     'target_count': move_target_count
-                }
+                },
+                'db2_table_mapping': self._get_db2_table_mapping(session_id, field_name),
+                'sql_operations': self._get_field_sql_operations(session_id, field_name)
             }
             
             field_mappings.append(field_mapping)
@@ -925,6 +927,33 @@ def analyze_field_mapping():
             'success': False,
             'error': str(e)
         })
+    
+def _get_db2_table_mapping(self, session_id: str, field_name: str) -> Dict:
+        """Get DB2 table mapping for a field"""
+        # Check if field appears in SQL operations
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT ca.component_name, ca.analysis_result_json
+                FROM component_analysis ca
+                WHERE ca.session_id = ? AND ca.analysis_result_json LIKE ?
+            ''', (session_id, f'%{field_name}%'))
+            
+            results = cursor.fetchall()
+            
+            for row in results:
+                analysis = json.loads(row[1])
+                db2_ops = analysis.get('db2_operations', [])
+                
+                for op in db2_ops:
+                    if field_name.upper() in op.get('sql', '').upper():
+                        return {
+                            'mapped_to_db2': True,
+                            'table_operations': self._extract_table_names_from_sql(op['sql']),
+                            'sql_context': op['sql'][:200]
+                        }
+        
+        return {'mapped_to_db2': False}
 
 @app.route('/api/field-matrix', methods=['GET'])
 def get_field_matrix():
@@ -1136,6 +1165,8 @@ def get_dependencies_enhanced_complete(session_id):
             'input_output_files': [],
             'cics_files_with_layouts': [],
             'cics_files_only': [],
+            'db2_input_tables': [],    # NEW
+            'db2_output_tables': [],   # NEW
             'program_calls': [],
             'missing_programs': []
         }
@@ -1202,6 +1233,22 @@ def get_dependencies_enhanced_complete(session_id):
                     categorized_dependencies['missing_programs'].append(call_info)
                 else:
                     categorized_dependencies['program_calls'].append(call_info)
+            
+            if interface_type == 'DB2' and 'TABLE' in rel_type:
+                table_info = {
+                'table_name': dep['target_component'],
+                'source_program': dep['source_component'],
+                'sql_operation': analysis.get('sql_operation', 'UNKNOWN'),
+                'io_direction': analysis.get('io_direction', 'UNKNOWN'),
+                'interface': 'DB2',
+                'relationship_type': rel_type,
+                'confidence': dep.get('confidence_score', 0.95)
+            }
+            
+            if rel_type == 'DB2_INPUT_TABLE':
+                categorized_dependencies['db2_input_tables'].append(table_info)
+            elif rel_type == 'DB2_OUTPUT_TABLE':
+                categorized_dependencies['db2_output_tables'].append(table_info)
         
         logger.info(f"Enhanced categorization complete: "
                    f"{len(categorized_dependencies['cics_files_with_layouts'])} CICS files with layouts, "

@@ -1534,7 +1534,7 @@ Rules:
             
             if 'EXEC CICS' in line_upper and ('XCTL' in line_upper or 'LINK' in line_upper):
                 # Extract complete multi-line CICS command
-                complete_cics_command, end_line = self._extract_complete_cics_command_enhanced(lines, i)
+                complete_cics_command = self._extract_complete_cics_command(lines, i)  # Only returns command
                 
                 if complete_cics_command:
                     logger.debug(f"Complete CICS command: {complete_cics_command}")
@@ -1542,7 +1542,8 @@ Rules:
                     if dynamic_call:
                         dynamic_calls.append(dynamic_call)
                 
-                i = end_line + 1
+                # Skip ahead by a reasonable amount since we don't know exact end line
+                i += 5  
             else:
                 i += 1
         
