@@ -1304,8 +1304,9 @@ def get_dependency_details(session_id, source, target):
                         if target.upper() in line.upper():
                             start_idx = max(0, i-2)
                             end_idx = min(len(source_content.split('\n')), i+3)
+                            s_cont = source_content.split('\n')[j]
                             context_lines.extend([
-                                f"{j+1}: {source_content.split('\n')[j]}" 
+                                f"{j+1}: {s_cont}" 
                                 for j in range(start_idx, end_idx)
                             ])
                             break
