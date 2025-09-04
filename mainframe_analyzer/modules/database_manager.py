@@ -2124,12 +2124,32 @@ class DatabaseManager:
                 
                 if picture:
                     # Use parser's calculation method
-                    mainframe_length, oracle_length, oracle_type = self._calculate_field_lengths_from_pic(
-                        picture, usage
+                    mainframe_length, oracle_length, oracle_type, mainframe_data_type = self._calculate_field_lengths_from_pic(
+                    picture, usage
                     )
                     field_data['mainframe_length'] = mainframe_length
                     field_data['oracle_length'] = oracle_length
                     field_data['oracle_data_type'] = oracle_type
+                    field_data['mainframe_data_type'] = mainframe_data_type
+
+            if not field_data.get('mainframe_data_type') or field_data.get('mainframe_data_type') == 'UNKNOWN':
+                level = field_data.get('level', 5)
+                picture = field_data.get('picture', '')
+                usage = field_data.get('usage', '')
+                value = field_data.get('value', '')
+                
+                mainframe_parts = [f"{level:02d} {field_name}"]
+                if picture:
+                    mainframe_parts.append(f"PIC {picture}")
+                if usage and usage.upper() != 'DISPLAY':
+                    mainframe_parts.append(f"USAGE {usage}")
+                if value:
+                    if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
+                        mainframe_parts.append(f"VALUE {value}")
+                    else:
+                        mainframe_parts.append(f"VALUE '{value}'")
+                
+                field_data['mainframe_data_type'] = " ".join(mainframe_parts)
             
             # Call the existing store method
             self.store_field_details(session_id, field_data, program_name, layout_id)
@@ -2138,15 +2158,17 @@ class DatabaseManager:
             logger.error(f"Error storing field details with lengths for {field_name}: {str(e)}")
             raise
 
-    def _calculate_field_lengths_from_pic(self, picture: str, usage: str = "") -> Tuple[int, int, str]:
-        """Database version of field length calculation"""
+    
+    def _calculate_field_lengths_from_pic(self, picture: str, usage: str = "") -> Tuple[int, int, str, str]:
+        """Database version of field length calculation - returns mainframe_length, oracle_length, oracle_type, mainframe_type"""
         if not picture or picture.strip() == '':
-            return 1, 50, "VARCHAR2(50)"
+            return 1, 50, "VARCHAR2(50)", "UNKNOWN"
         
         pic_upper = picture.upper().strip()
         mainframe_length = 1
         oracle_length = 50
         oracle_type = "VARCHAR2(50)"
+        mainframe_data_type = "UNKNOWN"
         
         try:
             # Numeric fields
@@ -2176,6 +2198,11 @@ class DatabaseManager:
                         decimal_digits += decimal_explicit
                 
                 total_digits = max(total_digits, 1)
+                
+                # Build mainframe data type for numeric fields
+                mainframe_data_type = f"PIC {picture}"
+                if usage and usage.upper() != 'DISPLAY':
+                    mainframe_data_type += f" USAGE {usage}"
                 
                 # Calculate storage
                 if usage.upper() in ['COMP-3', 'PACKED-DECIMAL']:
@@ -2211,6 +2238,22 @@ class DatabaseManager:
                     oracle_type = f"VARCHAR2({oracle_length})"
                 else:
                     oracle_type = "CLOB"
+                
+                # Build mainframe data type for alphanumeric fields
+                mainframe_data_type = f"PIC {picture}"
+                if usage and usage.upper() != 'DISPLAY':
+                    mainframe_data_type += f" USAGE {usage}"
+            
+            # Handle other PIC types (like edited fields)
+            else:
+                # Default handling for other picture types
+                mainframe_length = len(picture.replace('(', '').replace(')', '').replace(',', '').replace('.', ''))
+                mainframe_length = max(mainframe_length, 1)
+                oracle_length = max(mainframe_length, 50)
+                oracle_type = f"VARCHAR2({oracle_length})"
+                mainframe_data_type = f"PIC {picture}"
+                if usage and usage.upper() != 'DISPLAY':
+                    mainframe_data_type += f" USAGE {usage}"
             
             mainframe_length = max(mainframe_length, 1)
             oracle_length = max(oracle_length, mainframe_length)
@@ -2220,8 +2263,9 @@ class DatabaseManager:
             mainframe_length = 1
             oracle_length = 50
             oracle_type = "VARCHAR2(50)"
+            mainframe_data_type = f"PIC {picture}" if picture else "UNKNOWN"
         
-        return mainframe_length, oracle_length, oracle_type
+        return mainframe_length, oracle_length, oracle_type, mainframe_data_type
 
     def _store_enhanced_dependencies_with_status(self, session_id: str, dependencies: List[Dict]):
         """Store dependencies with enhanced status tracking"""
