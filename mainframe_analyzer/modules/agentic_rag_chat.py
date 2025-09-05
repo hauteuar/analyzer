@@ -1470,27 +1470,32 @@ class AgenticRAGChatManager:
         logger.info(f"Agentic RAG Chat Manager initialized with vector search: {VECTOR_SEARCH_AVAILABLE}")
     
     def initialize_session(self, session_id: str):
-        """Initialize the RAG system for a new session"""
+        """Enhanced session initialization with field analysis"""
         try:
-            logger.info(f"Initializing Agentic RAG for session {session_id}")
+            logger.info(f"Initializing super enhanced RAG session for {session_id}")
             
-            # Build vector index if enabled
+            # Build vector index
             if self.vector_store:
                 self.vector_store.build_index(session_id)
             
-            # Pre-warm caches and analyze session content
+            # Initialize enhanced field analysis
+            self.initialize_enhanced_field_analysis()
+            
+            # Initialize program flow analysis
+            self.initialize_program_flow_analysis()
+            
+            # Pre-warm caches
             self._analyze_session_content(session_id)
             
-            # Initialize query pattern tracking
             if session_id not in self._query_patterns:
                 self._query_patterns[session_id] = []
             
             self._initialized_sessions.add(session_id)
-            logger.info("Agentic RAG system initialized successfully")
+            logger.info("Super enhanced RAG system with field and program flow analysis initialized successfully")
             
         except Exception as e:
-            logger.error(f"Error initializing RAG system: {str(e)}")
-    
+            logger.error(f"Error initializing super enhanced RAG session: {str(e)}")
+
     def process_query_with_full_features(self, session_id: str, message: str, conversation_id: str) -> Dict:
         """Main entry point for enhanced RAG processing with full feature set"""
         start_time = time.time()
@@ -1521,7 +1526,7 @@ class AgenticRAGChatManager:
             logger.info(f"Retrieved {len(retrieved_contexts)} contexts using strategies: {[ctx.retrieval_method for ctx in retrieved_contexts]}")
             
             # Step 4: Route to specialized handler if needed
-            routed_response = self._route_specialized_query(session_id, message, query_plan, retrieved_contexts)
+            routed_response = self._enhanced_route_specialized_query(session_id, message, query_plan, retrieved_contexts)
             if routed_response:
                 return self._format_rag_response(
                     routed_response, 
@@ -2939,7 +2944,650 @@ class AgenticRAGChatManager:
             self._response_cache.clear()
             logger.info("Cleared all caches")
 
+    
+    def initialize_enhanced_field_analysis(self):
+        """Initialize enhanced field analysis components"""
+        try:
+            # Import enhanced components
+            from modules.enhanced_field_analyzer import EnhancedFieldAnalyzer
+            from modules.enhanced_field_query_analyzer import EnhancedFieldQueryAnalyzer
+            
+            self.enhanced_field_analyzer = EnhancedFieldAnalyzer(
+                self.db_manager, 
+                self.vector_store
+            )
+            self.enhanced_field_query_analyzer = EnhancedFieldQueryAnalyzer()
+            
+            logger.info("Enhanced field analysis components initialized successfully")
+            return True
+            
+        except ImportError as e:
+            logger.warning(f"Enhanced field analysis not available: {e}")
+            self.enhanced_field_analyzer = None
+            self.enhanced_field_query_analyzer = None
+            return False
+        except Exception as e:
+            logger.error(f"Error initializing enhanced field analysis: {e}")
+            self.enhanced_field_analyzer = None
+            self.enhanced_field_query_analyzer = None
+            return False
+
+    def _enhanced_query_analysis(self, message: str, query_plan) -> Dict:
+        """Enhanced query analysis that detects complex field queries"""
+        if not self.enhanced_field_query_analyzer:
+            return {'enhanced_analysis': False}
+        
+        try:
+            # Check if this is a complex field query
+            field_analysis = self.enhanced_field_query_analyzer.analyze_field_query(
+                message, query_plan.entities
+            )
+            
+            if field_analysis.get('is_complex_field_query'):
+                logger.info(f"Detected complex field query: {field_analysis['analysis_types']}")
+                return {
+                    'enhanced_analysis': True,
+                    'requires_field_analysis': True,
+                    'field_analysis_config': field_analysis,
+                    'specialized_routing': 'enhanced_field_handler'
+                }
+            
+            return {'enhanced_analysis': False}
+            
+        except Exception as e:
+            logger.error(f"Error in enhanced query analysis: {str(e)}")
+            return {'enhanced_analysis': False}
+
+    def _handle_enhanced_field_query(self, session_id: str, message: str, 
+                                query_plan, contexts: List) -> Optional[str]:
+        """Handle complex field analysis queries"""
+        if not self.enhanced_field_analyzer or not query_plan.entities:
+            return None
+        
+        try:
+            primary_field = query_plan.entities[0]
+            logger.info(f"Processing enhanced field analysis for: {primary_field}")
+            
+            # Perform comprehensive field analysis
+            field_analysis = self.enhanced_field_analyzer.analyze_field_comprehensive(
+                session_id, primary_field, message
+            )
+            
+            if 'error' in field_analysis:
+                return f"I encountered an error analyzing field {primary_field}: {field_analysis['error']}"
+            
+            # Check if we found meaningful analysis
+            if not (field_analysis.get('conditional_assignments') or 
+                    field_analysis.get('group_analysis') or 
+                    field_analysis.get('control_flow_patterns')):
+                return None  # Fall back to regular processing
+            
+            # Generate enhanced prompt
+            enhanced_prompt = self.enhanced_field_query_analyzer.generate_field_analysis_prompt(
+                field_analysis, message
+            )
+            
+            # Call LLM with enhanced context
+            response = self.llm_client.call_llm(
+                enhanced_prompt, 
+                max_tokens=2500, 
+                temperature=0.15  # Lower temperature for more factual analysis
+            )
+            
+            if response.success:
+                # Post-process response
+                return self._post_process_enhanced_field_response(
+                    response.content, field_analysis, primary_field, message
+                )
+            else:
+                logger.error(f"LLM call failed for enhanced field analysis: {response.error_message}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in enhanced field query handling: {str(e)}")
+            return None
+
+    def _post_process_enhanced_field_response(self, llm_response: str, field_analysis: Dict, 
+                                            field_name: str, original_query: str) -> str:
+        """Post-process enhanced field response with additional insights"""
+        try:
+            response_parts = [llm_response]
+            
+            # Add technical details section
+            technical_details = []
+            
+            if field_analysis.get('group_analysis'):
+                group = field_analysis['group_analysis']
+                technical_details.extend([
+                    f"**Group Structure Details:**",
+                    f"• Level {group.level:02d} group field with {len(group.child_fields)} child fields",
+                    f"• Business purpose: {group.business_purpose}"
+                ])
+                
+                # Add child field summary
+                if group.child_fields:
+                    technical_details.append("• Child fields:")
+                    for child in group.child_fields[:5]:  # Show first 5
+                        child_desc = f"  - {child['name']}"
+                        if child['picture']:
+                            child_desc += f" ({child['picture']})"
+                        if child['value']:
+                            child_desc += f" = '{child['value']}'"
+                        technical_details.append(child_desc)
+            
+            # Add assignment summary
+            if field_analysis.get('conditional_assignments'):
+                assignments = field_analysis['conditional_assignments']
+                programs = list(set(a['program'] for a in assignments))
+                
+                technical_details.extend([
+                    "",
+                    f"**Value Assignment Summary:**",
+                    f"• Found {len(assignments)} assignments across {len(programs)} programs",
+                    f"• Programs: {', '.join(programs)}"
+                ])
+                
+                # Group by transaction codes
+                tx_codes = {}
+                for assignment in assignments:
+                    tx_id = assignment.get('transaction_identifier', 'Unknown')
+                    if tx_id and tx_id != 'Unknown':
+                        if tx_id not in tx_codes:
+                            tx_codes[tx_id] = []
+                        tx_codes[tx_id].append(assignment['program'])
+                
+                if tx_codes:
+                    technical_details.append("• Transaction codes:")
+                    for code, programs in tx_codes.items():
+                        technical_details.append(f"  - '{code}' in {', '.join(set(programs))}")
+            
+            # Add control flow summary
+            if field_analysis.get('control_flow_patterns'):
+                flows = field_analysis['control_flow_patterns']
+                technical_details.extend([
+                    "",
+                    f"**Program Control Flow:**",
+                    f"• {len(flows)} control flow patterns identified"
+                ])
+                
+                for flow in flows:
+                    technical_details.append(
+                        f"• {flow['source_program']} → {flow['target_program']} "
+                        f"via {flow['control_type']}"
+                    )
+            
+            # Add query context
+            if 'TRANX' in field_name.upper() or 'TXN' in field_name.upper():
+                technical_details.extend([
+                    "",
+                    f"**Transaction Analysis Context:**",
+                    f"• This appears to be a transaction-related field",
+                    f"• Used for routing and program control flow"
+                ])
+            
+            # Combine response with technical details
+            if technical_details:
+                response_parts.extend(["", "---", ""])
+                response_parts.extend(technical_details)
+            
+            return "\n".join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error post-processing enhanced field response: {str(e)}")
+            return llm_response
+
+    # Add this to your existing _route_specialized_query method in AgenticRAGChatManager
+    def _enhanced_route_specialized_query(self, session_id: str, message: str, 
+                                          query_plan, contexts: List) -> Optional[str]:
+        """Super enhanced routing that includes both field and program flow analysis"""
+        
+        # Check for enhanced analysis (both field and program flow)
+        if (hasattr(self, 'enhanced_field_query_analyzer') or 
+            hasattr(self, 'program_flow_query_analyzer')):
+            
+            enhanced_analysis = self._enhanced_query_analysis_with_program_flow(message, query_plan)
+            
+            # Handle program flow analysis (priority)
+            if enhanced_analysis.get('requires_program_flow_analysis'):
+                logger.info("Routing to enhanced program flow analysis handler")
+                program_flow_response = self._handle_enhanced_program_flow_query(
+                    session_id, message, query_plan, contexts
+                )
+                if program_flow_response:
+                    return program_flow_response
+            
+            # Handle field analysis
+            elif enhanced_analysis.get('requires_field_analysis'):
+                logger.info("Routing to enhanced field analysis handler")
+                field_response = self._handle_enhanced_field_query(
+                    session_id, message, query_plan, contexts
+                )
+                if field_response:
+                    return field_response
+        
+        # Fall back to existing routing logic
+        routed_response = self._route_specialized_query(session_id, message, query_plan, contexts)
+        return routed_response
+    
+
+    
+    """
+    Integration of Program Flow Analysis into Agentic RAG Chat Manager
+    Add these methods to your existing AgenticRAGChatManager class
+    """
+
+    def initialize_program_flow_analysis(self):
+        """Initialize program flow analysis components"""
+        try:
+            from modules.enhanced_program_flow_analyzer import EnhancedProgramFlowAnalyzer
+            from modules.program_flow_query_analyzer import ProgramFlowQueryAnalyzer
+            
+            self.program_flow_analyzer = EnhancedProgramFlowAnalyzer(
+                self.db_manager, 
+                self.vector_store
+            )
+            self.program_flow_query_analyzer = ProgramFlowQueryAnalyzer()
+            
+            logger.info("Program flow analysis components initialized successfully")
+            return True
+            
+        except ImportError as e:
+            logger.warning(f"Program flow analysis not available: {e}")
+            self.program_flow_analyzer = None
+            self.program_flow_query_analyzer = None
+            return False
+        except Exception as e:
+            logger.error(f"Error initializing program flow analysis: {e}")
+            self.program_flow_analyzer = None
+            self.program_flow_query_analyzer = None
+            return False
+
+    def _enhanced_query_analysis_with_program_flow(self, message: str, query_plan) -> Dict:
+        """Enhanced query analysis that detects both field and program flow queries"""
+        analysis_result = {'enhanced_analysis': False}
+        
+        # Check for field analysis (existing)
+        if hasattr(self, 'enhanced_field_query_analyzer') and self.enhanced_field_query_analyzer:
+            field_analysis = self.enhanced_field_query_analyzer.analyze_field_query(
+                message, query_plan.entities
+            )
+            
+            if field_analysis.get('is_complex_field_query'):
+                analysis_result.update({
+                    'enhanced_analysis': True,
+                    'requires_field_analysis': True,
+                    'field_analysis_config': field_analysis,
+                    'specialized_routing': 'enhanced_field_handler'
+                })
+        
+        # Check for program flow analysis (new)
+        if hasattr(self, 'program_flow_query_analyzer') and self.program_flow_query_analyzer:
+            program_analysis = self.program_flow_query_analyzer.analyze_program_flow_query(
+                message, query_plan.entities
+            )
+            
+            if program_analysis.get('is_program_flow_query'):
+                logger.info(f"Detected program flow query: {program_analysis['flow_analysis_types']}")
+                
+                # Program flow takes precedence if both are detected
+                analysis_result.update({
+                    'enhanced_analysis': True,
+                    'requires_program_flow_analysis': True,
+                    'program_flow_config': program_analysis,
+                    'specialized_routing': 'enhanced_program_flow_handler'
+                })
+        
+        return analysis_result
+
+    def _handle_enhanced_program_flow_query(self, session_id: str, message: str, 
+                                        query_plan, contexts: List) -> Optional[str]:
+        """Handle complex program flow analysis queries"""
+        if not self.program_flow_analyzer or not query_plan.entities:
+            return None
+        
+        try:
+            # Find the primary program entity
+            program_entities = [e for e in query_plan.entities 
+                            if self._looks_like_program_name(e)]
+            
+            if not program_entities:
+                # Try to extract program name from message
+                program_entities = self._extract_program_names_from_message(message)
+            
+            if not program_entities:
+                return None
+            
+            primary_program = program_entities[0]
+            logger.info(f"Processing program flow analysis for: {primary_program}")
+            
+            # Perform comprehensive program flow analysis
+            flow_analysis = self.program_flow_analyzer.analyze_program_flow_comprehensive(
+                session_id, primary_program, message
+            )
+            
+            if 'error' in flow_analysis:
+                return f"I encountered an error analyzing program flow for {primary_program}: {flow_analysis['error']}"
+            
+            # Check if we found meaningful analysis
+            if not (flow_analysis.get('program_calls') or 
+                    flow_analysis.get('file_operations') or 
+                    flow_analysis.get('data_passing_analysis')):
+                return None  # Fall back to regular processing
+            
+            # Generate enhanced prompt
+            enhanced_prompt = self.program_flow_query_analyzer.generate_program_flow_prompt(
+                flow_analysis, message
+            )
+            
+            # Call LLM with enhanced context
+            response = self.llm_client.call_llm(
+                enhanced_prompt, 
+                max_tokens=3000,  # Increased for complex flow analysis
+                temperature=0.1   # Very low for factual analysis
+            )
+            
+            if response.success:
+                # Post-process response
+                return self._post_process_program_flow_response(
+                    response.content, flow_analysis, primary_program, message
+                )
+            else:
+                logger.error(f"LLM call failed for program flow analysis: {response.error_message}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in program flow query handling: {str(e)}")
+            return None
+
+    def _post_process_program_flow_response(self, llm_response: str, flow_analysis: Dict, 
+                                        program_name: str, original_query: str) -> str:
+        """Post-process program flow response with technical insights"""
+        try:
+            response_parts = [llm_response]
+            
+            # Add technical flow summary
+            technical_summary = []
+            
+            # Program call chain summary
+            if flow_analysis.get('program_calls'):
+                calls = flow_analysis['program_calls']
+                programs_involved = set()
+                for call in calls:
+                    programs_involved.add(call.source_program)
+                    programs_involved.add(call.target_program)
+                
+                technical_summary.extend([
+                    f"**Program Flow Technical Summary:**",
+                    f"• Entry Point: {program_name}",
+                    f"• Programs Involved: {len(programs_involved)} ({', '.join(sorted(programs_involved))})",
+                    f"• Program Calls: {len(calls)}"
+                ])
+                
+                # Add call type breakdown
+                call_types = {}
+                for call in calls:
+                    call_type = call.call_type
+                    call_types[call_type] = call_types.get(call_type, 0) + 1
+                
+                if call_types:
+                    technical_summary.append("• Call Types:")
+                    for call_type, count in call_types.items():
+                        technical_summary.append(f"  - {call_type}: {count}")
+            
+            # Data passing summary
+            if flow_analysis.get('data_passing_analysis'):
+                data_passing = flow_analysis['data_passing_analysis']
+                
+                dfhcommarea_count = len(data_passing.get('dfhcommarea_usage', []))
+                if dfhcommarea_count > 0:
+                    technical_summary.extend([
+                        "",
+                        f"**Data Passing Summary:**",
+                        f"• DFHCOMMAREA Usage: {dfhcommarea_count} instances",
+                    ])
+                    
+                    # Group by usage type
+                    usage_types = {}
+                    for usage in data_passing.get('dfhcommarea_usage', []):
+                        usage_type = usage['usage_type']
+                        usage_types[usage_type] = usage_types.get(usage_type, 0) + 1
+                    
+                    if usage_types:
+                        technical_summary.append("• Usage Patterns:")
+                        for usage_type, count in usage_types.items():
+                            technical_summary.append(f"  - {usage_type}: {count}")
+            
+            # File operations summary
+            if flow_analysis.get('file_operations'):
+                file_ops = flow_analysis['file_operations']
+                files_affected = set(op.file_name for op in file_ops)
+                
+                technical_summary.extend([
+                    "",
+                    f"**File Operations Summary:**",
+                    f"• Files Affected: {len(files_affected)} ({', '.join(sorted(files_affected))})",
+                    f"• Total Operations: {len(file_ops)}"
+                ])
+                
+                # Group by operation type
+                op_types = {}
+                for op in file_ops:
+                    op_type = op.operation_type
+                    op_types[op_type] = op_types.get(op_type, 0) + 1
+                
+                if op_types:
+                    technical_summary.append("• Operation Types:")
+                    for op_type, count in op_types.items():
+                        technical_summary.append(f"  - {op_type}: {count}")
+            
+            # Business flow context
+            if flow_analysis.get('business_flow'):
+                business_flow = flow_analysis['business_flow']
+                technical_summary.extend([
+                    "",
+                    f"**Business Process Context:**",
+                    f"• Process Type: {business_flow.business_purpose}",
+                    f"• Expected Outcome: {business_flow.end_result}"
+                ])
+            
+            # Add specific insights for common patterns
+            if 'NTAFDETF' in program_name or any('TMST' in call.target_program 
+                                            for call in flow_analysis.get('program_calls', [])):
+                technical_summary.extend([
+                    "",
+                    f"**Transaction Processing Pattern:**",
+                    f"• This appears to be a transaction routing and processing flow",
+                    f"• Data is passed via DFHCOMMAREA between transaction programs",
+                    f"• File updates preserve transaction state and results"
+                ])
+            
+            # Combine response with technical summary
+            if technical_summary:
+                response_parts.extend(["", "---", ""])
+                response_parts.extend(technical_summary)
+            
+            return "\n".join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error post-processing program flow response: {str(e)}")
+            return llm_response
+
+    def _looks_like_program_name(self, entity: str) -> bool:
+        """Check if entity looks like a COBOL program name"""
+        return (len(entity) >= 4 and 
+                len(entity) <= 8 and  # Standard COBOL program name length
+                entity.isalnum() and 
+                entity.isupper() and
+                not entity.isdigit())
+
+    def _extract_program_names_from_message(self, message: str) -> List[str]:
+        """Extract program names from message text"""
+        program_names = []
+        
+        # Look for uppercase alphanumeric strings that could be program names
+        words = message.split()
+        for word in words:
+            # Remove common punctuation
+            clean_word = word.strip('.,!?;:()[]{}"\'-')
+            
+            if self._looks_like_program_name(clean_word):
+                program_names.append(clean_word)
+        
+        return program_names
+
 # Factory function for easy integration
 def create_agentic_rag_chat_manager(llm_client, db_manager, fallback_chat_manager=None):
     """Factory function to create Agentic RAG Chat Manager"""
     return AgenticRAGChatManager(llm_client, db_manager, fallback_chat_manager)
+
+"""
+Integration of Enhanced Field Analysis into Agentic RAG Chat Manager
+Adds specialized field analysis capabilities to the existing RAG system
+"""
+
+from typing import Dict, List, Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
+class EnhancedFieldRAGIntegration:
+    """Integration class for enhanced field analysis in RAG system"""
+    
+    def __init__(self, agentic_rag_manager):
+        self.rag_manager = agentic_rag_manager
+        self.field_analyzer = None
+        self.field_query_analyzer = None
+        
+        # Initialize enhanced components
+        self._initialize_enhanced_components()
+    
+    def _initialize_enhanced_components(self):
+        """Initialize enhanced field analysis components"""
+        try:
+            from modules.enhanced_field_analyzer import EnhancedFieldAnalyzer
+            from modules.enhanced_field_query_analyzer import EnhancedFieldQueryAnalyzer
+            
+            self.field_analyzer = EnhancedFieldAnalyzer(
+                self.rag_manager.db_manager,
+                self.rag_manager.vector_store
+            )
+            self.field_query_analyzer = EnhancedFieldQueryAnalyzer()
+            
+            logger.info("Enhanced field analysis components initialized")
+            
+        except Exception as e:
+            logger.error(f"Error initializing enhanced field components: {str(e)}")
+    
+    def enhance_query_analysis(self, message: str, entities: List[str]) -> Dict:
+        """Enhance query analysis with field-specific detection"""
+        if not self.field_query_analyzer:
+            return {'enhanced': False}
+        
+        try:
+            # Analyze for complex field queries
+            field_analysis = self.field_query_analyzer.analyze_field_query(message, entities)
+            
+            if field_analysis.get('is_complex_field_query'):
+                return {
+                    'enhanced': True,
+                    'requires_field_analysis': True,
+                    'field_analysis_config': field_analysis,
+                    'specialized_handler': 'enhanced_field_analysis'
+                }
+            
+            return {'enhanced': False}
+            
+        except Exception as e:
+            logger.error(f"Error in enhanced query analysis: {str(e)}")
+            return {'enhanced': False}
+    
+    def handle_enhanced_field_query(self, session_id: str, message: str, 
+                                   entities: List[str], query_plan: Dict) -> Optional[str]:
+        """Handle enhanced field analysis queries"""
+        if not self.field_analyzer:
+            return None
+        
+        try:
+            # Get the primary field entity
+            if not entities:
+                return "No field entities found in your query."
+            
+            primary_field = entities[0]
+            logger.info(f"Performing enhanced field analysis for: {primary_field}")
+            
+            # Perform comprehensive field analysis
+            field_analysis = self.field_analyzer.analyze_field_comprehensive(
+                session_id, primary_field, message
+            )
+            
+            if 'error' in field_analysis:
+                return f"Error analyzing field {primary_field}: {field_analysis['error']}"
+            
+            # Generate specialized prompt for LLM
+            enhanced_prompt = self.field_query_analyzer.generate_field_analysis_prompt(
+                field_analysis, message
+            )
+            
+            # Call LLM with enhanced context
+            response = self.rag_manager.llm_client.call_llm(
+                enhanced_prompt, 
+                max_tokens=2000, 
+                temperature=0.2
+            )
+            
+            if response.success:
+                # Post-process response with additional insights
+                return self._post_process_field_response(
+                    response.content, field_analysis, primary_field
+                )
+            else:
+                return f"Error generating field analysis: {response.error_message}"
+                
+        except Exception as e:
+            logger.error(f"Error in enhanced field query handling: {str(e)}")
+            return f"Error processing enhanced field analysis: {str(e)}"
+    
+    def _post_process_field_response(self, llm_response: str, field_analysis: Dict, field_name: str) -> str:
+        """Post-process LLM response with additional insights"""
+        try:
+            response_parts = [llm_response]
+            
+            # Add technical summary
+            if field_analysis.get('group_analysis'):
+                group = field_analysis['group_analysis']
+                response_parts.extend([
+                    "",
+                    "**Technical Summary:**",
+                    f"- Group Field: {group.group_name} (Level {group.level:02d})",
+                    f"- Child Fields: {len(group.child_fields)}",
+                    f"- Business Purpose: {group.business_purpose}"
+                ])
+            
+            # Add cross-reference summary
+            if field_analysis.get('conditional_assignments'):
+                assignments = field_analysis['conditional_assignments']
+                programs = set(a['program'] for a in assignments)
+                response_parts.extend([
+                    "",
+                    "**Cross-Reference Summary:**",
+                    f"- Used in {len(programs)} programs: {', '.join(programs)}",
+                    f"- {len(assignments)} conditional assignments found",
+                ])
+            
+            # Add transaction flow summary
+            if field_analysis.get('control_flow_patterns'):
+                flows = field_analysis['control_flow_patterns']
+                response_parts.extend([
+                    "",
+                    "**Program Flow Summary:**",
+                    f"- {len(flows)} control flow patterns identified"
+                ])
+                
+                for flow in flows[:3]:  # Show first 3
+                    response_parts.append(f"- {flow['source_program']} → {flow['target_program']} via {flow['control_type']}")
+            
+            return "\n".join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error post-processing field response: {str(e)}")
+            return llm_response
