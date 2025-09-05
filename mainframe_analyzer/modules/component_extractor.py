@@ -2095,7 +2095,7 @@ File Content ({filename}):
             all_session_components = self.db_manager.get_session_components(session_id)
             uploaded_programs = set(comp['component_name'].upper() for comp in all_session_components)
             
-            # Enhanced program calls with dynamic resolution
+            # FIXED: Enhanced program calls with dynamic resolution
             program_calls = main_program.get('program_calls', [])
             for call in program_calls:
                 call_type = call.get('call_type', 'static')
@@ -2914,8 +2914,8 @@ File Content ({filename}):
     
 
     def _create_dynamic_call_dependencies(self, session_id: str, program_name: str, 
-                                   dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
-        """Create dependencies for dynamic calls with multiple possible targets"""
+                               dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
+        """Create dependencies for dynamic calls with multiple possible targets - FIXED"""
         dependencies = []
         variable_name = dynamic_call.get('variable_name', 'UNKNOWN')
         
@@ -2923,6 +2923,8 @@ File Content ({filename}):
         resolved_programs = dynamic_call.get('resolved_programs', [])
         if not resolved_programs:
             resolved_programs = [{'program_name': variable_name, 'resolution': 'unresolved', 'confidence': 0.1}]
+        
+        logger.info(f"Creating dependencies for dynamic call with {len(resolved_programs)} resolved programs")
         
         for resolved_program in resolved_programs:
             target_prog = resolved_program.get('program_name')
@@ -2944,11 +2946,12 @@ File Content ({filename}):
                         'resolution_method': resolved_program.get('resolution', 'unknown'),
                         'source_info': resolved_program.get('source', ''),
                         'line_number': dynamic_call.get('line_number', 0),
-                        'business_context': f"Dynamic call via {variable_name} variable"
+                        'business_context': f"Dynamic call via {variable_name} variable -> {target_prog}"
                     }),
                     'source_code_evidence': f"Line {dynamic_call.get('line_number', 0)}: {dynamic_call.get('operation')} PROGRAM({variable_name}) -> {target_prog}"
                 }
                 dependencies.append(dependency)
+                logger.info(f"Created dynamic dependency: {program_name} -> {target_prog} (via {variable_name})")
         
         return dependencies
 

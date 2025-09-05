@@ -1620,17 +1620,24 @@ Rules:
         
         logger.info(f"Extracted {len(dynamic_calls)} dynamic program calls")
         return dynamic_calls
+    
     def _build_variable_value_map(self, lines: List[str]) -> Dict[str, Any]:
         """
-        Build map of working storage variables and their possible values
-        Handles group fields, fillers with values, and computed values
-        FIXED: Properly initialize children dictionary
+        Enhanced variable value map building with better group field handling
+        Properly handles complex structures like TRANX with HOLD-TRANX subfields
         """
         variable_map = {}
         current_group = None
+        group_stack = []  # Stack to handle nested groups
+        
+        logger.info("Building enhanced variable value map...")
         
         for i, line in enumerate(lines, 1):
-            line_upper = line.upper().strip()
+            program_area = self.extract_program_area_only(line)
+            if not program_area:
+                continue
+                
+            line_upper = program_area.upper().strip()
             
             if not line_upper or line_upper.startswith('*'):
                 continue
@@ -1641,58 +1648,62 @@ Rules:
                 level = int(level_match.group(1))
                 field_content = level_match.group(2).strip()
                 
-                # Handle group fields (01-49 level)
-                if level == 1 or (level > 1 and level < 49):
-                    # Extract field name
+                # Manage group stack based on level
+                while group_stack and group_stack[-1]['level'] >= level:
+                    group_stack.pop()
+                
+                # Extract field name (handle FILLER specially)
+                if field_content.startswith('FILLER'):
+                    field_name = f'FILLER-{i}'
+                    is_filler = True
+                    remaining_content = field_content[6:].strip()
+                else:
                     name_match = re.match(r'^([A-Z][A-Z0-9\-]*)', field_content)
                     if name_match:
                         field_name = name_match.group(1)
+                        is_filler = False
+                        remaining_content = field_content[len(field_name):].strip()
+                    else:
+                        continue
+                
+                # Initialize field info
+                field_info = {
+                    'type': 'group' if level == 1 else 'field',
+                    'level': level,
+                    'line': i,
+                    'children': {},
+                    'possible_values': [],
+                    'is_filler': is_filler,
+                    'parent': group_stack[-1]['name'] if group_stack else None
+                }
+                
+                # Check for VALUE clause
+                value_match = re.search(r"VALUE\s+['\"]([^'\"]*)['\"]", remaining_content)
+                if value_match:
+                    value = value_match.group(1)
+                    field_info['constant_value'] = value
+                    field_info['possible_values'].append(value)
+                    logger.debug(f"Found VALUE '{value}' for field {field_name}")
+                
+                # Add to variable map
+                variable_map[field_name] = field_info
+                
+                # Update parent's children if this is a sub-field
+                if group_stack:
+                    parent_name = group_stack[-1]['name']
+                    if parent_name in variable_map:
+                        variable_map[parent_name]['children'][field_name] = field_info
                         
-                        if level == 1:
-                            current_group = field_name
-                            variable_map[field_name] = {
-                                'type': 'group',
-                                'level': level,
-                                'children': {},  # ALWAYS initialize children
-                                'line': i,
-                                'possible_values': []
-                            }
-                        else:
-                            # Sub-field of group - FIXED: Check if current_group exists and has children
-                            if current_group and current_group in variable_map:
-                                # Ensure children dict exists
-                                if 'children' not in variable_map[current_group]:
-                                    variable_map[current_group]['children'] = {}
-                                
-                                variable_map[current_group]['children'][field_name] = {
-                                    'type': 'field',
-                                    'level': level,
-                                    'line': i,
-                                    'parent': current_group
-                                }
-                            
-                            # Also add to main variable map
-                            variable_map[field_name] = {
-                                'type': 'field',
-                                'level': level,
-                                'line': i,
-                                'parent': current_group,
-                                'possible_values': []
-                            }
-                        
-                        # Check for VALUE clause
-                        value_match = re.search(r"VALUE\s+['\"]([^'\"]*)['\"]", field_content)
-                        if value_match:
-                            value = value_match.group(1)
-                            variable_map[field_name]['constant_value'] = value
-                            variable_map[field_name]['possible_values'].append(value)
-                            
-                            # For fillers with values in groups
-                            if 'FILLER' in field_content and current_group:
-                                if current_group in variable_map:
-                                    if 'filler_values' not in variable_map[current_group]:
-                                        variable_map[current_group]['filler_values'] = []
-                                    variable_map[current_group]['filler_values'].append(value)
+                        # CRITICAL: For fillers with values in groups, track them specially
+                        if is_filler and 'constant_value' in field_info:
+                            if 'filler_values' not in variable_map[parent_name]:
+                                variable_map[parent_name]['filler_values'] = []
+                            variable_map[parent_name]['filler_values'].append(value)
+                            logger.debug(f"Added filler value '{value}' to group {parent_name}")
+                
+                # Add to group stack if it's a group (level 01 or has potential children)
+                if level == 1 or (level > 1 and level < 49):
+                    group_stack.append({'name': field_name, 'level': level})
             
             # Look for MOVE statements that populate variables
             move_match = re.search(r'MOVE\s+([A-Z0-9\-\'\"]+)\s+TO\s+([A-Z0-9\-]+)', line_upper)
@@ -1700,12 +1711,28 @@ Rules:
                 source_val = move_match.group(1).strip("'\"")
                 target_var = move_match.group(2)
                 
+                # Add to target variable's possible values
                 if target_var in variable_map:
-                    if 'possible_values' not in variable_map[target_var]:
-                        variable_map[target_var]['possible_values'] = []
                     if source_val not in variable_map[target_var]['possible_values']:
                         variable_map[target_var]['possible_values'].append(source_val)
+                        logger.debug(f"Added MOVE value '{source_val}' to {target_var}")
+                
+                # ENHANCED: Also track as potential dynamic program name
+                # Look for patterns like MOVE 'TP94' TO HOLD-TRANX
+                if 'HOLD-' in target_var:
+                    base_var = target_var.replace('HOLD-', '')
+                    if base_var in variable_map:
+                        # This could be a dynamic program component
+                        if 'dynamic_components' not in variable_map[base_var]:
+                            variable_map[base_var]['dynamic_components'] = []
+                        variable_map[base_var]['dynamic_components'].append({
+                            'component': source_val,
+                            'target_field': target_var,
+                            'line': i
+                        })
+                        logger.debug(f"Added dynamic component '{source_val}' for {base_var}")
         
+        logger.info(f"Built variable map with {len(variable_map)} variables")
         return variable_map
 
     def _resolve_group_field_programs(self, group_name: str, group_info: Dict, variable_map: Dict) -> List[Dict]:
@@ -1797,109 +1824,120 @@ Rules:
 
     def _resolve_variable_to_programs(self, variable_name: str, variable_map: Dict) -> List[Dict]:
         """
-        Resolve a variable to its possible program name values
-        Handles group fields with filler constants, computed values, and HOLD-field patterns
+        Enhanced variable resolution that properly handles complex group structures
+        Supports patterns like TRANX group with FILLER 'TMS' + HOLD-TRANX field
         """
         resolved_programs = []
         
-        if variable_name not in variable_map:
-            # NEW: Check for HOLD-xxx pattern (for dynamic CICS calls like PROGRAM(TRANX) -> HOLD-TRANX)
-            hold_field_name = f"HOLD-{variable_name}"
-            if hold_field_name in variable_map:
-                logger.debug(f"Found HOLD field for {variable_name}: {hold_field_name}")
-                hold_var_info = variable_map[hold_field_name]
-                
-                # Direct constant value in HOLD field
-                if 'constant_value' in hold_var_info:
-                    resolved_programs.append({
-                        'program_name': hold_var_info['constant_value'],
-                        'resolution': 'hold_field_constant',
-                        'confidence': 1.0,
-                        'source': f"HOLD field {hold_field_name} VALUE '{hold_var_info['constant_value']}'"
-                    })
-                
-                # Possible values from MOVE operations to HOLD field
-                for value in hold_var_info.get('possible_values', []):
-                    if value not in [p['program_name'] for p in resolved_programs]:
-                        resolved_programs.append({
-                            'program_name': value,
-                            'resolution': 'hold_field_move',
-                            'confidence': 0.9,
-                            'source': f"MOVE '{value}' TO {hold_field_name}"
-                        })
-                
-                if resolved_programs:
-                    logger.debug(f"Resolved {variable_name} via HOLD field to {len(resolved_programs)} programs")
-                    return resolved_programs
+        logger.debug(f"Resolving variable {variable_name}...")
+        
+        # Strategy 1: Direct variable lookup
+        if variable_name in variable_map:
+            var_info = variable_map[variable_name]
             
-            logger.debug(f"Variable {variable_name} not found in map and no HOLD field available")
-            return [{'program_name': variable_name, 'resolution': 'unresolved', 'confidence': 0.1}]
-        
-        var_info = variable_map[variable_name]
-        logger.debug(f"Found variable {variable_name} in map: {var_info.get('type', 'unknown type')}")
-        
-        # Direct constant value
-        if 'constant_value' in var_info:
-            resolved_programs.append({
-                'program_name': var_info['constant_value'],
-                'resolution': 'constant',
-                'confidence': 1.0,
-                'source': f"VALUE '{var_info['constant_value']}'"
-            })
-        
-        # Possible values from MOVE operations
-        for value in var_info.get('possible_values', []):
-            if value not in [p['program_name'] for p in resolved_programs]:
+            # Direct constant value
+            if 'constant_value' in var_info:
                 resolved_programs.append({
-                    'program_name': value,
-                    'resolution': 'move_operation',
-                    'confidence': 0.8,
-                    'source': f"MOVE '{value}' TO {variable_name}"
+                    'program_name': var_info['constant_value'],
+                    'resolution': 'direct_constant',
+                    'confidence': 1.0,
+                    'source': f"Direct VALUE '{var_info['constant_value']}'"
                 })
-        
-        # Handle group fields with filler constants
-        if var_info.get('type') == 'group' and 'children' in var_info:
-            group_programs = self._resolve_group_field_programs(variable_name, var_info, variable_map)
-            resolved_programs.extend(group_programs)
             
-            # ENHANCED: Also check if this group contains a HOLD-xxx field
-            hold_child_name = f"HOLD-{variable_name}"
-            if hold_child_name in var_info.get('children', {}):
-                logger.debug(f"Group {variable_name} contains HOLD field: {hold_child_name}")
-                if hold_child_name in variable_map:
-                    hold_child_info = variable_map[hold_child_name]
-                    for value in hold_child_info.get('possible_values', []):
-                        if value not in [p['program_name'] for p in resolved_programs]:
-                            resolved_programs.append({
-                                'program_name': value,
-                                'resolution': 'group_hold_child',
-                                'confidence': 0.9,
-                                'source': f"Group child {hold_child_name} = '{value}'"
-                            })
-        
-        # Handle parent group resolution
-        if var_info.get('parent') and var_info['parent'] in variable_map:
-            parent_info = variable_map[var_info['parent']]
-            if 'filler_values' in parent_info:
-                for filler_value in parent_info['filler_values']:
-                    # Construct potential program name from filler + variable
-                    potential_program = f"{filler_value}{variable_name.replace(var_info['parent'] + '-', '')}"
+            # Values from MOVE operations
+            for value in var_info.get('possible_values', []):
+                if value and value not in [p['program_name'] for p in resolved_programs]:
                     resolved_programs.append({
-                        'program_name': potential_program,
-                        'resolution': 'group_filler_combination',
-                        'confidence': 0.7,
-                        'source': f"Group {var_info['parent']} filler '{filler_value}' + {variable_name}"
+                        'program_name': value,
+                        'resolution': 'move_operation',
+                        'confidence': 0.8,
+                        'source': f"MOVE '{value}' TO {variable_name}"
                     })
+            
+            # ENHANCED: Handle group structures with filler + dynamic components
+            if var_info.get('type') == 'group':
+                filler_values = var_info.get('filler_values', [])
+                dynamic_components = var_info.get('dynamic_components', [])
+                
+                # Combine filler prefix with dynamic components
+                for filler_val in filler_values:
+                    for component in dynamic_components:
+                        combined_program = f"{filler_val}{component['component']}"
+                        resolved_programs.append({
+                            'program_name': combined_program,
+                            'resolution': 'group_filler_dynamic',
+                            'confidence': 0.9,
+                            'source': f"Group {variable_name}: filler '{filler_val}' + dynamic '{component['component']}'"
+                        })
+                        logger.info(f"Resolved dynamic program: {combined_program}")
         
-        if resolved_programs:
-            logger.debug(f"Successfully resolved {variable_name} to {len(resolved_programs)} programs")
+        # Strategy 2: Look for HOLD-{variable_name} pattern
+        hold_field_name = f"HOLD-{variable_name}"
+        if hold_field_name in variable_map:
+            hold_info = variable_map[hold_field_name]
+            
+            # Get parent group to find filler values
+            parent_name = hold_info.get('parent')
+            if parent_name and parent_name in variable_map:
+                parent_info = variable_map[parent_name]
+                filler_values = parent_info.get('filler_values', [])
+                
+                # Combine parent filler values with HOLD field values
+                for filler_val in filler_values:
+                    for hold_val in hold_info.get('possible_values', []):
+                        combined_program = f"{filler_val}{hold_val}"
+                        resolved_programs.append({
+                            'program_name': combined_program,
+                            'resolution': 'hold_field_combination',
+                            'confidence': 0.95,
+                            'source': f"Parent {parent_name} filler '{filler_val}' + {hold_field_name} '{hold_val}'"
+                        })
+                        logger.info(f"Resolved via HOLD field: {combined_program}")
+        
+        # Strategy 3: Search for any field containing the variable name
+        for field_name, field_info in variable_map.items():
+            if variable_name in field_name and field_info.get('parent'):
+                parent_name = field_info['parent']
+                if parent_name in variable_map:
+                    parent_info = variable_map[parent_name]
+                    filler_values = parent_info.get('filler_values', [])
+                    
+                    for filler_val in filler_values:
+                        for value in field_info.get('possible_values', []):
+                            combined_program = f"{filler_val}{value}"
+                            if combined_program not in [p['program_name'] for p in resolved_programs]:
+                                resolved_programs.append({
+                                    'program_name': combined_program,
+                                    'resolution': 'field_search_combination',
+                                    'confidence': 0.7,
+                                    'source': f"Field {field_name} in group {parent_name}"
+                                })
+        
+        # Filter out invalid program names
+        valid_programs = []
+        for prog in resolved_programs:
+            prog_name = prog['program_name']
+            if (prog_name and 
+                len(prog_name) >= 3 and 
+                prog_name.replace('-', '').isalnum() and
+                not prog_name.isdigit()):
+                valid_programs.append(prog)
+        
+        if valid_programs:
+            logger.info(f"Successfully resolved {variable_name} to {len(valid_programs)} valid programs")
+            for prog in valid_programs:
+                logger.info(f"  -> {prog['program_name']} ({prog['resolution']})")
         else:
-            logger.debug(f"No resolution found for {variable_name}")
+            logger.warning(f"No valid programs resolved for {variable_name}")
+            # Return unresolved marker
+            valid_programs = [{
+                'program_name': variable_name, 
+                'resolution': 'unresolved', 
+                'confidence': 0.1,
+                'source': 'Variable could not be resolved'
+            }]
         
-        return resolved_programs if resolved_programs else [
-            {'program_name': variable_name, 'resolution': 'unresolved', 'confidence': 0.1}
-        ]
-    
+        return valid_programs    
 
     def _calculate_resolution_confidence(self, variable_name: str, variable_map: Dict, resolved_programs: List[Dict]) -> float:
         """Calculate confidence in variable resolution"""
