@@ -67,33 +67,36 @@ class MainframeAnalyzer:
         try:
             if AGENTIC_RAG_AVAILABLE:
                 try:
-                    from modules.chat_manager import ChatManager
-                    fallback_chat = ChatManager(self.llm_client, self.token_manager, self.db_manager)
                     
-                    self.chat_manager = AgenticRAGChatManager(
-                        self.llm_client, 
-                        self.db_manager,
-                        fallback_chat_manager=fallback_chat
-                    )
-                    
-                    # Initialize comprehensive analysis capabilities
-                    field_analysis_ready = self.chat_manager.initialize_enhanced_field_analysis()
-                    program_flow_ready = self.chat_manager.initialize_program_flow_analysis()
-                    
-                    if field_analysis_ready and program_flow_ready:
-                        self.chat_system_type = "agentic_rag_super_enhanced"
-                        logger.info("Initialized Super Enhanced Agentic RAG with field + program flow analysis")
-                    elif field_analysis_ready:
-                        self.chat_system_type = "agentic_rag_field_enhanced"
-                        logger.info("Initialized Field Enhanced Agentic RAG")
-                    else:
-                        self.chat_system_type = "agentic_rag"
-                        logger.info("Initialized Basic Agentic RAG")
+                        from modules.chat_manager import ChatManager
+                        fallback_chat = ChatManager(self.llm_client, self.token_manager, self.db_manager)
                         
-                except Exception as e:
-                    logger.error(f"Failed to initialize enhanced chat system: {e}")
-                    self.chat_manager = AgenticRAGChatManager(self.llm_client, self.db_manager)
-                    self.chat_system_type = "agentic_rag"
+                        self.chat_manager = AgenticRAGChatManager(
+                            self.llm_client, 
+                            self.db_manager,
+                            fallback_chat_manager=fallback_chat
+                        )
+                        
+                        # CRITICAL: Force initialize both enhanced components
+                        field_ready = self.chat_manager.initialize_enhanced_field_analysis()
+                        flow_ready = self.chat_manager.initialize_program_flow_analysis()
+                        
+                        # Set proper system type based on what's available
+                        if field_ready and flow_ready:
+                            self.chat_system_type = "agentic_rag_super_enhanced"
+                            logger.info("✅ Super Enhanced RAG with field + program flow analysis")
+                        elif field_ready:
+                            self.chat_system_type = "agentic_rag_field_enhanced" 
+                            logger.info("✅ Field Enhanced RAG")
+                        elif flow_ready:
+                            self.chat_system_type = "agentic_rag_flow_enhanced"
+                            logger.info("✅ Program Flow Enhanced RAG")
+                        else:
+                            self.chat_system_type = "agentic_rag_basic"
+                            logger.info("✅ Basic RAG")
+                        
+                except Exception as init_error:
+                    logger.error(f"RAG initialization failed: {init_error}")
             else:
                 from modules.chat_manager import ChatManager
                 self.chat_manager = ChatManager(self.llm_client, self.token_manager, self.db_manager)
@@ -739,91 +742,58 @@ def test_field_analysis(session_id, field_name):
 
 # CHANGE 8: Enhanced chat endpoint with better error handling
 @app.route('/api/chat', methods=['POST'])
-def super_enhanced_chat_query():
-    """Super enhanced chat endpoint with comprehensive analysis capabilities"""
+def enhanced_chat_query():
     try:
         data = request.json
         session_id = data.get('session_id')
         message = data.get('message')
         conversation_id = data.get('conversation_id', str(uuid.uuid4()))
         
-        if not session_id or not message:
-            return jsonify({
-                'success': False,
-                'error': 'Missing session_id or message',
-                'response': 'Please provide both session_id and message'
-            })
+        # ENHANCED: Better query type detection
+        message_lower = message.lower()
         
-        # Enhanced processing with comprehensive analysis detection
-        start_time = time.time()
+        # Log the query for debugging
+        logger.info(f"Chat query: {message[:100]}...")
+        logger.info(f"System type: {analyzer.chat_system_type}")
         
-        # Log query type for debugging
-        query_preview = message[:50] + "..." if len(message) > 50 else message
-        logger.info(f"Processing query: {query_preview}")
+        # Force enhanced processing for program/field queries
+        if analyzer.chat_system_type in ["agentic_rag_super_enhanced", "agentic_rag_field_enhanced", "agentic_rag_flow_enhanced"]:
+            
+            # Check if this should be enhanced
+            is_program_query = any(word in message_lower for word in [
+                'program', 'call', 'xctl', 'link', 'flow', 'calls'
+            ])
+            
+            is_field_query = any(word in message_lower for word in [
+                'field', 'variable', 'move', 'value', 'assign'
+            ])
+            
+            if is_program_query or is_field_query:
+                logger.info(f"🔍 Enhanced processing triggered: program={is_program_query}, field={is_field_query}")
+                
+                # Force session initialization if not done
+                try:
+                    analyzer.chat_manager.initialize_session(session_id)
+                except:
+                    pass  # May already be initialized
         
+        # Process with full features
         result = analyzer.chat_query(session_id, message, conversation_id)
-        processing_time = time.time() - start_time
         
-        # Add processing time if not already included
-        if 'processing_time' not in result:
-            result['processing_time'] = processing_time
-        
-        # Super enhanced response format
+        # Enhanced response logging
         if result.get('success'):
-            response_data = {
-                'success': True,
-                'response': result.get('response', 'No response generated'),
-                'conversation_id': conversation_id,
-                'system_type': result.get('system_type', 'unknown'),
-                'processing_time': result.get('processing_time', processing_time),
-                'query_plan': result.get('query_plan'),
-                'contexts_used': result.get('contexts_used'),
-                'cached': result.get('cached', False),
-                'routed': result.get('routed', False)
-            }
-            
-            # Add comprehensive analysis indicators
-            if "super" in analyzer.chat_system_type:
-                response_data['comprehensive_analysis_available'] = True
-                
-                # Check query type
-                query_plan = result.get('query_plan', {})
-                entities = query_plan.get('entities', [])
-                
-                if entities:
-                    response_data['entities_detected'] = entities
-                    
-                    # Check for field entities
-                    field_entities = [e for e in entities if len(e) >= 3 and '-' in e]
-                    if field_entities:
-                        response_data['field_entities'] = field_entities
-                    
-                    # Check for program entities
-                    program_entities = [e for e in entities 
-                                      if len(e) >= 4 and len(e) <= 8 and e.isupper() and e.isalnum()]
-                    if program_entities:
-                        response_data['program_entities'] = program_entities
-            
-            elif "enhanced" in analyzer.chat_system_type:
-                response_data['field_analysis_available'] = True
-            
-            return jsonify(response_data)
-        else:
-            return jsonify({
-                'success': False,
-                'response': f"I encountered an error: {result.get('error', 'Unknown error')}",
-                'error': result.get('error'),
-                'system_type': result.get('system_type', 'unknown')
-            })
+            query_plan = result.get('query_plan', {})
+            logger.info(f"Query processed: type={query_plan.get('query_type')}, contexts={result.get('contexts_used', 0)}")
+        
+        return jsonify(result)
         
     except Exception as e:
-        logger.error(f"Super enhanced chat endpoint error: {str(e)}")
+        logger.error(f"Chat endpoint error: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e),
             'response': 'Chat service encountered an error'
-        })
-    
+        })    
 # CHANGE 9: Add RAG analytics endpoint
 @app.route('/api/chat/analytics/<session_id>', methods=['GET'])
 def get_chat_analytics(session_id):

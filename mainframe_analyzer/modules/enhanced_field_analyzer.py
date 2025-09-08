@@ -89,34 +89,148 @@ class EnhancedFieldAnalyzer:
             return {'error': str(e)}
     
     def _get_field_source_contexts(self, session_id: str, field_name: str) -> List[Dict]:
-        """Get all source code contexts where field appears"""
+        """Enhanced field source context retrieval"""
         try:
             contexts = []
             
-            # Use vector search to find relevant code sections
-            if self.vector_store and self.vector_store.index_built:
-                search_query = f"{field_name} MOVE WHEN IF EVALUATE PERFORM"
-                vector_results = self.vector_store.semantic_search(search_query, top_k=10)
+            # ENHANCED: Get ALL components that mention this field
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT ca.component_name, ca.analysis_result_json, ca.source_content
+                    FROM component_analysis ca
+                    WHERE ca.session_id = ? 
+                    AND (ca.analysis_result_json LIKE ? OR ca.source_content LIKE ?)
+                ''', (session_id, f'%{field_name}%', f'%{field_name}%'))
                 
-                for result in vector_results:
-                    source_code = result['source_code']
-                    if field_name.upper() in source_code.upper():
+                for row in cursor.fetchall():
+                    component_name, analysis_json, source_content = row
+                    
+                    # Use source_content directly if available
+                    if source_content and field_name.upper() in source_content.upper():
                         contexts.append({
-                            'component_name': result['metadata']['component_name'],
-                            'source_code': source_code,
-                            'similarity_score': result['similarity']
+                            'component_name': component_name,
+                            'source_code': source_content,
+                            'similarity_score': 1.0,
+                            'source': 'direct_source'
                         })
+                    
+                    # Also check analysis results
+                    if analysis_json:
+                        try:
+                            analysis = json.loads(analysis_json)
+                            if 'content' in analysis and field_name.upper() in analysis['content'].upper():
+                                contexts.append({
+                                    'component_name': component_name,
+                                    'source_code': analysis['content'],
+                                    'similarity_score': 0.9,
+                                    'source': 'analysis_content'
+                                })
+                        except:
+                            pass
             
-            # Also get from database field analysis
-            db_contexts = self._get_database_field_contexts(session_id, field_name)
-            contexts.extend(db_contexts)
-            
+            logger.info(f"Found {len(contexts)} contexts for field {field_name}")
             return contexts
             
         except Exception as e:
-            logger.error(f"Error getting field source contexts: {str(e)}")
+            logger.error(f"Error getting field contexts: {str(e)}")
             return []
-    
+        
+    def _build_semantic_context(self, contexts: List[Dict], query_context: str) -> str:
+        """Build semantic context for better understanding"""
+        try:
+            if not contexts:
+                return "No semantic context available"
+            
+            context_parts = []
+            
+            # Summarize contexts
+            context_parts.append(f"Found in {len(contexts)} program contexts")
+            
+            # Extract key programs
+            programs = [ctx['component_name'] for ctx in contexts]
+            context_parts.append(f"Programs: {', '.join(programs[:3])}")
+            
+            # Look for business keywords in query
+            query_lower = query_context.lower()
+            business_keywords = ['business', 'process', 'rule', 'logic', 'calculate', 'validate']
+            
+            relevant_keywords = [kw for kw in business_keywords if kw in query_lower]
+            if relevant_keywords:
+                context_parts.append(f"Business focus: {', '.join(relevant_keywords)}")
+            
+            return '; '.join(context_parts)
+            
+        except Exception as e:
+            logger.error(f"Error building semantic context: {str(e)}")
+            return "Semantic context analysis failed"
+
+    def _extract_target_program(self, line_upper: str, keyword: str) -> Optional[str]:
+        """Extract target program from control statement"""
+        try:
+            # Look for PROGRAM clause
+            prog_match = re.search(r'PROGRAM\s*\(\s*[\'"]?([A-Z0-9\-]+)[\'"]?\s*\)', line_upper)
+            if prog_match:
+                return prog_match.group(1)
+            
+            # Look for direct program name after keyword
+            if keyword == 'CALL':
+                call_match = re.search(r'CALL\s+[\'"]?([A-Z0-9\-]+)[\'"]?', line_upper)
+                if call_match:
+                    return call_match.group(1)
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error extracting target program: {str(e)}")
+            return None
+
+    def _analyze_field_usage_in_control(self, line: str, field_name: str) -> str:
+        """Analyze how field is used in control statement"""
+        field_upper = field_name.upper()
+        line_upper = line.upper()
+        
+        if f'PROGRAM({field_upper})' in line_upper or f'PROGRAM ({field_upper})' in line_upper:
+            return 'DYNAMIC_PROGRAM_NAME'
+        elif field_upper in line_upper:
+            return 'PARAMETER_OR_DATA'
+        else:
+            return 'CONTEXT_REFERENCE'
+
+    def _infer_business_flow(self, control_type: str, target_program: str, context_lines: List[str]) -> str:
+        """Infer business flow from control statement"""
+        try:
+            context_text = ' '.join(context_lines).upper()
+            
+            # Transaction management patterns
+            if any(keyword in target_program.upper() for keyword in ['TMST', 'TMS', 'TRAN']):
+                return 'Transaction management system call'
+            
+            # Error handling patterns
+            elif any(keyword in context_text for keyword in ['ERROR', 'FAIL', 'ABEND']):
+                return 'Error handling routine'
+            
+            # Validation patterns
+            elif any(keyword in context_text for keyword in ['VALID', 'CHECK', 'VERIFY']):
+                return 'Data validation process'
+            
+            # File processing patterns
+            elif any(keyword in context_text for keyword in ['READ', 'WRITE', 'UPDATE']):
+                return 'File processing operation'
+            
+            # Based on control type
+            elif control_type == 'XCTL':
+                return 'Transfer control to next process'
+            elif control_type == 'LINK':
+                return 'Call subroutine and return'
+            elif control_type == 'CALL':
+                return 'Program subroutine call'
+            
+            return f'{control_type} operation to {target_program}'
+            
+        except Exception as e:
+            logger.error(f"Error inferring business flow: {str(e)}")
+            return 'Program control operation'
     def _analyze_group_structure(self, contexts: List[Dict], field_name: str) -> Optional[GroupFieldAnalysis]:
         """Analyze if field is part of a group and extract structure"""
         try:
