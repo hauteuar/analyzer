@@ -4191,3 +4191,24 @@ class EnhancedFieldRAGIntegration:
         except Exception as e:
             logger.error(f"Error post-processing field response: {str(e)}")
             return llm_response
+    
+    def debug_dynamic_call_processing(self, session_id: str, message: str, query_plan, contexts: List) -> Dict:
+        """Debug why dynamic call queries aren't being processed correctly"""
+    
+        debug_info = {
+            'message': message,
+            'entities': query_plan.entities,
+            'query_type': query_plan.query_type.value,
+            'contexts_count': len(contexts),
+            'context_methods': [ctx.retrieval_method for ctx in contexts],
+            'routing_checks': {}
+        }
+        
+        # Check routing conditions
+        debug_info['routing_checks']['is_dynamic_call_query'] = self._is_dynamic_call_query(message, query_plan, contexts)
+        debug_info['routing_checks']['has_dynamic_contexts'] = any(
+            ctx.retrieval_method == "dynamic_call_business_logic" for ctx in contexts
+        )
+        debug_info['routing_checks']['has_dynamic_source'] = self._check_contexts_for_dynamic_calls(contexts)
+        
+        return debug_info
