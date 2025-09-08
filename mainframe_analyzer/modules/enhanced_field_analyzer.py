@@ -267,6 +267,7 @@ class EnhancedFieldAnalyzer:
         except Exception as e:
             logger.error(f"Error inferring business flow: {str(e)}")
             return 'Program control operation'
+
     def _analyze_group_structure(self, contexts: List[Dict], field_name: str) -> Optional[GroupFieldAnalysis]:
         """Analyze if field is part of a group and extract structure"""
         try:
@@ -286,11 +287,20 @@ class EnhancedFieldAnalyzer:
                         # Extract child fields
                         child_fields = self._extract_child_fields(source_lines, i, level)
                         
+                        # FIXED: Ensure parent_field is a string
+                        parent_field = self._find_parent_field(source_lines, i, level)
+                        
+                        # Safety check - ensure it's a string
+                        if isinstance(parent_field, list):
+                            parent_field = parent_field[0] if parent_field else ""
+                        elif not isinstance(parent_field, str):
+                            parent_field = str(parent_field) if parent_field else ""
+                        
                         return GroupFieldAnalysis(
                             group_name=group_name,
                             level=level,
                             child_fields=child_fields,
-                            parent_field=self._find_parent_field(source_lines, i, level),
+                            parent_field=parent_field,  # Now guaranteed to be string
                             business_purpose=self._infer_group_business_purpose(group_name, child_fields),
                             usage_patterns=[]
                         )
@@ -300,7 +310,62 @@ class EnhancedFieldAnalyzer:
         except Exception as e:
             logger.error(f"Error analyzing group structure: {str(e)}")
             return None
+
+    # Add this missing method to the EnhancedFieldAnalyzer class:
+
+    def _find_parent_field(self, source_lines: List[str], current_idx: int, current_level: int) -> str:
+        """Find parent field by scanning backwards for lower level number"""
+        try:
+            # Scan backwards from current position
+            for i in range(current_idx - 1, -1, -1):
+                line = source_lines[i].strip()
+                if not line or line.startswith('*'):
+                    continue
+                
+                # Look for field definition with lower level
+                field_match = re.match(r'^\s*(\d{2})\s+([A-Z][A-Z0-9\-]+)', line.upper())
+                if field_match:
+                    level = int(field_match.group(1))
+                    field_name = field_match.group(2)
+                    
+                    # Found a parent (lower level number)
+                    if level < current_level:
+                        return field_name
+            
+            # No parent found
+            return ""
+            
+        except Exception as e:
+            logger.error(f"Error finding parent field: {str(e)}")
+            return ""
+
+    # Also fix the _analyze_group_structure method to handle the string return:
+
     
+    # Add the missing helper method:
+    def _infer_group_business_purpose(self, group_name: str, child_fields: List[Dict]) -> str:
+        """Infer business purpose from group name and child fields"""
+        try:
+            # Analyze group name patterns
+            name_upper = group_name.upper()
+            
+            if 'TRAN' in name_upper or 'TXN' in name_upper:
+                return "Transaction processing data structure"
+            elif 'CUST' in name_upper:
+                return "Customer information record"
+            elif 'ACCT' in name_upper:
+                return "Account data structure"
+            elif any(field.get('has_value') for field in child_fields):
+                return "Configuration or constant data group"
+            elif len(child_fields) > 5:
+                return "Complex data structure with multiple components"
+            else:
+                return f"Data group containing {len(child_fields)} fields"
+                
+        except Exception as e:
+            logger.error(f"Error inferring group business purpose: {str(e)}")
+            return "Data structure group"
+
     def _extract_child_fields(self, source_lines: List[str], start_idx: int, parent_level: int) -> List[Dict]:
         """Extract child fields from group definition"""
         child_fields = []
