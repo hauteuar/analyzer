@@ -135,7 +135,43 @@ class EnhancedFieldAnalyzer:
         except Exception as e:
             logger.error(f"Error getting field contexts: {str(e)}")
             return []
+    
+    def _extract_business_logic_patterns(self, source_content: str, program_name: str) -> Dict:
+        """Extract business logic patterns that drive dynamic behavior"""
+        patterns = {
+            'conditional_logic': [],
+            'decision_trees': [],
+            'variable_population_logic': [],
+            'dynamic_routing_patterns': []
+        }
         
+        lines = source_content.split('\n')
+        
+        for i, line in enumerate(lines):
+            line_upper = line.upper().strip()
+            
+            # Pattern 1: Conditional variable assignment
+            if re.search(r'IF.*MOVE.*TO.*(HOLD-|TRANX)', line_upper):
+                patterns['conditional_logic'].append({
+                    'line': i+1,
+                    'condition': extract_condition(line),
+                    'target_variable': extract_target_var(line),
+                    'business_rule': infer_business_rule(line)
+                })
+            
+            # Pattern 2: EVALUATE statements for routing
+            if 'EVALUATE' in line_upper and any(var in line_upper for var in ['TRANX', 'HOLD-']):
+                decision_tree = extract_evaluate_logic(lines, i)
+                patterns['decision_trees'].append(decision_tree)
+            
+            # Pattern 3: Table-driven logic
+            if re.search(r'(SEARCH|PERFORM.*VARYING).*TRANX', line_upper):
+                patterns['variable_population_logic'].append({
+                    'type': 'table_driven',
+                    'line': i+1,
+                    'logic': extract_table_logic(lines, i)
+                })
+
     def _build_semantic_context(self, contexts: List[Dict], query_context: str) -> str:
         """Build semantic context for better understanding"""
         try:
