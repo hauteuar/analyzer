@@ -3138,8 +3138,13 @@ class AgenticRAGChatManager:
 
     # Add this to your existing _route_specialized_query method in AgenticRAGChatManager
     def _enhanced_route_specialized_query(self, session_id: str, message: str, 
-                                          query_plan, contexts: List) -> Optional[str]:
-        """Super enhanced routing that includes both field and program flow analysis"""
+                                        query_plan, contexts: List) -> Optional[str]:
+        """Enhanced routing with priority for dynamic call analysis"""
+        
+        # PRIORITY 1: Check for dynamic call queries first
+        if self._is_dynamic_call_query(message, query_plan, contexts):
+            logger.info("Routing to dynamic call analysis handler")
+            return self._handle_dynamic_call_query_enhanced(session_id, message, query_plan, contexts)
         
         # Check for enhanced analysis (both field and program flow)
         if (hasattr(self, 'enhanced_field_query_analyzer') or 
@@ -3169,12 +3174,607 @@ class AgenticRAGChatManager:
         routed_response = self._route_specialized_query(session_id, message, query_plan, contexts)
         return routed_response
     
-
+    def process_query_with_full_features(self, session_id: str, message: str, conversation_id: str) -> Dict:
+        """Enhanced processing with dynamic call debugging"""
+        start_time = time.time()
+        
+        try:
+            # Ensure session is initialized
+            if session_id not in self._initialized_sessions:
+                self.initialize_session(session_id)
+            
+            # Step 1: Analyze query and create retrieval plan
+            query_plan = self.query_analyzer.analyze_query(message, session_id)
+            logger.info(f"Query analysis: {query_plan.query_type.value}, entities: {query_plan.entities}")
+            
+            # Step 2: Execute retrieval plan
+            retrieved_contexts = self.context_retriever.retrieve_contexts(session_id, query_plan)
+            logger.info(f"Retrieved {len(retrieved_contexts)} contexts using methods: {[ctx.retrieval_method for ctx in retrieved_contexts]}")
+            
+            # DEBUG: Log for dynamic call issues
+            if any(keyword in message.lower() for keyword in ['call', 'program', 'xctl', 'route']):
+                debug_info = self.debug_dynamic_call_processing(session_id, message, query_plan, retrieved_contexts)
+                logger.info(f"Dynamic call debug: routing={debug_info['routing_checks']}")
+            
+            # Step 3: Route to specialized handler
+            routed_response = self._enhanced_route_specialized_query(session_id, message, query_plan, retrieved_contexts)
+            if routed_response:
+                return self._format_rag_response(
+                    routed_response, 
+                    query_plan, 
+                    retrieved_contexts, 
+                    time.time() - start_time, 
+                    routed=True
+                )
+            
+            # Step 4: Generate standard response
+            response = self.response_generator.generate_response(message, query_plan, retrieved_contexts)
+            
+            # Step 5: Post-process and cache
+            processing_time = time.time() - start_time
+            self._cache_response(session_id, message, query_plan, response)
+            
+            return self._format_rag_response(response, query_plan, retrieved_contexts, processing_time)
+            
+        except Exception as e:
+            logger.error(f"Error in RAG pipeline: {str(e)}")
+            return {
+                'response': f"I encountered an error analyzing your request: {str(e)}",
+                'error': str(e)
+            }
     
     """
     Integration of Program Flow Analysis into Agentic RAG Chat Manager
     Add these methods to your existing AgenticRAGChatManager class
     """
+    def _is_dynamic_call_query(self, message: str, query_plan, contexts: List) -> bool:
+        """Enhanced detection for dynamic program call queries"""
+        message_lower = message.lower()
+        
+        # Enhanced dynamic call keywords
+        dynamic_keywords = [
+            'dynamic call', 'variable program', 'runtime call', 'xctl',
+            'calls what program', 'which program', 'program call',
+            'calls via', 'routes to', 'calling program', 'program routing',
+            'different programs', 'calls different', 'which programs',
+            'program flow', 'routing logic', 'call logic'
+        ]
+        
+        # Field usage in calls keywords
+        field_call_keywords = [
+            r'field.*call', r'field.*program', r'field.*xctl', r'field.*routing',
+            r'variable.*call', r'used.*call', r'populated.*call', r'values.*call',
+            r'conditions.*call', r'when.*call', r'how.*call', r'what.*call'
+        ]
+        
+        has_dynamic_keywords = any(keyword in message_lower for keyword in dynamic_keywords)
+        has_field_call_keywords = any(re.search(pattern, message_lower) for pattern in field_call_keywords)
+        
+        # Check if contexts contain dynamic call information
+        has_dynamic_contexts = any(
+            ctx.retrieval_method == "dynamic_call_business_logic" 
+            for ctx in contexts
+        )
+        
+        # Check source code for dynamic call patterns
+        has_dynamic_source = self._check_contexts_for_dynamic_calls(contexts)
+        
+        # Check if entities look like program names or call variables
+        program_entities = [e for e in query_plan.entities 
+                        if self._looks_like_program_name(e) or 
+                            self._looks_like_call_variable(e)]
+        
+        # Special case: Transaction fields often used in dynamic calls
+        transaction_entities = [e for e in query_plan.entities 
+                            if 'TRAN' in e.upper() or 'TXN' in e.upper()]
+        
+        return (has_dynamic_keywords or has_field_call_keywords or 
+                has_dynamic_contexts or has_dynamic_source or
+                (len(program_entities) > 0 and any(word in message_lower for word in ['call', 'program', 'route'])) or
+                (len(transaction_entities) > 0 and any(word in message_lower for word in ['call', 'program', 'flow'])))
+
+    # 3. SOURCE CODE PATTERN DETECTION (New)
+    def _check_contexts_for_dynamic_calls(self, contexts: List) -> bool:
+        """Check if any context contains dynamic call patterns"""
+        
+        for context in contexts:
+            source_code = context.source_code
+            if not source_code:
+                continue
+                
+            source_upper = source_code.upper()
+            
+            # Look for dynamic call patterns
+            dynamic_patterns = [
+                r'EXEC\s+CICS\s+XCTL\s+PROGRAM\s*\(\s*[A-Z0-9\-]+\s*\)',
+                r'EXEC\s+CICS\s+LINK\s+PROGRAM\s*\(\s*[A-Z0-9\-]+\s*\)',
+                r'MOVE\s+.*\s+TO\s+[A-Z0-9\-]+.*XCTL',
+                r'MOVE\s+.*\s+TO\s+[A-Z0-9\-]+.*LINK'
+            ]
+            
+            for pattern in dynamic_patterns:
+                if re.search(pattern, source_upper):
+                    return True
+        
+        return False
+
+    # 4. ENHANCED CALL VARIABLE DETECTION (New)
+    def _looks_like_call_variable(self, entity: str) -> bool:
+        """Check if entity looks like a variable used in dynamic calls"""
+        entity_upper = entity.upper()
+        # Common patterns for call variables
+        call_patterns = ['TRAN', 'TXN', 'PROG', 'PGM', 'CALL', 'XCTL']
+        return any(pattern in entity_upper for pattern in call_patterns)
+
+    # 5. MAIN DYNAMIC CALL HANDLER (New)
+    def _handle_dynamic_call_query_enhanced(self, session_id: str, message: str, 
+                                        query_plan, contexts: List) -> str:
+        """Enhanced dynamic call query handler with detailed field usage analysis"""
+        
+        dynamic_contexts = [ctx for ctx in contexts 
+                        if ctx.retrieval_method == "dynamic_call_business_logic"]
+        
+        if not dynamic_contexts:
+            # Try to find dynamic call info in regular contexts
+            return self._analyze_dynamic_calls_from_regular_contexts(
+                session_id, message, query_plan, contexts
+            )
+        
+        response_parts = [
+            "**Dynamic Program Call Analysis**",
+            ""
+        ]
+        
+        for context in dynamic_contexts:
+            metadata = context.metadata
+            program_name = metadata.get('component_name')
+            dynamic_calls = metadata.get('dynamic_calls', [])
+            call_variables = metadata.get('call_variables', [])
+            
+            response_parts.extend([
+                f"**Program: {program_name}**",
+                ""
+            ])
+            
+            # Analyze each call variable in detail
+            for var_name in call_variables:
+                if var_name and var_name != 'UNKNOWN':
+                    variable_analysis = self._analyze_call_variable_usage(
+                        context.source_code, var_name, dynamic_calls
+                    )
+                    response_parts.extend(variable_analysis)
+            
+            # Add condition analysis
+            condition_analysis = self._analyze_call_conditions(
+                context.source_code, dynamic_calls
+            )
+            if condition_analysis:
+                response_parts.extend([
+                    "",
+                    "**Call Conditions:**",
+                    ""
+                ])
+                response_parts.extend(condition_analysis)
+            
+            # Add target program analysis
+            target_analysis = self._analyze_target_programs(dynamic_calls)
+            if target_analysis:
+                response_parts.extend([
+                    "",
+                    "**Target Programs:**",
+                    ""
+                ])
+                response_parts.extend(target_analysis)
+        
+        return '\n'.join(response_parts)
+
+    # 6. FALLBACK ANALYSIS FOR REGULAR CONTEXTS (New)
+    def _analyze_dynamic_calls_from_regular_contexts(self, session_id: str, message: str, 
+                                                query_plan, contexts: List) -> str:
+        """Analyze dynamic calls from regular source contexts when specialized contexts aren't available"""
+        
+        logger.info("Analyzing dynamic calls from regular contexts")
+        
+        response_parts = [
+            "**Dynamic Call Analysis from Source Code**",
+            ""
+        ]
+        
+        found_dynamic_calls = False
+        
+        for context in contexts:
+            source_code = context.source_code
+            component_name = context.metadata.get('component_name', 'Unknown')
+            
+            # Search for dynamic call patterns in source code
+            dynamic_call_analysis = self._extract_dynamic_calls_from_source(
+                source_code, component_name, query_plan.entities
+            )
+            
+            if dynamic_call_analysis['has_dynamic_calls']:
+                found_dynamic_calls = True
+                response_parts.extend([
+                    f"**Program: {component_name}**",
+                    ""
+                ])
+                response_parts.extend(dynamic_call_analysis['analysis'])
+        
+        if not found_dynamic_calls:
+            return self._generate_no_dynamic_calls_response(message, query_plan.entities)
+        
+        return '\n'.join(response_parts)
+
+    # 7. SOURCE CODE EXTRACTION (New)
+    def _extract_dynamic_calls_from_source(self, source_code: str, program_name: str, 
+                                        entities: List[str]) -> Dict:
+        """Extract dynamic call information directly from source code"""
+        
+        lines = source_code.split('\n')
+        analysis = []
+        has_dynamic_calls = False
+        
+        # Look for XCTL/LINK with variables
+        for i, line in enumerate(lines):
+            line_upper = line.upper().strip()
+            
+            # Pattern 1: EXEC CICS XCTL PROGRAM(variable)
+            if re.search(r'EXEC\s+CICS\s+(XCTL|LINK)\s+PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)', line_upper):
+                has_dynamic_calls = True
+                match = re.search(r'EXEC\s+CICS\s+(XCTL|LINK)\s+PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)', line_upper)
+                call_type = match.group(1)
+                variable_name = match.group(2)
+                
+                # Analyze this variable's usage
+                var_analysis = self._analyze_variable_in_source(lines, variable_name, i)
+                
+                analysis.extend([
+                    f"**Dynamic {call_type} Call (Line {i+1}):**",
+                    f"• Variable: {variable_name}",
+                    f"• Call Statement: {line.strip()}",
+                    ""
+                ])
+                
+                if var_analysis['assignments']:
+                    analysis.extend([
+                        "**Variable Assignments:**",
+                        ""
+                    ])
+                    for assign in var_analysis['assignments']:
+                        analysis.append(f"• Line {assign['line']}: {assign['statement']}")
+                        if assign['condition']:
+                            analysis.append(f"  Condition: {assign['condition']}")
+                        if assign['value']:
+                            analysis.append(f"  Value: '{assign['value']}'")
+                    analysis.append("")
+                
+                if var_analysis['conditions']:
+                    analysis.extend([
+                        "**Conditional Logic:**",
+                        ""
+                    ])
+                    for cond in var_analysis['conditions']:
+                        analysis.append(f"• Line {cond['line']}: {cond['statement']}")
+                    analysis.append("")
+            
+            # Pattern 2: Look for entities mentioned in the query
+            for entity in entities:
+                if entity.upper() in line_upper and any(keyword in line_upper for keyword in 
+                                                    ['MOVE', 'XCTL', 'LINK', 'CALL']):
+                    entity_analysis = self._analyze_entity_usage_in_line(lines, i, entity)
+                    if entity_analysis:
+                        has_dynamic_calls = True
+                        analysis.extend(entity_analysis)
+        
+        return {
+            'has_dynamic_calls': has_dynamic_calls,
+            'analysis': analysis
+        }
+
+    # 8. VARIABLE USAGE ANALYSIS (New)
+    def _analyze_call_variable_usage(self, source_code: str, var_name: str, 
+                                    dynamic_calls: List[Dict]) -> List[str]:
+        """Analyze how the call variable is populated and used"""
+        analysis_parts = [
+            f"**Variable: {var_name}**",
+            ""
+        ]
+        
+        lines = source_code.split('\n')
+        var_upper = var_name.upper()
+        
+        # Find all references to this variable
+        variable_refs = []
+        for i, line in enumerate(lines):
+            line_upper = line.upper().strip()
+            if var_upper in line_upper:
+                # Categorize the reference
+                ref_type = self._categorize_variable_reference(line_upper, var_upper)
+                variable_refs.append({
+                    'line_number': i + 1,
+                    'line_content': line.strip(),
+                    'reference_type': ref_type,
+                    'context': self._get_variable_context(lines, i)
+                })
+        
+        # Group references by type
+        assignments = [ref for ref in variable_refs if ref['reference_type'] == 'ASSIGNMENT']
+        conditions = [ref for ref in variable_refs if ref['reference_type'] == 'CONDITION']
+        calls = [ref for ref in variable_refs if ref['reference_type'] == 'PROGRAM_CALL']
+        
+        # Analyze assignments
+        if assignments:
+            analysis_parts.extend([
+                "**Value Assignments:**",
+                ""
+            ])
+            for assign in assignments:
+                analysis_parts.append(f"• Line {assign['line_number']}: {assign['line_content']}")
+                if assign['context']:
+                    analysis_parts.append(f"  Context: {assign['context']}")
+            analysis_parts.append("")
+        
+        # Analyze conditions
+        if conditions:
+            analysis_parts.extend([
+                "**Conditional Logic:**",
+                ""
+            ])
+            for cond in conditions:
+                analysis_parts.append(f"• Line {cond['line_number']}: {cond['line_content']}")
+                if cond['context']:
+                    analysis_parts.append(f"  Context: {cond['context']}")
+            analysis_parts.append("")
+        
+        # Analyze program calls
+        if calls:
+            analysis_parts.extend([
+                "**Program Calls:**",
+                ""
+            ])
+            for call in calls:
+                analysis_parts.append(f"• Line {call['line_number']}: {call['line_content']}")
+                
+                # Find corresponding dynamic call info
+                matching_call = self._find_matching_dynamic_call(
+                    dynamic_calls, call['line_number']
+                )
+                if matching_call:
+                    target = matching_call.get('target_component', 'Unknown')
+                    confidence = matching_call.get('confidence_score', 0)
+                    analysis_parts.append(f"  → Resolves to: {target} (confidence: {confidence:.1f})")
+            analysis_parts.append("")
+        
+        return analysis_parts
+
+    # 9. HELPER METHODS (New)
+    def _categorize_variable_reference(self, line: str, var_name: str) -> str:
+        """Categorize how a variable is being referenced"""
+        if f'MOVE' in line and f'TO {var_name}' in line:
+            return 'ASSIGNMENT'
+        elif any(keyword in line for keyword in ['IF', 'WHEN', 'EVALUATE']) and var_name in line:
+            return 'CONDITION'
+        elif any(keyword in line for keyword in ['XCTL', 'LINK', 'CALL']) and var_name in line:
+            return 'PROGRAM_CALL'
+        elif f'{var_name} =' in line or f'= {var_name}' in line:
+            return 'COMPARISON'
+        else:
+            return 'REFERENCE'
+
+    def _get_variable_context(self, lines: List[str], line_idx: int) -> str:
+        """Get business context around variable usage"""
+        # Look for comments or meaningful statements nearby
+        context_lines = []
+        for i in range(max(0, line_idx - 2), min(len(lines), line_idx + 3)):
+            line = lines[i].strip()
+            if line.startswith('*') and len(line) > 10:
+                context_lines.append(line[1:].strip())
+            elif i != line_idx and any(keyword in line.upper() for keyword in 
+                                    ['IF', 'WHEN', 'PERFORM', 'EVALUATE']):
+                context_lines.append(line[:50] + "..." if len(line) > 50 else line)
+        
+        return '; '.join(context_lines) if context_lines else ""
+
+    def _analyze_variable_in_source(self, lines: List[str], variable_name: str, 
+                                call_line_idx: int) -> Dict:
+        """Analyze how a variable is populated before being used in a call"""
+        
+        var_upper = variable_name.upper()
+        assignments = []
+        conditions = []
+        
+        # Look backwards from the call to find assignments
+        for i in range(call_line_idx - 1, max(0, call_line_idx - 50), -1):
+            line = lines[i].strip()
+            line_upper = line.upper()
+            
+            if not line or line.startswith('*'):
+                continue
+            
+            # Look for MOVE statements to this variable
+            if f'MOVE' in line_upper and f'TO {var_upper}' in line_upper:
+                # Extract the value being moved
+                move_match = re.search(rf'MOVE\s+([^T]+)\s+TO\s+{re.escape(var_upper)}', line_upper)
+                value = move_match.group(1).strip() if move_match else 'Unknown'
+                
+                # Check for surrounding conditional logic
+                condition = self._find_surrounding_condition(lines, i)
+                
+                assignments.append({
+                    'line': i + 1,
+                    'statement': line,
+                    'value': value,
+                    'condition': condition
+                })
+            
+            # Look for conditional statements involving this variable
+            elif any(keyword in line_upper for keyword in ['IF', 'WHEN', 'EVALUATE']) and var_upper in line_upper:
+                conditions.append({
+                    'line': i + 1,
+                    'statement': line,
+                    'type': 'conditional_check'
+                })
+        
+        return {
+            'assignments': assignments,
+            'conditions': conditions
+        }
+
+    def _find_surrounding_condition(self, lines: List[str], line_idx: int) -> str:
+        """Find conditional logic surrounding a statement"""
+        
+        # Look backwards for IF/WHEN/EVALUATE
+        for i in range(line_idx - 1, max(0, line_idx - 10), -1):
+            line = lines[i].upper().strip()
+            
+            if any(keyword in line for keyword in ['IF ', 'WHEN ', 'EVALUATE ']):
+                # Extract the condition
+                for keyword in ['IF ', 'WHEN ', 'EVALUATE ']:
+                    if keyword in line:
+                        condition_part = line.split(keyword, 1)[1] if keyword in line else ""
+                        return f"{keyword.strip()} {condition_part[:50]}..."
+        
+        return ""
+
+    def _analyze_entity_usage_in_line(self, lines: List[str], line_idx: int, entity: str) -> List[str]:
+        """Analyze how a specific entity is used in a line"""
+        
+        line = lines[line_idx].strip()
+        line_upper = line.upper()
+        entity_upper = entity.upper()
+        
+        analysis = []
+        
+        if f'MOVE' in line_upper and entity_upper in line_upper:
+            if f'TO {entity_upper}' in line_upper:
+                # Entity is being assigned a value
+                move_match = re.search(rf'MOVE\s+([^T]+)\s+TO\s+{re.escape(entity_upper)}', line_upper)
+                value = move_match.group(1).strip() if move_match else 'Unknown'
+                
+                analysis.extend([
+                    f"**Field Assignment: {entity} (Line {line_idx + 1})**",
+                    f"• Statement: {line}",
+                    f"• Value: '{value}'",
+                    ""
+                ])
+                
+                # Look for surrounding context
+                condition = self._find_surrounding_condition(lines, line_idx)
+                if condition:
+                    analysis.append(f"• Condition: {condition}")
+                    analysis.append("")
+            
+            elif f'MOVE {entity_upper}' in line_upper:
+                # Entity is being used as source
+                to_match = re.search(rf'MOVE\s+{re.escape(entity_upper)}\s+TO\s+([A-Z0-9\-]+)', line_upper)
+                target = to_match.group(1) if to_match else 'Unknown'
+                
+                analysis.extend([
+                    f"**Field Usage: {entity} (Line {line_idx + 1})**",
+                    f"• Statement: {line}",
+                    f"• Used to populate: {target}",
+                    ""
+                ])
+        
+        elif any(keyword in line_upper for keyword in ['XCTL', 'LINK']) and entity_upper in line_upper:
+            # Entity used in program call
+            analysis.extend([
+                f"**Program Call with {entity} (Line {line_idx + 1})**",
+                f"• Statement: {line}",
+                f"• Usage: Dynamic program name or parameter",
+                ""
+            ])
+        
+        return analysis
+
+    def _analyze_call_conditions(self, source_code: str, dynamic_calls: List[Dict]) -> List[str]:
+        """Analyze the conditions that determine which program is called"""
+        conditions = []
+        
+        # Group calls by the conditions that trigger them
+        condition_groups = {}
+        for call in dynamic_calls:
+            analysis_details = call.get('analysis_details', {})
+            condition = analysis_details.get('condition', 'Unknown')
+            
+            if condition not in condition_groups:
+                condition_groups[condition] = []
+            condition_groups[condition].append(call)
+        
+        for condition, calls in condition_groups.items():
+            if condition != 'Unknown':
+                conditions.append(f"**When {condition}:**")
+                for call in calls:
+                    target = call.get('target_component', 'Unknown')
+                    confidence = call.get('confidence_score', 0)
+                    conditions.append(f"  → Calls {target} (confidence: {confidence:.1f})")
+                conditions.append("")
+        
+        return conditions
+
+    def _analyze_target_programs(self, dynamic_calls: List[Dict]) -> List[str]:
+        """Analyze target programs from dynamic calls"""
+        analysis = []
+        
+        programs = {}
+        for call in dynamic_calls:
+            target = call.get('target_component', 'Unknown')
+            confidence = call.get('confidence_score', 0)
+            status = call.get('display_status', 'unknown')
+            
+            if target not in programs:
+                programs[target] = {
+                    'confidence': confidence,
+                    'status': status,
+                    'calls': 1
+                }
+            else:
+                programs[target]['calls'] += 1
+        
+        for program, info in programs.items():
+            status_indicator = "✓" if info['status'] == 'present' else "⚠" if info['status'] == 'missing' else "?"
+            analysis.append(f"{status_indicator} **{program}** (confidence: {info['confidence']:.1f}, calls: {info['calls']})")
+        
+        return analysis
+
+    def _find_matching_dynamic_call(self, dynamic_calls: List[Dict], line_number: int) -> Optional[Dict]:
+        """Find dynamic call that matches the line number"""
+        for call in dynamic_calls:
+            analysis_details = call.get('analysis_details', {})
+            call_line = analysis_details.get('line_number', 0)
+            
+            # Allow some tolerance for line number matching
+            if abs(call_line - line_number) <= 2:
+                return call
+        
+        return None
+
+    def _generate_no_dynamic_calls_response(self, message: str, entities: List[str]) -> str:
+        """Generate response when no dynamic calls are found"""
+        
+        response_parts = [
+            "**Dynamic Call Analysis Results**",
+            "",
+            "I didn't find explicit dynamic program calls (XCTL/LINK with variables) in the analyzed code."
+        ]
+        
+        if entities:
+            response_parts.extend([
+                "",
+                f"**Searched for:** {', '.join(entities)}",
+                "",
+                "**Possible reasons:**",
+                "• The fields might be used for other purposes (data storage, validation, etc.)",
+                "• Dynamic calls might be in programs not yet analyzed",
+                "• The calls might use different patterns or be indirect",
+                "",
+                "**Alternative analysis:**",
+                "Try asking about:",
+                f"• How {entities[0]} is populated with different values",
+                f"• What business logic determines {entities[0]} values",
+                f"• Which programs reference {entities[0]}",
+            ])
+        
+        return '\n'.join(response_parts)
 
     def initialize_program_flow_analysis(self):
         """Initialize program flow analysis components"""
