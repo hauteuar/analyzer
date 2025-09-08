@@ -42,7 +42,7 @@ class EnhancedFieldAnalyzer:
         self.vector_store = vector_store
         
     def analyze_field_comprehensive(self, session_id: str, field_name: str, 
-                                  query_context: str = "") -> Dict:
+                              query_context: str = "") -> Dict:
         """
         Comprehensive field analysis including:
         - Group structure analysis
@@ -58,7 +58,7 @@ class EnhancedFieldAnalyzer:
             # Analyze group structure if applicable
             group_analysis = self._analyze_group_structure(field_contexts, field_name)
             
-            # Extract business logic patterns
+            # Extract business logic patterns - FIXED: Pass contexts correctly
             business_logic = self._extract_business_logic_patterns(field_contexts, field_name)
             
             # Analyze conditional assignments
@@ -87,7 +87,44 @@ class EnhancedFieldAnalyzer:
         except Exception as e:
             logger.error(f"Error in comprehensive field analysis: {str(e)}")
             return {'error': str(e)}
+        
+    def _analyze_cross_program_usage(self, contexts: List[Dict], field_name: str) -> Dict:
+        """Analyze how field is used across multiple programs - FIXED"""
+        try:
+            cross_usage = {
+                'programs_using_field': [],
+                'usage_patterns': {},
+                'common_values': [],
+                'business_flows': []
+            }
+            
+            for context in contexts:
+                program_name = context.get('component_name', 'Unknown')
+                source_code = context.get('source_code', '')
+                
+                if not source_code:
+                    continue
+                
+                # Analyze usage in this program
+                usage_info = self._analyze_field_usage_in_program(source_code, field_name, program_name)
+                
+                cross_usage['programs_using_field'].append(program_name)
+                cross_usage['usage_patterns'][program_name] = usage_info
+            
+            return cross_usage
+            
+        except Exception as e:
+            logger.error(f"Error analyzing cross-program usage: {str(e)}")
+            return {}
     
+    def _extract_condition(self, line: str) -> str:
+        """Extract condition from IF statement"""
+        try:
+            if_match = re.search(r'IF\s+(.+?)\s+(?:MOVE|THEN)', line.upper())
+            return if_match.group(1) if if_match else "Unknown condition"
+        except:
+            return "Unknown condition"
+
     def _get_field_source_contexts(self, session_id: str, field_name: str) -> List[Dict]:
         """Enhanced field source context retrieval"""
         try:
@@ -136,41 +173,136 @@ class EnhancedFieldAnalyzer:
             logger.error(f"Error getting field contexts: {str(e)}")
             return []
     
-    def _extract_business_logic_patterns(self, source_content: str, program_name: str) -> Dict:
-        """Extract business logic patterns that drive dynamic behavior"""
-        patterns = {
-            'conditional_logic': [],
-            'decision_trees': [],
-            'variable_population_logic': [],
-            'dynamic_routing_patterns': []
-        }
+    def _extract_business_logic_patterns(self, contexts: List[Dict], field_name: str) -> List[Dict]:
+        """Extract business logic patterns from field contexts - FIXED"""
+        all_patterns = []
         
-        lines = source_content.split('\n')
+        try:
+            for context in contexts:
+                source_content = context.get('source_code', '')
+                component_name = context.get('component_name', 'Unknown')
+                
+                if not source_content:
+                    continue
+                    
+                lines = source_content.split('\n')
+                patterns = {
+                    'conditional_logic': [],
+                    'decision_trees': [],
+                    'variable_population_logic': [],
+                    'dynamic_routing_patterns': []
+                }
+                
+                for i, line in enumerate(lines):
+                    line_upper = line.upper().strip()
+                    
+                    # Pattern 1: Conditional variable assignment
+                    if re.search(rf'IF.*MOVE.*TO.*{re.escape(field_name.upper())}', line_upper):
+                        patterns['conditional_logic'].append({
+                            'program': component_name,
+                            'line': i+1,
+                            'condition': self._extract_condition(line),
+                            'target_variable': field_name,
+                            'business_rule': self._infer_business_rule(line)
+                        })
+                    
+                    # Pattern 2: EVALUATE statements for routing
+                    if 'EVALUATE' in line_upper and field_name.upper() in line_upper:
+                        decision_tree = self._extract_evaluate_logic(lines, i, component_name)
+                        patterns['decision_trees'].append(decision_tree)
+                    
+                    # Pattern 3: Table-driven logic
+                    if re.search(rf'(SEARCH|PERFORM.*VARYING).*{re.escape(field_name.upper())}', line_upper):
+                        patterns['variable_population_logic'].append({
+                            'program': component_name,
+                            'type': 'table_driven',
+                            'line': i+1,
+                            'logic': self._extract_table_logic(lines, i)
+                        })
+                
+                # Add patterns from this context to overall patterns
+                all_patterns.append({
+                    'program': component_name,
+                    'patterns': patterns
+                })
+                
+        except Exception as e:
+            logger.error(f"Error extracting business logic patterns: {str(e)}")
         
-        for i, line in enumerate(lines):
-            line_upper = line.upper().strip()
+        return all_patterns
+    
+    def _infer_business_rule(self, line: str) -> str:
+        """Infer business rule from line content"""
+        try:
+            line_upper = line.upper()
+            if 'CUSTOMER' in line_upper:
+                return "Customer-related business rule"
+            elif 'TRANSACTION' in line_upper or 'TRAN' in line_upper:
+                return "Transaction processing rule"
+            elif 'ERROR' in line_upper:
+                return "Error handling rule"
+            else:
+                return "Business logic rule"
+        except:
+            return "Unknown business rule"
+        
+    def _extract_evaluate_logic(self, lines: List[str], start_idx: int, program_name: str) -> Dict:
+        """Extract EVALUATE statement logic"""
+        try:
+            evaluate_logic = {
+                'program': program_name,
+                'start_line': start_idx + 1,
+                'variable': 'Unknown',
+                'cases': [],
+                'default_action': None
+            }
             
-            # Pattern 1: Conditional variable assignment
-            if re.search(r'IF.*MOVE.*TO.*(HOLD-|TRANX)', line_upper):
-                patterns['conditional_logic'].append({
-                    'line': i+1,
-                    'condition': extract_condition(line),
-                    'target_variable': extract_target_var(line),
-                    'business_rule': infer_business_rule(line)
-                })
+            # Extract EVALUATE variable
+            evaluate_line = lines[start_idx].upper()
+            eval_match = re.search(r'EVALUATE\s+([A-Z0-9\-]+)', evaluate_line)
+            if eval_match:
+                evaluate_logic['variable'] = eval_match.group(1)
             
-            # Pattern 2: EVALUATE statements for routing
-            if 'EVALUATE' in line_upper and any(var in line_upper for var in ['TRANX', 'HOLD-']):
-                decision_tree = extract_evaluate_logic(lines, i)
-                patterns['decision_trees'].append(decision_tree)
+            # Look for WHEN clauses
+            for i in range(start_idx + 1, min(len(lines), start_idx + 20)):
+                line_upper = lines[i].upper().strip()
+                
+                if 'WHEN ' in line_upper:
+                    when_match = re.search(r'WHEN\s+(.+)', line_upper)
+                    if when_match:
+                        evaluate_logic['cases'].append({
+                            'condition': when_match.group(1),
+                            'line': i + 1
+                        })
+                elif 'WHEN OTHER' in line_upper:
+                    evaluate_logic['default_action'] = i + 1
+                elif 'END-EVALUATE' in line_upper:
+                    break
             
-            # Pattern 3: Table-driven logic
-            if re.search(r'(SEARCH|PERFORM.*VARYING).*TRANX', line_upper):
-                patterns['variable_population_logic'].append({
-                    'type': 'table_driven',
-                    'line': i+1,
-                    'logic': extract_table_logic(lines, i)
-                })
+            return evaluate_logic
+            
+        except Exception as e:
+            logger.error(f"Error extracting EVALUATE logic: {str(e)}")
+            return {'error': str(e)}
+        
+    def _extract_table_logic(self, lines: List[str], start_idx: int) -> str:
+        """Extract table-driven logic"""
+        try:
+            context_lines = lines[max(0, start_idx-2):min(len(lines), start_idx+3)]
+            return ' '.join([line.strip() for line in context_lines if line.strip()])
+        except:
+            return "Table logic extraction failed"
+
+    def _extract_control_type(self, line_upper: str) -> str:
+        """Extract control flow type from line"""
+        if 'XCTL' in line_upper:
+            return 'XCTL'
+        elif 'LINK' in line_upper:
+            return 'LINK'
+        elif 'CALL' in line_upper:
+            return 'CALL'
+        else:
+            return 'UNKNOWN'
 
     def _build_semantic_context(self, contexts: List[Dict], query_context: str) -> str:
         """Build semantic context for better understanding"""
