@@ -2091,13 +2091,13 @@ class AgenticRAGChatManager:
         return self._handle_field_definition_query(session_id, field_name, contexts)
 
     def _handle_dependencies_query(self, session_id: str, message: str, 
-                                query_plan: QueryPlan, contexts: List) -> str:
-        """Handle dependency-related queries"""
+                              query_plan: QueryPlan, contexts: List) -> str:
+        """Enhanced dependencies handler that routes to comprehensive call analysis"""
         
-        # Check what type of dependencies the user is asking about
         message_lower = message.lower()
         
-        if 'program' in message_lower or 'call' in message_lower:
+        # Route to comprehensive program calls handler
+        if any(keyword in message_lower for keyword in ['program', 'call', 'xctl', 'link']):
             return self._handle_program_calls_query(session_id, message, query_plan, contexts)
         elif 'file' in message_lower:
             return self._handle_file_usage_query(session_id, message, query_plan, contexts)
@@ -2548,88 +2548,431 @@ class AgenticRAGChatManager:
         response_parts.append(f"**Total Dependencies**: {total_deps}")
         
         return '\n'.join(response_parts)
+    
     def _handle_program_calls_query(self, session_id: str, message: str, 
                                 query_plan: QueryPlan, contexts: List) -> str:
-        """Handle program calls queries"""
+        """Comprehensive program calls analysis - both static and dynamic"""
         try:
             if not contexts:
                 return "I couldn't find program call information in the analyzed code."
             
             response_parts = [
-                "**Program Calls Analysis**",
+                "**Comprehensive Program Calls Analysis**",
                 ""
             ]
             
-            all_program_calls = []
+            all_calls_found = False
             
             for context in contexts:
-                metadata = context.metadata
-                dependencies = metadata.get('dependencies', [])
+                component_name = context.metadata.get('component_name', 'Unknown')
+                source_code = context.source_code
                 
-                # Extract program call dependencies
-                program_calls = [dep for dep in dependencies 
-                            if 'PROGRAM' in dep.get('relationship_type', '') or 
-                                'CALL' in dep.get('relationship_type', '')]
+                if not source_code:
+                    continue
                 
-                if program_calls:
-                    component_name = metadata.get('component_name', 'Unknown')
+                # Comprehensive call analysis
+                call_analysis = self._extract_all_program_calls(source_code, component_name, query_plan.entities)
+                
+                if call_analysis['has_calls']:
+                    all_calls_found = True
                     response_parts.extend([
-                        f"**In {component_name}:**",
+                        f"**Program: {component_name}**",
                         ""
                     ])
-                    
-                    for call in program_calls:
-                        target_prog = call.get('target_component')
-                        rel_type = call.get('relationship_type')
-                        
-                        # Extract line information
-                        try:
-                            details = json.loads(call.get('analysis_details_json', '{}'))
-                            line_info = f" (Line {details.get('line_number', 'Unknown')})" if details.get('line_number') else ""
-                        except:
-                            line_info = ""
-                        
-                        response_parts.append(f"• **{rel_type}**: {target_prog}{line_info}")
-                        
-                        all_program_calls.append({
-                            'source': component_name,
-                            'target': target_prog,
-                            'type': rel_type
-                        })
-                    
+                    response_parts.extend(call_analysis['analysis'])
                     response_parts.append("")
             
-            if not all_program_calls:
-                return "No program calls found in the analyzed components."
-            
-            # Add summary
-            response_parts.extend([
-                f"**Summary**: Found {len(all_program_calls)} program call(s) across {len(contexts)} component(s).",
-                ""
-            ])
-            
-            # Add source code evidence if available
-            for context in contexts:
-                source_lines = context.source_code.split('\n')
-                call_lines = [line for line in source_lines 
-                            if 'CALL' in line.upper() or 'LINK' in line.upper() or 'XCTL' in line.upper()]
-                
-                if call_lines:
-                    response_parts.extend([
-                        "**Source Code Examples:**",
-                        ""
-                    ])
-                    for line in call_lines[:3]:  # Show first 3
-                        response_parts.append(f"```cobol\n{line.strip()}\n```")
-                    response_parts.append("")
-                    break
+            if not all_calls_found:
+                # Try dependency-based analysis as fallback
+                return self._analyze_calls_from_dependencies(session_id, message, query_plan, contexts)
             
             return '\n'.join(response_parts)
             
         except Exception as e:
-            logger.error(f"Error in program calls handler: {str(e)}")
+            logger.error(f"Error in comprehensive program calls handler: {str(e)}")
             return f"Error analyzing program calls: {str(e)}"
+        
+    def _analyze_calls_from_dependencies(self, session_id: str, message: str, 
+                                   query_plan: QueryPlan, contexts: List) -> str:
+        """Fallback analysis using dependency data"""
+        
+        try:
+            # Get all dependencies
+            dependencies = self.db_manager.get_dependencies(session_id)
+            
+            # Filter for program call dependencies
+            program_deps = [dep for dep in dependencies 
+                        if any(call_type in dep.get('relationship_type', '') 
+                                for call_type in ['PROGRAM', 'CALL', 'XCTL', 'LINK'])]
+            
+            if not program_deps:
+                return self._generate_no_calls_found_response(message, query_plan.entities, contexts)
+            
+            response_parts = [
+                "**Program Calls from Dependency Analysis**",
+                "",
+                f"Found {len(program_deps)} program call dependencies:",
+                ""
+            ]
+            
+            # Group by source program
+            calls_by_program = {}
+            for dep in program_deps:
+                source = dep.get('source_component', 'Unknown')
+                if source not in calls_by_program:
+                    calls_by_program[source] = []
+                calls_by_program[source].append(dep)
+            
+            for source_program, calls in calls_by_program.items():
+                response_parts.extend([
+                    f"**From {source_program}:**",
+                    ""
+                ])
+                
+                for call in calls:
+                    target = call.get('target_component', 'Unknown')
+                    call_type = call.get('relationship_type', 'UNKNOWN')
+                    
+                    response_parts.append(f"• **{call_type}**: {target}")
+                    
+                    # Add analysis details if available
+                    try:
+                        details = json.loads(call.get('analysis_details_json', '{}'))
+                        if details.get('line_number'):
+                            response_parts.append(f"  Line: {details['line_number']}")
+                        if details.get('call_pattern'):
+                            response_parts.append(f"  Pattern: {details['call_pattern']}")
+                    except:
+                        pass
+                
+                response_parts.append("")
+            
+            return '\n'.join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error in dependency-based call analysis: {str(e)}")
+            return f"Error analyzing program calls from dependencies: {str(e)}"
     
+    def _generate_no_calls_found_response(self, message: str, entities: List[str], contexts: List) -> str:
+        """Generate helpful response when no calls are found"""
+        
+        response_parts = [
+            "**Program Call Analysis Results**",
+            "",
+            "I searched for program calls but didn't find the expected patterns."
+        ]
+        
+        if entities:
+            response_parts.extend([
+                "",
+                f"**Searched for:** {', '.join(entities)}",
+                ""
+            ])
+        
+        # Analyze what we DID find
+        found_patterns = []
+        for context in contexts:
+            if context.source_code:
+                source_upper = context.source_code.upper()
+                component = context.metadata.get('component_name', 'Unknown')
+                
+                patterns_in_program = []
+                if 'PERFORM' in source_upper:
+                    patterns_in_program.append('PERFORM statements')
+                if 'COPY' in source_upper:
+                    patterns_in_program.append('COPY statements')
+                if 'FILE' in source_upper and ('READ' in source_upper or 'WRITE' in source_upper):
+                    patterns_in_program.append('File operations')
+                if 'EXEC CICS' in source_upper:
+                    patterns_in_program.append('CICS commands')
+                
+                if patterns_in_program:
+                    found_patterns.append(f"• **{component}**: {', '.join(patterns_in_program)}")
+        
+        if found_patterns:
+            response_parts.extend([
+                "**What I found instead:**",
+                ""
+            ])
+            response_parts.extend(found_patterns)
+            response_parts.append("")
+        
+        response_parts.extend([
+            "**Possible reasons:**",
+            "• Program calls might use different naming patterns",
+            "• Calls might be in copybooks or include members",
+            "• Dynamic calls might use complex variable logic",
+            "• The program might be a called program rather than a calling program",
+            "",
+            "**Try asking:**",
+            "• 'What programs call this program?' (reverse lookup)",
+            "• 'Show me all PERFORM statements' (internal calls)",
+            "• 'What CICS commands are used?' (transaction calls)",
+            "• 'Show me file operations' (data processing flows)"
+        ])
+        
+        return '\n'.join(response_parts)
+
+    def _extract_all_program_calls(self, source_code: str, program_name: str, entities: List[str]) -> Dict:
+        """Extract ALL types of program calls from source code"""
+    
+        lines = source_code.split('\n')
+        analysis = []
+        has_calls = False
+        
+        # Track all call types
+        static_calls = []
+        dynamic_calls = []
+        batch_calls = []
+        cics_calls = []
+        
+        for i, line in enumerate(lines):
+            line_upper = line.upper().strip()
+            line_number = i + 1
+            
+            if not line_upper or line_upper.startswith('*'):
+                continue
+            
+            # 1. CICS Dynamic Calls (XCTL/LINK with variables)
+            cics_dynamic_match = re.search(r'EXEC\s+CICS\s+(XCTL|LINK)\s+PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)', line_upper)
+            if cics_dynamic_match:
+                call_type = cics_dynamic_match.group(1)
+                variable = cics_dynamic_match.group(2)
+                
+                # Check if it's a variable (not a literal)
+                if not (variable.startswith("'") or variable.startswith('"')):
+                    has_calls = True
+                    variable_analysis = self._analyze_call_variable_comprehensive(lines, variable, i)
+                    
+                    dynamic_calls.append({
+                        'type': f'CICS {call_type} (Dynamic)',
+                        'line': line_number,
+                        'statement': line.strip(),
+                        'variable': variable,
+                        'analysis': variable_analysis
+                    })
+            
+            # 2. CICS Static Calls (XCTL/LINK with literals)
+            cics_static_match = re.search(r'EXEC\s+CICS\s+(XCTL|LINK)\s+PROGRAM\s*\(\s*[\'"]([A-Z0-9\-]+)[\'"]\s*\)', line_upper)
+            if cics_static_match:
+                call_type = cics_static_match.group(1)
+                target_program = cics_static_match.group(2)
+                has_calls = True
+                
+                static_calls.append({
+                    'type': f'CICS {call_type} (Static)',
+                    'line': line_number,
+                    'statement': line.strip(),
+                    'target': target_program
+                })
+            
+            # 3. Batch/COBOL CALL statements
+            call_match = re.search(r'CALL\s+[\'"]([A-Z0-9\-]+)[\'"]', line_upper)
+            if call_match:
+                target_program = call_match.group(1)
+                has_calls = True
+                
+                batch_calls.append({
+                    'type': 'COBOL CALL (Static)',
+                    'line': line_number,
+                    'statement': line.strip(),
+                    'target': target_program
+                })
+            
+            # 4. Dynamic CALL with variables
+            dynamic_call_match = re.search(r'CALL\s+([A-Z0-9\-]+)(?!\s*[\'"])', line_upper)
+            if dynamic_call_match and not re.search(r'CALL\s+[\'"]', line_upper):
+                variable = dynamic_call_match.group(1)
+                has_calls = True
+                variable_analysis = self._analyze_call_variable_comprehensive(lines, variable, i)
+                
+                dynamic_calls.append({
+                    'type': 'COBOL CALL (Dynamic)',
+                    'line': line_number,
+                    'statement': line.strip(),
+                    'variable': variable,
+                    'analysis': variable_analysis
+                })
+            
+            # 5. Check for entity-specific calls
+            for entity in entities:
+                if entity.upper() in line_upper and any(keyword in line_upper for keyword in 
+                                                    ['CALL', 'XCTL', 'LINK', 'PERFORM']):
+                    entity_call_analysis = self._analyze_entity_call_usage(lines, i, entity)
+                    if entity_call_analysis:
+                        has_calls = True
+                        analysis.extend(entity_call_analysis)
+        
+        # Build comprehensive analysis
+        if static_calls:
+            analysis.extend([
+                "**Static Program Calls:**",
+                ""
+            ])
+            for call in static_calls:
+                analysis.append(f"• Line {call['line']}: {call['type']}")
+                analysis.append(f"  Target: **{call['target']}**")
+                analysis.append(f"  Statement: `{call['statement']}`")
+                analysis.append("")
+        
+        if dynamic_calls:
+            analysis.extend([
+                "**Dynamic Program Calls:**",
+                ""
+            ])
+            for call in dynamic_calls:
+                analysis.append(f"• Line {call['line']}: {call['type']}")
+                analysis.append(f"  Variable: **{call['variable']}**")
+                analysis.append(f"  Statement: `{call['statement']}`")
+                
+                if call['analysis']['possible_values']:
+                    analysis.append("  **Possible Values:**")
+                    for value in call['analysis']['possible_values']:
+                        analysis.append(f"    - '{value['value']}' (Line {value['line']})")
+                        if value['condition']:
+                            analysis.append(f"      Condition: {value['condition']}")
+                analysis.append("")
+        
+        if batch_calls:
+            analysis.extend([
+                "**Batch/COBOL Calls:**",
+                ""
+            ])
+            for call in batch_calls:
+                analysis.append(f"• Line {call['line']}: {call['type']}")
+                analysis.append(f"  Target: **{call['target']}**")
+                analysis.append(f"  Statement: `{call['statement']}`")
+                analysis.append("")
+        
+        # Add summary
+        if has_calls:
+            total_calls = len(static_calls) + len(dynamic_calls) + len(batch_calls)
+            analysis.extend([
+                "**Call Summary:**",
+                f"• Static Calls: {len(static_calls)}",
+                f"• Dynamic Calls: {len(dynamic_calls)}",
+                f"• Batch Calls: {len(batch_calls)}",
+                f"• **Total Calls: {total_calls}**",
+                ""
+            ])
+        
+        return {
+            'has_calls': has_calls,
+            'analysis': analysis,
+            'static_calls': static_calls,
+            'dynamic_calls': dynamic_calls,
+            'batch_calls': batch_calls
+        }
+    
+    def _analyze_entity_call_usage(self, lines: List[str], line_idx: int, entity: str) -> List[str]:
+        """Analyze how entities are used in calls"""
+    
+        line = lines[line_idx].strip()
+        line_upper = line.upper()
+        entity_upper = entity.upper()
+        
+        analysis = []
+        
+        # Check if entity is the called program name
+        if re.search(rf'(CALL|XCTL|LINK).*[\'"]?{re.escape(entity_upper)}[\'"]?', line_upper):
+            analysis.extend([
+                f"**Direct Call to {entity} (Line {line_idx + 1})**",
+                f"• Statement: `{line}`",
+                f"• Type: Direct program call",
+                ""
+            ])
+        
+        # Check if entity is used as a variable in calls
+        elif re.search(rf'(CALL|XCTL|LINK).*PROGRAM\s*\(\s*{re.escape(entity_upper)}\s*\)', line_upper):
+            # Get variable analysis
+            var_analysis = self._analyze_call_variable_comprehensive(lines, entity, line_idx)
+            
+            analysis.extend([
+                f"**Dynamic Call via {entity} (Line {line_idx + 1})**",
+                f"• Statement: `{line}`",
+                f"• Type: Variable-based call",
+                ""
+            ])
+            
+            if var_analysis['possible_values']:
+                analysis.append("• **Possible Target Programs:**")
+                for value in var_analysis['possible_values']:
+                    analysis.append(f"  - {value['value']} (Line {value['line']})")
+                    if value['condition'] and value['condition'] != 'DEFAULT_VALUE':
+                        analysis.append(f"    Condition: {value['condition']}")
+                analysis.append("")
+        
+        return analysis
+    
+    def _analyze_call_variable_comprehensive(self, lines: List[str], variable_name: str, call_line_idx: int) -> Dict:
+        """Comprehensive analysis of call variables"""
+    
+        var_upper = variable_name.upper()
+        possible_values = []
+        conditions = []
+        definitions = []
+        
+        # Look backwards from call to find variable usage
+        for i in range(call_line_idx - 1, max(0, call_line_idx - 100), -1):
+            line = lines[i].strip()
+            line_upper = line.upper()
+            
+            if not line or line.startswith('*'):
+                continue
+            
+            # 1. MOVE statements to variable
+            if f'MOVE' in line_upper and f'TO {var_upper}' in line_upper:
+                move_match = re.search(rf'MOVE\s+([^T]+)\s+TO\s+{re.escape(var_upper)}', line_upper)
+                if move_match:
+                    value = move_match.group(1).strip()
+                    # Remove quotes if present
+                    clean_value = value.strip('\'"')
+                    
+                    condition = self._find_surrounding_condition_comprehensive(lines, i)
+                    
+                    possible_values.append({
+                        'value': clean_value,
+                        'line': i + 1,
+                        'statement': line,
+                        'condition': condition
+                    })
+            
+            # 2. Variable definition in WORKING-STORAGE
+            if re.match(rf'^\s*\d{{2}}\s+{re.escape(var_upper)}', line_upper):
+                definitions.append({
+                    'line': i + 1,
+                    'definition': line,
+                    'type': 'WORKING_STORAGE'
+                })
+            
+            # 3. VALUE clauses
+            if var_upper in line_upper and 'VALUE' in line_upper:
+                value_match = re.search(r"VALUE\s+['\"]([^'\"]+)['\"]", line_upper)
+                if value_match:
+                    possible_values.append({
+                        'value': value_match.group(1),
+                        'line': i + 1,
+                        'statement': line,
+                        'condition': 'DEFAULT_VALUE'
+                    })
+        
+        # Look forward for additional context
+        for i in range(call_line_idx + 1, min(len(lines), call_line_idx + 10)):
+            line = lines[i].strip()
+            line_upper = line.upper()
+            
+            if not line or line.startswith('*'):
+                continue
+            
+            if 'END-' in line_upper or line_upper.startswith('IF '):
+                break
+        
+        return {
+            'possible_values': possible_values,
+            'conditions': conditions,
+            'definitions': definitions
+        }
+
     def _handle_file_usage_query(self, session_id: str, message: str, 
                             query_plan: QueryPlan, contexts: List) -> str:
         """Handle file usage queries"""
@@ -3634,6 +3977,31 @@ class AgenticRAGChatManager:
                         return f"{keyword.strip()} {condition_part[:50]}..."
         
         return ""
+    
+    def _find_surrounding_condition_comprehensive(self, lines: List[str], line_idx: int) -> str:
+        """Find comprehensive conditional logic"""
+    
+        conditions = []
+        
+        # Look backwards for nested conditions
+        for i in range(line_idx - 1, max(0, line_idx - 15), -1):
+            line = lines[i].upper().strip()
+            
+            if any(keyword in line for keyword in ['IF ', 'WHEN ', 'EVALUATE ']):
+                # Extract condition details
+                if 'IF ' in line:
+                    condition_part = line.split('IF ', 1)[1] if 'IF ' in line else ""
+                    # Clean up the condition
+                    condition_clean = re.sub(r'\s+THEN.*', '', condition_part)
+                    conditions.append(f"IF {condition_clean}")
+                elif 'WHEN ' in line:
+                    when_part = line.split('WHEN ', 1)[1] if 'WHEN ' in line else ""
+                    conditions.append(f"WHEN {when_part}")
+                elif 'EVALUATE ' in line:
+                    eval_part = line.split('EVALUATE ', 1)[1] if 'EVALUATE ' in line else ""
+                    conditions.append(f"EVALUATE {eval_part}")
+        
+        return ' AND '.join(reversed(conditions)) if conditions else ""
 
     def _analyze_entity_usage_in_line(self, lines: List[str], line_idx: int, entity: str) -> List[str]:
         """Analyze how a specific entity is used in a line"""
