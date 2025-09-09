@@ -440,7 +440,73 @@ class DatabaseManager:
                             last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         )
                     ''')
-
+                    cursor.execute('''
+                        CREATE TABLE program_flow_traces (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            flow_id TEXT NOT NULL,
+                            source_program TEXT NOT NULL,
+                            target_program TEXT,
+                            call_sequence INTEGER DEFAULT 1,
+                            call_mechanism TEXT, -- 'DYNAMIC_CALL', 'STATIC_CALL', 'CICS_LINK', 'CICS_XCTL'
+                            variable_name TEXT, -- For dynamic calls
+                            resolved_via TEXT, -- How dynamic call was resolved
+                            data_flow_json TEXT, -- JSON of fields passed/received
+                            file_operations_json TEXT, -- Files accessed in this step
+                            business_context TEXT,
+                            line_number INTEGER,
+                            confidence_score REAL DEFAULT 0.8,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
+                        )
+                    ''')
+                    
+                    # Field Data Flow
+                    cursor.execute('''
+                        CREATE TABLE field_data_flow (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            flow_id TEXT NOT NULL,
+                            field_name TEXT NOT NULL,
+                            source_program TEXT NOT NULL,
+                            target_program TEXT,
+                            flow_type TEXT, -- 'PASSED_TO_PROGRAM', 'RECEIVED_FROM_PROGRAM', 'FILE_READ', 'FILE_WRITE'
+                            data_source TEXT, -- Where field gets its value
+                            data_target TEXT, -- Where field value goes
+                            transformation_logic TEXT, -- Business logic applied
+                            sequence_in_flow INTEGER DEFAULT 1,
+                            field_type TEXT, -- 'INPUT', 'OUTPUT', 'WORKING', 'LINKAGE'
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
+                        )
+                    ''')
+                    
+                    # Program Flow Relationships
+                    cursor.execute('''
+                        CREATE TABLE program_flow_relationships (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            parent_flow_id TEXT NOT NULL,
+                            child_flow_id TEXT NOT NULL,
+                            relationship_type TEXT, -- 'CALLS', 'USES_DATA_FROM', 'WRITES_TO_FILE'
+                            data_elements_json TEXT, -- Fields/data involved
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    ''')
+                    
+                    # Missing Program Impact
+                    cursor.execute('''
+                        CREATE TABLE missing_program_impact (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            missing_program TEXT NOT NULL,
+                            calling_programs_json TEXT, -- Programs that call this missing one
+                            estimated_flow_impact TEXT, -- Business description of what's missing
+                            upload_priority INTEGER DEFAULT 1, -- 1=high, 2=medium, 3=low
+                            data_flow_interrupted BOOLEAN DEFAULT 1,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    ''')
 
                     # Create performance indexes (UPDATED with new classification indexes)
                     indexes = [
@@ -459,6 +525,10 @@ class DatabaseManager:
                         'CREATE INDEX idx_record_layouts_classification ON record_layouts(record_classification, session_id)',
                         'CREATE INDEX idx_field_record_classification ON field_analysis_details(record_classification, session_id)',
                         'CREATE INDEX idx_field_effective_classification ON field_analysis_details(effective_classification, session_id)'
+                        'CREATE INDEX idx_program_flow_traces ON program_flow_traces(session_id, source_program, target_program)',
+                        'CREATE INDEX idx_field_data_flow ON field_data_flow(session_id, field_name, source_program)',
+                        'CREATE INDEX idx_flow_relationships ON program_flow_relationships(session_id, parent_flow_id)'
+                    
                     ]
 
                     for index_sql in indexes:

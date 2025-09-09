@@ -20,6 +20,7 @@ from modules.database_manager import DatabaseManager
 from modules.cobol_parser import COBOLParser
 from modules.field_analyzer import FieldAnalyzer
 from modules.component_extractor import ComponentExtractor
+from modules.program_flow_analyzer import ProgramFlowAnalyzer
 logger = logging.getLogger(__name__)
 # CHANGE 1: Import the Agentic RAG system instead of regular chat
 try:
@@ -61,8 +62,13 @@ class MainframeAnalyzer:
         self.cobol_parser = COBOLParser()
         self.field_analyzer = FieldAnalyzer(self.llm_client, self.token_manager, self.db_manager)
         self.component_extractor = ComponentExtractor(self.llm_client, self.token_manager, self.db_manager)
-        
-        # CHANGE 2: Initialize RAG or fallback chat system
+        # Add after line ~40 where other analyzers are initialized
+        self.program_flow_analyzer = ProgramFlowAnalyzer(
+            self.db_manager, 
+            self.component_extractor, 
+            self.llm_client
+        )
+                # CHANGE 2: Initialize RAG or fallback chat system
         self.chat_system_type = "unknown"
         try:
             if AGENTIC_RAG_AVAILABLE:
@@ -2112,6 +2118,240 @@ def get_dynamic_call_analysis_api(session_id):
         
     except Exception as e:
         logger.error(f"Error getting dynamic call analysis: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+    
+@app.route('/api/program-flow/<session_id>/<program_name>', methods=['GET'])
+def analyze_program_flow(session_id, program_name):
+    """Analyze complete program flow starting from a given program"""
+    try:
+        logger.info(f"Program flow analysis request: {program_name} in session {session_id[:8]}")
+        
+        # Check if program exists in session
+        components = analyzer.db_manager.get_session_components(session_id)
+        program_exists = any(c['component_name'].upper() == program_name.upper() for c in components)
+        
+        if not program_exists:
+            return jsonify({
+                'success': False,
+                'error': f'Program {program_name} not found in session'
+            })
+        
+        # Analyze program flow
+        flow_analysis = analyzer.program_flow_analyzer.analyze_complete_program_flow(session_id, program_name)
+        
+        return jsonify({
+            'success': True,
+            'flow_analysis': flow_analysis,
+            'program_name': program_name,
+            'analysis_type': 'complete_program_flow'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in program flow analysis: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/program-flow-visualization/<session_id>/<program_name>', methods=['GET'])
+def get_program_flow_visualization(session_id, program_name):
+    """Get program flow data for visualization"""
+    try:
+        flow_analysis = analyzer.program_flow_analyzer.analyze_complete_program_flow(session_id, program_name)
+        
+        # Transform for visualization
+        visualization_data = {
+            'nodes': [],
+            'edges': [],
+            'field_flows': {},
+            'missing_programs': [],
+            'file_operations': []
+        }
+        
+        # Create nodes
+        programs_in_flow = set()
+        for step in flow_analysis.get('program_chain', []):
+            programs_in_flow.add(step['source_program'])
+            programs_in_flow.add(step['target_program'])
+        
+        for program in programs_in_flow:
+            is_missing = any(step.get('is_missing') for step in flow_analysis.get('program_chain', []) 
+                           if step['target_program'] == program)
+            
+            visualization_data['nodes'].append({
+                'id': program,
+                'label': program,
+                'type': 'program',
+                'status': 'missing' if is_missing else 'present',
+                'is_starting_program': program == program_name
+            })
+        
+        # Create edges for program calls
+        for step in flow_analysis.get('program_chain', []):
+            edge_data = {
+                'from': step['source_program'],
+                'to': step['target_program'],
+                'type': step['call_mechanism'],
+                'call_type': step.get('call_type', 'CALL'),
+                'status': 'missing' if step.get('is_missing') else 'present',
+                'sequence': step['sequence'],
+                'data_fields': step.get('data_passed', [])
+            }
+            
+            if step.get('variable_name'):
+                edge_data['variable_name'] = step['variable_name']
+                edge_data['label'] = f"via {step['variable_name']}"
+            
+            visualization_data['edges'].append(edge_data)
+        
+        # Add file operations
+        for file_op in flow_analysis.get('file_operations', []):
+            # File node
+            file_node = {
+                'id': f"FILE_{file_op['file_name']}",
+                'label': file_op['file_name'],
+                'type': 'file',
+                'interface': file_op['interface_type'],
+                'io_direction': file_op['io_direction'],
+                'has_layout': file_op.get('has_layout_resolution', False)
+            }
+            visualization_data['nodes'].append(file_node)
+            
+            # Edge from program to file
+            file_edge = {
+                'from': file_op['program_name'],
+                'to': f"FILE_{file_op['file_name']}",
+                'type': 'file_operation',
+                'io_direction': file_op['io_direction'],
+                'operations': file_op['operations']
+            }
+            visualization_data['edges'].append(file_edge)
+        
+        # Field flow summary
+        field_flow_summary = {}
+        for field_flow in flow_analysis.get('field_flows', []):
+            field_name = field_flow['field_name']
+            if field_name not in field_flow_summary:
+                field_flow_summary[field_name] = []
+            field_flow_summary[field_name].append({
+                'from': field_flow['source_program'],
+                'to': field_flow['target_program'],
+                'type': field_flow['flow_type']
+            })
+        
+        visualization_data['field_flows'] = field_flow_summary
+        visualization_data['missing_programs'] = [
+            step['target_program'] for step in flow_analysis.get('program_chain', [])
+            if step.get('is_missing')
+        ]
+        
+        return jsonify({
+            'success': True,
+            'visualization_data': visualization_data,
+            'business_summary': flow_analysis.get('business_flow_summary', ''),
+            'total_programs': len(programs_in_flow),
+            'missing_count': len(visualization_data['missing_programs'])
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting flow visualization: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/field-flow-trace/<session_id>/<field_name>', methods=['GET'])
+def trace_field_flow(session_id, field_name):
+    """Trace a specific field through program flows"""
+    try:
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT fdf.*, pft.source_program, pft.target_program, pft.call_mechanism
+                FROM field_data_flow fdf
+                JOIN program_flow_traces pft ON fdf.flow_id = pft.flow_id 
+                WHERE fdf.session_id = ? AND UPPER(fdf.field_name) = UPPER(?)
+                ORDER BY fdf.sequence_in_flow
+            ''', (session_id, field_name))
+            
+            field_flows = [dict(row) for row in cursor.fetchall()]
+            
+            if not field_flows:
+                return jsonify({
+                    'success': False,
+                    'message': f'No flow data found for field {field_name}'
+                })
+            
+            # Build field journey
+            field_journey = {
+                'field_name': field_name,
+                'flow_steps': [],
+                'programs_involved': set(),
+            }
+            
+            for flow in field_flows:
+                step = {
+                    'sequence': flow['sequence_in_flow'],
+                    'source_program': flow['source_program'],
+                    'target_program': flow['target_program'],
+                    'flow_type': flow['flow_type'],
+                    'transformation': flow['transformation_logic'],
+                    'call_mechanism': flow['call_mechanism']
+                }
+                field_journey['flow_steps'].append(step)
+                field_journey['programs_involved'].add(flow['source_program'])
+                field_journey['programs_involved'].add(flow['target_program'])
+            
+            field_journey['programs_involved'] = list(field_journey['programs_involved'])
+            
+            return jsonify({
+                'success': True,
+                'field_journey': field_journey
+            })
+            
+    except Exception as e:
+        logger.error(f"Error tracing field flow: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/missing-program-impact/<session_id>/<program_name>', methods=['GET'])
+def get_missing_program_impact(session_id, program_name):
+    """Get impact analysis for a missing program"""
+    try:
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT DISTINCT pft.source_program, pft.call_mechanism, pft.business_context
+                FROM program_flow_traces pft
+                WHERE pft.session_id = ? AND pft.target_program = ?
+            ''', (session_id, program_name))
+            
+            blocked_flows = [dict(row) for row in cursor.fetchall()]
+        
+        impact_analysis = {
+            'missing_program': program_name,
+            'blocked_flows': blocked_flows,
+            'calling_programs': [flow['source_program'] for flow in blocked_flows],
+            'impact_description': f"Missing {program_name} blocks {len(blocked_flows)} program flows",
+            'recommendations': [
+                f"Upload {program_name} to restore complete flow analysis",
+                f"This program is called by: {', '.join(set(flow['source_program'] for flow in blocked_flows))}"
+            ]
+        }
+        
+        return jsonify({
+            'success': True,
+            'impact_analysis': impact_analysis
+        })
+        
+    except Exception as e:
+        logger.error(f"Error analyzing missing program impact: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
