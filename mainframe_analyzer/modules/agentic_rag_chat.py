@@ -630,7 +630,7 @@ class SpecializedHandlerRegistry:
         return self.handlers.get(query_type)
 
 class DynamicCallHandler:
-    """Specialized handler for dynamic call queries"""
+    """Fixed dynamic call handler with no repetition"""
     
     def __init__(self, db_manager, llm_client):
         self.db_manager = db_manager
@@ -638,42 +638,70 @@ class DynamicCallHandler:
     
     def handle(self, session_id: str, message: str, query_analysis: QueryAnalysis, 
                contexts: List[RetrievedContext]) -> str:
-        """Handle dynamic call queries with business logic analysis"""
+        """Handle dynamic call queries without repetition"""
         
         if not contexts:
             return "No dynamic call patterns found in the analyzed code."
         
+        # Process only unique components to avoid repetition
+        processed_components = set()
+        all_analyses = []
+        
+        for context in contexts:
+            component_name = context.component_name
+            
+            # Skip if already processed
+            if component_name in processed_components:
+                continue
+            
+            processed_components.add(component_name)
+            
+            # Extract dynamic calls from this component
+            dynamic_calls = self._extract_dynamic_calls_concise(
+                context.source_code, component_name, query_analysis.entities
+            )
+            
+            if dynamic_calls:
+                all_analyses.extend(dynamic_calls)
+        
+        if not all_analyses:
+            return "No dynamic program calls found in the analyzed components."
+        
+        # Build single comprehensive response
         response_parts = [
             "**Dynamic Program Call Analysis**",
             ""
         ]
         
-        for context in contexts:
-            analysis = self._analyze_dynamic_call_structure(
-                context.source_code, context.component_name, query_analysis.entities
-            )
+        # Group by program to avoid repetition
+        by_program = {}
+        for analysis in all_analyses:
+            prog_name = analysis['program']
+            if prog_name not in by_program:
+                by_program[prog_name] = []
+            by_program[prog_name].append(analysis)
+        
+        for program_name, analyses in by_program.items():
+            response_parts.extend([
+                f"**Program: {program_name}**",
+                ""
+            ])
             
-            if analysis['found_dynamic_calls']:
-                response_parts.extend([
-                    f"**Program: {context.component_name}**",
-                    ""
-                ])
-                response_parts.extend(analysis['business_logic'])
+            # Combine analyses for this program
+            combined_analysis = self._combine_program_analyses(analyses)
+            response_parts.extend(combined_analysis)
+            response_parts.append("")
         
         return '\n'.join(response_parts)
     
-    def _analyze_dynamic_call_structure(self, source_code: str, component_name: str, 
-                                      entities: List[str]) -> Dict:
-        """Analyze dynamic call structure with business logic"""
+    def _extract_dynamic_calls_concise(self, source_code: str, component_name: str, 
+                                     entities: List[str]) -> List[Dict]:
+        """Extract dynamic calls with concise analysis"""
         
+        dynamic_calls = []
         lines = source_code.split('\n')
-        business_logic = []
-        found_dynamic_calls = False
         
-        # Build variable map for group field analysis
-        variable_map = self._build_variable_map(lines)
-        
-        # Find dynamic CICS calls
+        # Find CICS dynamic calls
         for i, line in enumerate(lines):
             line_clean = self._extract_program_area(line)
             if not line_clean:
@@ -681,114 +709,130 @@ class DynamicCallHandler:
             
             line_upper = line_clean.upper()
             
-            # Look for dynamic CICS calls
-            if 'EXEC CICS' in line_upper and ('XCTL' in line_upper or 'LINK' in line_upper):
-                # Check if it uses a variable
+            # Look for EXEC CICS with PROGRAM(variable)
+            if 'EXEC CICS' in line_upper and 'PROGRAM(' in line_upper:
                 program_match = re.search(r'PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)', line_upper)
                 if program_match:
-                    variable_name = program_match.group(1)
+                    variable = program_match.group(1)
                     
-                    # Check if it's a variable (not a literal)
-                    if not (variable_name.startswith("'") or variable_name.startswith('"')):
-                        found_dynamic_calls = True
+                    # Check if it's a variable (not literal)
+                    if not (variable.startswith("'") or variable.startswith('"')):
+                        call_type = 'XCTL' if 'XCTL' in line_upper else 'LINK'
                         
-                        # Extract complete multi-line command
-                        complete_command = self._extract_multiline_cics(lines, i)
+                        # Get variable analysis (simplified)
+                        var_analysis = self._analyze_variable_simple(lines, variable, i)
                         
-                        # Analyze the business logic
-                        call_analysis = self._analyze_call_business_logic(
-                            complete_command, variable_name, variable_map, i + 1
-                        )
-                        
-                        business_logic.extend(call_analysis)
+                        if var_analysis:
+                            dynamic_calls.append({
+                                'program': component_name,
+                                'call_type': call_type,
+                                'variable': variable,
+                                'line': i + 1,
+                                'analysis': var_analysis
+                            })
         
-        return {
-            'found_dynamic_calls': found_dynamic_calls,
-            'business_logic': business_logic
-        }
+        return dynamic_calls
     
-    def _build_variable_map(self, lines: List[str]) -> Dict:
-        """Build variable map for dynamic call analysis"""
-        variable_map = {}
-        group_stack = []
+    def _analyze_variable_simple(self, lines: List[str], variable: str, call_line: int) -> Optional[Dict]:
+        """Simplified variable analysis"""
         
-        for i, line in enumerate(lines):
-            line_clean = self._extract_program_area(line)
+        var_upper = variable.upper()
+        
+        # Look for group structure around the call line
+        for i in range(max(0, call_line - 50), min(len(lines), call_line + 10)):
+            line_clean = self._extract_program_area(lines[i])
             if not line_clean:
                 continue
             
-            line_upper = line_clean.upper().strip()
+            line_upper = line_clean.upper()
             
-            # Field definition
-            level_match = re.match(r'^\s*(\d{2})\s+(.+)', line_upper)
+            # Look for level 01 definition
+            if re.match(rf'^\s*01\s+{re.escape(var_upper)}\b', line_upper):
+                # Found group definition, extract structure
+                group_structure = self._extract_group_structure_simple(lines, i)
+                if group_structure:
+                    return {
+                        'type': 'group_field',
+                        'structure': group_structure,
+                        'line_definition': i + 1
+                    }
+        
+        return None
+    
+    def _extract_group_structure_simple(self, lines: List[str], start_line: int) -> Optional[Dict]:
+        """Extract simplified group structure"""
+        
+        structure = {
+            'filler_values': [],
+            'dynamic_fields': []
+        }
+        
+        # Look ahead for child fields
+        for i in range(start_line + 1, min(len(lines), start_line + 20)):
+            line_clean = self._extract_program_area(lines[i])
+            if not line_clean:
+                continue
+            
+            line_upper = line_clean.upper()
+            
+            # Stop at next 01 level or division
+            if re.match(r'^\s*01\s+', line_upper) or 'DIVISION' in line_upper:
+                break
+            
+            # Look for 05 level fields
+            level_match = re.match(r'^\s*05\s+(.+)', line_upper)
             if level_match:
-                level = int(level_match.group(1))
-                field_content = level_match.group(2).strip()
+                field_content = level_match.group(1)
                 
-                # Manage group stack
-                while group_stack and group_stack[-1]['level'] >= level:
-                    group_stack.pop()
-                
-                # Extract field info
                 if field_content.startswith('FILLER'):
-                    field_name = f'FILLER-{i+1}'
-                    is_filler = True
-                    remaining = field_content[6:].strip()
+                    # Extract VALUE
+                    value_match = re.search(r"VALUE\s+['\"]([^'\"]*)['\"]", field_content)
+                    if value_match:
+                        structure['filler_values'].append(value_match.group(1))
                 else:
+                    # Dynamic field
                     name_match = re.match(r'^([A-Z][A-Z0-9\-]*)', field_content)
                     if name_match:
                         field_name = name_match.group(1)
-                        is_filler = False
-                        remaining = field_content[len(field_name):].strip()
-                    else:
-                        continue
-                
-                field_info = {
-                    'level': level,
-                    'line': i + 1,
-                    'is_filler': is_filler,
-                    'parent': group_stack[-1]['name'] if group_stack else None,
-                    'children': {},
-                    'possible_values': []
-                }
-                
-                # Extract VALUE
-                value_match = re.search(r"VALUE\s+['\"]([^'\"]*)['\"]", remaining, re.IGNORECASE)
-                if value_match:
-                    value = value_match.group(1)
-                    field_info['constant_value'] = value
-                    field_info['possible_values'].append(value)
-                
-                variable_map[field_name] = field_info
-                
-                # Update parent
-                if group_stack and group_stack[-1]['name'] in variable_map:
-                    parent_name = group_stack[-1]['name']
-                    variable_map[parent_name]['children'][field_name] = field_info
-                    
-                    if is_filler and 'constant_value' in field_info:
-                        if 'filler_values' not in variable_map[parent_name]:
-                            variable_map[parent_name]['filler_values'] = []
-                        variable_map[parent_name]['filler_values'].append(value)
-                
-                # Add to group stack
-                if level <= 49:
-                    group_stack.append({'name': field_name, 'level': level})
-            
-            # MOVE operations
-            move_match = re.search(r'MOVE\s+([A-Z0-9\-\'\"]+)\s+TO\s+([A-Z0-9\-]+)', line_upper)
-            if move_match:
-                source_val = move_match.group(1).strip("'\"")
-                target_var = move_match.group(2)
-                
-                if target_var in variable_map:
-                    if source_val not in variable_map[target_var]['possible_values']:
-                        variable_map[target_var]['possible_values'].append(source_val)
+                        structure['dynamic_fields'].append(field_name)
         
-        return variable_map
+        return structure if structure['filler_values'] or structure['dynamic_fields'] else None
+    
+    def _combine_program_analyses(self, analyses: List[Dict]) -> List[str]:
+        """Combine multiple analyses for a single program"""
+        
+        combined = []
+        
+        for analysis in analyses:
+            call_info = analysis['analysis']
+            
+            combined.extend([
+                f"**{analysis['call_type']} Call (Line {analysis['line']})**",
+                f"• Variable: {analysis['variable']}"
+            ])
+            
+            if call_info and call_info['type'] == 'group_field':
+                structure = call_info['structure']
+                
+                if structure['filler_values']:
+                    combined.append(f"• Prefix: '{structure['filler_values'][0]}'")
+                
+                if structure['dynamic_fields']:
+                    combined.append(f"• Dynamic part: {', '.join(structure['dynamic_fields'])}")
+                
+                # Show constructed programs
+                if structure['filler_values'] and structure['dynamic_fields']:
+                    prefix = structure['filler_values'][0]
+                    combined.append("• Constructs programs like:")
+                    for field in structure['dynamic_fields'][:2]:  # Limit examples
+                        combined.append(f"  - {prefix} + {field} values")
+            
+            combined.append("")
+        
+        return combined
     
     def _extract_program_area(self, line: str) -> str:
-        """Extract COBOL program area (columns 8-72)"""
+        """Extract COBOL program area"""
         if not line or len(line) < 8:
             return ""
         
@@ -800,103 +844,6 @@ class DynamicCallHandler:
             return line[7:].rstrip('\n')
         return line[7:72]
     
-    def _extract_multiline_cics(self, lines: List[str], start_idx: int) -> str:
-        """Extract complete multi-line CICS command"""
-        command_parts = []
-        
-        for i in range(start_idx, min(len(lines), start_idx + 15)):
-            line_clean = self._extract_program_area(lines[i])
-            if not line_clean:
-                continue
-            
-            command_parts.append(line_clean.strip())
-            
-            if 'END-EXEC' in line_clean.upper():
-                break
-        
-        return ' '.join(command_parts)
-    
-    def _analyze_call_business_logic(self, complete_command: str, variable_name: str, 
-                                   variable_map: Dict, line_number: int) -> List[str]:
-        """Analyze business logic of dynamic call"""
-        
-        analysis = []
-        command_upper = complete_command.upper()
-        
-        # Extract call type
-        call_type = 'XCTL' if 'XCTL' in command_upper else 'LINK' if 'LINK' in command_upper else 'UNKNOWN'
-        
-        analysis.extend([
-            f"**Dynamic {call_type} Call (Line {line_number})**",
-            f"• **Variable**: {variable_name}",
-            f"• **Complete Command**: `{complete_command}`",
-            ""
-        ])
-        
-        # Analyze variable structure
-        if variable_name in variable_map:
-            var_info = variable_map[variable_name]
-            
-            analysis.extend([
-                f"**Variable Structure:**",
-                f"• Level {var_info['level']:02d} field",
-                ""
-            ])
-            
-            # Group field analysis
-            if var_info.get('children'):
-                analysis.append("**Group Field Components:**")
-                
-                filler_constants = []
-                dynamic_fields = []
-                
-                for child_name, child_info in var_info['children'].items():
-                    if child_info['is_filler'] and 'constant_value' in child_info:
-                        filler_constants.append(child_info['constant_value'])
-                    elif not child_info['is_filler']:
-                        dynamic_fields.append({
-                            'name': child_name,
-                            'values': child_info.get('possible_values', [])
-                        })
-                
-                if filler_constants:
-                    analysis.append(f"• **Constant Prefix**: '{filler_constants[0]}' (FILLER)")
-                
-                if dynamic_fields:
-                    for field in dynamic_fields:
-                        analysis.append(f"• **Dynamic Component**: {field['name']}")
-                        if field['values']:
-                            values_str = ', '.join([f"'{v}'" for v in field['values']])
-                            analysis.append(f"  Possible values: {values_str}")
-                
-                # Show constructed program names
-                if filler_constants and dynamic_fields:
-                    analysis.append("")
-                    analysis.append("**Resulting Program Names:**")
-                    for field in dynamic_fields:
-                        for value in field['values']:
-                            full_program = f"{filler_constants[0]}{value}"
-                            analysis.append(f"• **{full_program}** = '{filler_constants[0]}' + '{value}'")
-            
-            # Direct values
-            elif var_info.get('possible_values'):
-                analysis.append("**Possible Program Values:**")
-                for value in var_info['possible_values']:
-                    analysis.append(f"• {value}")
-        
-        # Business flow explanation
-        analysis.extend([
-            "",
-            "**Business Logic:**",
-            f"• This {call_type} call uses runtime program selection",
-            "• Program name constructed from group field components",
-            "• Enables flexible transaction routing based on conditions",
-            "• DFHCOMMAREA maintains data across program transfers" if 'DFHCOMMAREA' in command_upper else "",
-            ""
-        ])
-        
-        return [item for item in analysis if item]  # Remove empty strings
-
 class ProgramCallHandler:
     """Handler for general program call queries"""
     
@@ -1213,7 +1160,7 @@ class FieldAnalysisHandler:
             return f"Error analyzing field '{field_name}': {str(e)}"
 
 class ResponseGenerator:
-    """Enhanced response generation with specialized routing"""
+    """Enhanced response generation with source code optimization"""
     
     def __init__(self, llm_client, handler_registry):
         self.llm_client = llm_client
@@ -1221,7 +1168,7 @@ class ResponseGenerator:
     
     def generate_response(self, session_id: str, message: str, query_analysis: QueryAnalysis, 
                          contexts: List[RetrievedContext]) -> str:
-        """Generate response using appropriate handler"""
+        """Generate response with optimized source code handling"""
         
         # Route to specialized handler if needed
         if query_analysis.requires_specialized_handler:
@@ -1231,13 +1178,15 @@ class ResponseGenerator:
                     return handler.handle(session_id, message, query_analysis, contexts)
                 except Exception as e:
                     logger.error(f"Specialized handler failed: {str(e)}")
-                    # Fall through to general generation
         
-        # General LLM-based response generation
+        # General LLM-based response generation with optimized context
         if not contexts:
             return self._generate_no_context_response(message, query_analysis)
         
-        prompt = self._build_general_prompt(message, query_analysis, contexts)
+        # FIXED: Optimize contexts before sending to LLM
+        optimized_contexts = self._optimize_contexts_for_llm(contexts, query_analysis)
+        
+        prompt = self._build_optimized_prompt(message, query_analysis, optimized_contexts)
         
         response = self.llm_client.call_llm(
             prompt, 
@@ -1250,6 +1199,225 @@ class ResponseGenerator:
         else:
             return f"Error generating response: {response.error_message}"
     
+    def _optimize_contexts_for_llm(self, contexts: List[RetrievedContext], 
+                                  query_analysis: QueryAnalysis) -> List[Dict]:
+        """Optimize contexts to reduce source code size and avoid repetition"""
+        
+        optimized = []
+        seen_components = set()
+        total_chars = 0
+        max_total_chars = 3000  # REDUCED: Maximum total characters for all contexts
+        max_per_context = 800   # REDUCED: Maximum per context
+        
+        for context in contexts:
+            component_name = context.component_name
+            
+            # Skip if we've already seen this component
+            if component_name in seen_components:
+                continue
+            
+            seen_components.add(component_name)
+            
+            # Extract relevant snippets instead of full source
+            relevant_snippets = self._extract_relevant_snippets(
+                context.source_code, query_analysis, max_per_context
+            )
+            
+            if not relevant_snippets:
+                continue
+            
+            snippet_text = '\n'.join(relevant_snippets)
+            
+            # Check if adding this would exceed total limit
+            if total_chars + len(snippet_text) > max_total_chars:
+                # Take only what fits
+                remaining_chars = max_total_chars - total_chars
+                if remaining_chars > 200:  # Only if meaningful amount left
+                    snippet_text = snippet_text[:remaining_chars] + "..."
+                else:
+                    break
+            
+            optimized.append({
+                'component_name': component_name,
+                'source_snippet': snippet_text,
+                'relevance_score': context.relevance_score,
+                'retrieval_method': context.retrieval_method,
+                'snippet_count': len(relevant_snippets)
+            })
+            
+            total_chars += len(snippet_text)
+            
+            # Stop if we've reached limit
+            if total_chars >= max_total_chars:
+                break
+        
+        logger.info(f"Optimized {len(contexts)} contexts to {len(optimized)} contexts, "
+                   f"total chars: {total_chars}")
+        
+        return optimized
+    
+    def _extract_relevant_snippets(self, source_code: str, query_analysis: QueryAnalysis, 
+                                  max_chars: int) -> List[str]:
+        """Extract relevant code snippets based on query"""
+        
+        if not source_code:
+            return []
+        
+        lines = source_code.split('\n')
+        snippets = []
+        current_snippet = []
+        snippet_chars = 0
+        
+        # Keywords to look for based on query type
+        keywords = self._get_search_keywords(query_analysis)
+        
+        # Entity-specific search
+        entities = [e.upper() for e in query_analysis.entities]
+        
+        i = 0
+        while i < len(lines) and snippet_chars < max_chars:
+            line = lines[i]
+            line_clean = self._extract_program_area(line)
+            if not line_clean:
+                i += 1
+                continue
+            
+            line_upper = line_clean.upper()
+            
+            # Check if line contains relevant content
+            is_relevant = (
+                any(keyword in line_upper for keyword in keywords) or
+                any(entity in line_upper for entity in entities) or
+                self._is_structurally_important(line_upper)
+            )
+            
+            if is_relevant:
+                # Collect context around this line
+                context_start = max(0, i - 2)
+                context_end = min(len(lines), i + 3)
+                
+                context_lines = []
+                for j in range(context_start, context_end):
+                    context_line = self._extract_program_area(lines[j])
+                    if context_line:
+                        context_lines.append(f"{j+1:4d}: {context_line}")
+                
+                snippet_text = '\n'.join(context_lines)
+                
+                # Check if adding this snippet would exceed limit
+                if snippet_chars + len(snippet_text) + 50 > max_chars:
+                    break
+                
+                snippets.append(f"--- Lines {context_start+1}-{context_end} ---")
+                snippets.append(snippet_text)
+                snippets.append("")  # Separator
+                
+                snippet_chars += len(snippet_text) + 50
+                
+                # Skip ahead to avoid overlapping contexts
+                i = context_end
+            else:
+                i += 1
+        
+        return snippets
+    
+    def _get_search_keywords(self, query_analysis: QueryAnalysis) -> List[str]:
+        """Get keywords to search for based on query type"""
+        
+        keyword_map = {
+            QueryType.PROGRAM_CALLS: ['CALL', 'XCTL', 'LINK', 'EXEC CICS'],
+            QueryType.DYNAMIC_CALLS: ['PROGRAM(', 'MOVE', 'TO', 'FILLER', 'VALUE'],
+            QueryType.FILE_OPERATIONS: ['READ', 'WRITE', 'CICS', 'DATASET', 'FILE'],
+            QueryType.FIELD_ANALYSIS: ['PIC', 'VALUE', 'MOVE', 'LEVEL'],
+            QueryType.BUSINESS_LOGIC: ['IF', 'COMPUTE', 'PERFORM', 'EVALUATE']
+        }
+        
+        base_keywords = keyword_map.get(query_analysis.query_type, [])
+        base_keywords.extend(query_analysis.keywords)
+        
+        return [kw.upper() for kw in base_keywords]
+    
+    def _is_structurally_important(self, line: str) -> bool:
+        """Check if line is structurally important (field definitions, etc.)"""
+        
+        # Level numbers (01, 05, etc.)
+        if re.match(r'^\s*\d{2}\s+', line):
+            return True
+        
+        # Division/section headers
+        if any(word in line for word in ['DIVISION', 'SECTION']):
+            return True
+        
+        # Important COBOL constructs
+        important_constructs = [
+            'WORKING-STORAGE', 'LINKAGE', 'PROCEDURE', 
+            'FD ', 'SELECT', 'COPY'
+        ]
+        
+        return any(construct in line for construct in important_constructs)
+    
+    def _extract_program_area(self, line: str) -> str:
+        """Extract COBOL program area (columns 8-72)"""
+        if not line or len(line) < 8:
+            return ""
+        
+        indicator = line[6] if len(line) > 6 else ' '
+        if indicator in ['*', '/', 'C', 'c', 'D', 'd']:
+            return ""
+        
+        if len(line) <= 72:
+            return line[7:].rstrip('\n')
+        return line[7:72]
+    
+    def _build_optimized_prompt(self, message: str, query_analysis: QueryAnalysis, 
+                               optimized_contexts: List[Dict]) -> str:
+        """Build optimized prompt with reduced source code"""
+        
+        prompt_parts = [
+            "You are an expert COBOL analyst for a wealth management system.",
+            f"Query Type: {query_analysis.query_type.value}",
+            f"Entities: {', '.join(query_analysis.entities) if query_analysis.entities else 'None'}",
+            "",
+            f"USER QUESTION: {message}",
+            ""
+        ]
+        
+        # Add concise type-specific instructions
+        instruction_map = {
+            QueryType.FIELD_ANALYSIS: "Analyze the field definition, structure, and business usage.",
+            QueryType.PROGRAM_CALLS: "Identify all program calls (static and dynamic) with their purposes.",
+            QueryType.DYNAMIC_CALLS: "Explain the dynamic call logic and how program names are constructed.",
+            QueryType.FILE_OPERATIONS: "Describe file operations and data flow patterns.",
+            QueryType.BUSINESS_LOGIC: "Explain the business rules and processing logic."
+        }
+        
+        instruction = instruction_map.get(query_analysis.query_type, 
+                                        "Provide a comprehensive analysis of the code.")
+        prompt_parts.extend([instruction, ""])
+        
+        # Add optimized contexts
+        prompt_parts.append("RELEVANT CODE SNIPPETS:")
+        prompt_parts.append("")
+        
+        for i, context in enumerate(optimized_contexts, 1):
+            prompt_parts.extend([
+                f"=== CONTEXT {i}: {context['component_name']} ===",
+                f"Method: {context['retrieval_method']} | Relevance: {context['relevance_score']:.2f}",
+                f"Snippets: {context['snippet_count']}",
+                "",
+                context['source_snippet'],
+                "",
+                "=" * 50,
+                ""
+            ])
+        
+        prompt_parts.extend([
+            "Provide a direct, focused answer. Reference specific line numbers when possible.",
+            "Avoid repeating information. Focus on what directly answers the user's question."
+        ])
+        
+        return '\n'.join(prompt_parts)
+        
     def _build_general_prompt(self, message: str, query_analysis: QueryAnalysis, 
                              contexts: List[RetrievedContext]) -> str:
         """Build prompt for general LLM response"""
