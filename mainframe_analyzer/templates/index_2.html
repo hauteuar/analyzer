@@ -1274,6 +1274,208 @@
             color: #6c757d;
         }
 
+        .program-flow-container {
+        padding: 20px;
+    }
+    
+    .flow-controls {
+        margin-bottom: 20px;
+        padding: 15px;
+        background: #f5f5f5;
+        border-radius: 5px;
+    }
+    
+    .flow-controls input {
+        padding: 8px;
+        margin-right: 10px;
+        border: 1px solid #ddd;
+        border-radius: 3px;
+    }
+    
+    .flow-controls button {
+        padding: 8px 16px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+    }
+    
+    .flow-visualization {
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        margin-bottom: 20px;
+        min-height: 600px;
+    }
+    
+    .flow-details {
+        background: #f9f9f9;
+        padding: 20px;
+        border-radius: 5px;
+    }
+    
+    .flow-summary-section h3,
+    .missing-programs-section h3,
+    .field-flows-section h3,
+    .file-operations-section h3 {
+        color: #333;
+        border-bottom: 2px solid #007bff;
+        padding-bottom: 5px;
+        margin-bottom: 15px;
+    }
+    
+    .missing-program-item {
+        display: flex;
+        align-items: center;
+        padding: 10px;
+        margin: 5px 0;
+        background: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 3px;
+    }
+    
+    .missing-program-item .program-name {
+        font-weight: bold;
+        margin-right: 10px;
+    }
+    
+    .missing-program-item .impact-btn {
+        margin: 0 10px;
+        padding: 5px 10px;
+        background: #dc3545;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+    }
+    
+    .missing-program-item .upload-hint {
+        color: #856404;
+        font-style: italic;
+    }
+    
+    .field-flow-item {
+        display: flex;
+        align-items: center;
+        padding: 10px;
+        margin: 5px 0;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 3px;
+    }
+    
+    .field-flow-item .field-name {
+        font-weight: bold;
+        margin-right: 15px;
+        min-width: 120px;
+    }
+    
+    .field-flow-item .field-flow-path {
+        flex: 1;
+        margin-right: 10px;
+    }
+    
+    .field-flow-item .trace-btn {
+        padding: 5px 10px;
+        background: #28a745;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+    }
+    
+    .file-operation-item {
+        padding: 10px;
+        margin: 5px 0;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 3px;
+    }
+    
+    .file-operation-item.has-layout {
+        border-left: 4px solid #28a745;
+    }
+    
+    .file-operation-item.no-layout {
+        border-left: 4px solid #ffc107;
+    }
+    
+    .file-info {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+    }
+    
+    .file-name {
+        font-weight: bold;
+        margin-right: 10px;
+    }
+    
+    .io-direction {
+        color: #6c757d;
+        margin-right: 10px;
+    }
+    
+    .layout-indicator {
+        background: #28a745;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 12px;
+    }
+    
+    .modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .modal-content {
+        background: white;
+        border-radius: 5px;
+        max-width: 80%;
+        max-height: 80%;
+        overflow-y: auto;
+    }
+    
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 15px 20px;
+        border-bottom: 1px solid #ddd;
+    }
+    
+    .modal-body {
+        padding: 20px;
+    }
+    
+    .close-btn {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        color: #999;
+    }
+    
+    .close-btn:hover {
+        color: #333;
+    }
+    
+    .highlight {
+        background: #fff3cd;
+        padding: 10px;
+        border-radius: 3px;
+        font-weight: bold;
+    }
+
         /* Responsive Design */
         @media (max-width: 1200px) {
             .main-container {
@@ -5016,6 +5218,446 @@ function viewLayoutFields(layoutName) {
             }
 
             hideLoading();
+        }
+
+        // Add to your main UI
+function createProgramFlowView(sessionId) {
+    return `
+        <div class="program-flow-container">
+            <div class="flow-controls">
+                <input type="text" id="startingProgram" placeholder="Enter program name (e.g., TMSTM6)">
+                <button onclick="analyzeFlow('${sessionId}')">Analyze Program Flow</button>
+            </div>
+            
+            <div id="flowVisualization" class="flow-visualization">
+                <!-- Flow diagram will be rendered here -->
+            </div>
+            
+            <div id="flowDetails" class="flow-details">
+                <div class="flow-summary"></div>
+                <div class="missing-programs"></div>
+                <div class="field-flows"></div>
+                <div class="file-operations"></div>
+            </div>
+        </div>
+    `;
+}
+
+        async function analyzeFlow(sessionId) {
+            const programName = document.getElementById('startingProgram').value;
+            if (!programName) {
+                alert('Please enter a program name');
+                return;
+            }
+            
+            showLoadingSpinner('Analyzing program flow...');
+            
+            try {
+                // Get flow analysis
+                const flowResponse = await fetch(`/api/program-flow/${sessionId}/${programName}`);
+                const flowData = await flowResponse.json();
+                
+                if (!flowData.success) {
+                    showError(flowData.error);
+                    return;
+                }
+                
+                // Get visualization data
+                const vizResponse = await fetch(`/api/program-flow-visualization/${sessionId}/${programName}`);
+                const vizData = await vizResponse.json();
+                
+                if (vizData.success) {
+                    renderFlowVisualization(vizData.visualization_data);
+                    renderFlowDetails(flowData.flow_analysis, vizData);
+                }
+                
+            } catch (error) {
+                showError(`Error analyzing flow: ${error.message}`);
+            } finally {
+                hideLoadingSpinner();
+            }
+        }
+
+        function renderFlowVisualization(vizData) {
+            const container = document.getElementById('flowVisualization');
+            
+            // Create SVG for flow diagram
+            const svg = d3.select(container)
+                .html('') // Clear previous content
+                .append('svg')
+                .attr('width', '100%')
+                .attr('height', '600px');
+            
+            // Create flow diagram using D3.js
+            const nodes = vizData.nodes.map(node => ({
+                ...node,
+                x: Math.random() * 800,
+                y: Math.random() * 400
+            }));
+            
+            const links = vizData.edges.map(edge => ({
+                source: edge.from,
+                target: edge.to,
+                ...edge
+            }));
+            
+            // Create force simulation
+            const simulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(links).id(d => d.id).distance(150))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(400, 300));
+            
+            // Draw links (arrows)
+            const link = svg.selectAll('.link')
+                .data(links)
+                .enter()
+                .append('line')
+                .attr('class', 'link')
+                .attr('stroke', d => {
+                    if (d.status === 'missing') return '#ff4444';
+                    if (d.type === 'file_operation') return '#4444ff';
+                    return '#666';
+                })
+                .attr('stroke-width', 2)
+                .attr('marker-end', 'url(#arrowhead)');
+            
+            // Add arrowhead marker
+            svg.append('defs').append('marker')
+                .attr('id', 'arrowhead')
+                .attr('viewBox', '0 -5 10 10')
+                .attr('refX', 15)
+                .attr('refY', 0)
+                .attr('markerWidth', 6)
+                .attr('markerHeight', 6)
+                .attr('orient', 'auto')
+                .append('path')
+                .attr('d', 'M0,-5L10,0L0,5')
+                .attr('fill', '#666');
+            
+            // Draw nodes
+            const node = svg.selectAll('.node')
+                .data(nodes)
+                .enter()
+                .append('g')
+                .attr('class', 'node')
+                .call(d3.drag()
+                    .on('start', dragStarted)
+                    .on('drag', dragged)
+                    .on('end', dragEnded));
+            
+            // Node circles
+            node.append('circle')
+                .attr('r', d => d.type === 'file' ? 15 : 20)
+                .attr('fill', d => {
+                    if (d.status === 'missing') return '#ffcccc';
+                    if (d.type === 'file') return '#ccffcc';
+                    if (d.is_starting_program) return '#ffcc99';
+                    return '#ccccff';
+                })
+                .attr('stroke', d => {
+                    if (d.status === 'missing') return '#ff0000';
+                    if (d.type === 'file') return '#00aa00';
+                    return '#0000aa';
+                })
+                .attr('stroke-width', 2);
+            
+            // Node labels
+            node.append('text')
+                .attr('dy', '.35em')
+                .attr('text-anchor', 'middle')
+                .attr('font-size', '10px')
+                .attr('font-weight', 'bold')
+                .text(d => d.label.length > 8 ? d.label.substring(0, 8) + '...' : d.label);
+            
+            // Add click handlers for nodes
+            node.on('click', function(event, d) {
+                showNodeDetails(d, vizData);
+            });
+            
+            // Update positions on simulation tick
+            simulation.on('tick', () => {
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+                
+                node
+                    .attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+            
+            // Drag functions
+            function dragStarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+            
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+            
+            function dragEnded(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+        }
+
+        function renderFlowDetails(flowAnalysis, vizData) {
+            const detailsContainer = document.getElementById('flowDetails');
+            
+            let html = `
+                <div class="flow-summary-section">
+                    <h3>Flow Summary</h3>
+                    <pre>${flowAnalysis.business_flow_summary}</pre>
+                </div>
+            `;
+            
+            // Missing programs section
+            if (vizData.missing_count > 0) {
+                html += `
+                    <div class="missing-programs-section">
+                        <h3>Missing Programs (${vizData.missing_count})</h3>
+                        <div class="missing-list">
+                `;
+                
+                vizData.visualization_data.missing_programs.forEach(program => {
+                    html += `
+                        <div class="missing-program-item">
+                            <span class="program-name">${program}</span>
+                            <button onclick="showMissingProgramImpact('${sessionId}', '${program}')" 
+                                    class="impact-btn">Show Impact</button>
+                            <span class="upload-hint">Upload this program to continue flow analysis</span>
+                        </div>
+                    `;
+                });
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Field flows section
+            if (Object.keys(vizData.visualization_data.field_flows).length > 0) {
+                html += `
+                    <div class="field-flows-section">
+                        <h3>Key Field Data Flows</h3>
+                        <div class="field-flows-list">
+                `;
+                
+                Object.entries(vizData.visualization_data.field_flows).forEach(([fieldName, flows]) => {
+                    html += `
+                        <div class="field-flow-item">
+                            <div class="field-name">${fieldName}</div>
+                            <div class="field-flow-path">
+                    `;
+                    
+                    flows.forEach((flow, index) => {
+                        if (index > 0) html += ' → ';
+                        html += `<span class="flow-step">${flow.from}</span>`;
+                    });
+                    
+                    html += `
+                            </div>
+                            <button onclick="traceFieldFlow('${sessionId}', '${fieldName}')" 
+                                    class="trace-btn">Trace Field</button>
+                        </div>
+                    `;
+                });
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // File operations section
+            if (vizData.visualization_data.file_operations && vizData.visualization_data.file_operations.length > 0) {
+                html += `
+                    <div class="file-operations-section">
+                        <h3>File Operations in Flow</h3>
+                        <div class="file-operations-list">
+                `;
+                
+                vizData.visualization_data.file_operations.forEach(fileOp => {
+                    const statusClass = fileOp.has_layout ? 'has-layout' : 'no-layout';
+                    html += `
+                        <div class="file-operation-item ${statusClass}">
+                            <div class="file-info">
+                                <span class="file-name">${fileOp.file_name}</span>
+                                <span class="io-direction">(${fileOp.io_direction})</span>
+                                ${fileOp.has_layout ? '<span class="layout-indicator">Has Layout</span>' : ''}
+                            </div>
+                            <div class="file-program">Used by: ${fileOp.program_name}</div>
+                        </div>
+                    `;
+                });
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            }
+            
+            detailsContainer.innerHTML = html;
+        }
+
+        function showNodeDetails(node, vizData) {
+            const modal = document.createElement('div');
+            modal.className = 'node-details-modal';
+            
+            let content = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>${node.label} Details</h3>
+                        <button class="close-btn" onclick="this.parentElement.parentElement.parentElement.remove()">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="node-info">
+                            <p><strong>Type:</strong> ${node.type}</p>
+                            <p><strong>Status:</strong> ${node.status}</p>
+            `;
+            
+            if (node.type === 'program') {
+                if (node.status === 'missing') {
+                    content += `
+                        <div class="missing-program-info">
+                            <p class="missing-notice">This program is missing from the analysis.</p>
+                            <button onclick="showMissingProgramImpact('${sessionId}', '${node.id}')" 
+                                    class="impact-analysis-btn">View Impact Analysis</button>
+                        </div>
+                    `;
+                } else {
+                    content += `
+                        <div class="program-actions">
+                            <button onclick="viewProgramSource('${sessionId}', '${node.id}')" 
+                                    class="view-source-btn">View Source Code</button>
+                            <button onclick="analyzeProgram('${sessionId}', '${node.id}')" 
+                                    class="analyze-btn">Analyze Program</button>
+                        </div>
+                    `;
+                }
+            } else if (node.type === 'file') {
+                content += `
+                    <p><strong>Interface:</strong> ${node.interface}</p>
+                    <p><strong>I/O Direction:</strong> ${node.io_direction}</p>
+                    <p><strong>Has Layout:</strong> ${node.has_layout ? 'Yes' : 'No'}</p>
+                `;
+            }
+            
+            content += `
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            modal.innerHTML = content;
+            document.body.appendChild(modal);
+        }
+
+        async function showMissingProgramImpact(sessionId, programName) {
+            try {
+                const response = await fetch(`/api/missing-program-impact/${sessionId}/${programName}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const impact = data.impact_analysis;
+                    
+                    const modal = document.createElement('div');
+                    modal.className = 'impact-modal';
+                    modal.innerHTML = `
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h3>Impact Analysis: ${impact.missing_program}</h3>
+                                <button class="close-btn" onclick="this.parentElement.parentElement.parentElement.remove()">×</button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="impact-summary">
+                                    <p><strong>Impact:</strong> ${impact.impact_description}</p>
+                                </div>
+                                <div class="calling-programs">
+                                    <h4>Programs that call ${impact.missing_program}:</h4>
+                                    <ul>
+                                        ${impact.calling_programs.map(prog => `<li>${prog}</li>`).join('')}
+                                    </ul>
+                                </div>
+                                <div class="recommendations">
+                                    <h4>Recommendations:</h4>
+                                    <ul>
+                                        ${impact.recommendations.map(rec => `<li>${rec}</li>`).join('')}
+                                    </ul>
+                                </div>
+                                <div class="upload-hint">
+                                    <p class="highlight">Upload ${impact.missing_program} to restore complete flow analysis</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.body.appendChild(modal);
+                }
+            } catch (error) {
+                showError(`Error getting impact analysis: ${error.message}`);
+            }
+        }
+
+        async function traceFieldFlow(sessionId, fieldName) {
+            try {
+                const response = await fetch(`/api/field-flow-trace/${sessionId}/${fieldName}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const journey = data.field_journey;
+                    
+                    const modal = document.createElement('div');
+                    modal.className = 'field-trace-modal';
+                    
+                    let flowStepsHtml = '';
+                    journey.flow_steps.forEach((step, index) => {
+                        flowStepsHtml += `
+                            <div class="flow-step">
+                                <div class="step-number">${step.sequence}</div>
+                                <div class="step-content">
+                                    <div class="step-programs">
+                                        ${step.source_program} → ${step.target_program}
+                                    </div>
+                                    <div class="step-type">${step.flow_type}</div>
+                                    <div class="step-transformation">${step.transformation}</div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    modal.innerHTML = `
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h3>Field Flow Trace: ${journey.field_name}</h3>
+                                <button class="close-btn" onclick="this.parentElement.parentElement.parentElement.remove()">×</button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="field-journey">
+                                    <div class="journey-summary">
+                                        <p><strong>Programs Involved:</strong> ${journey.programs_involved.join(' → ')}</p>
+                                    </div>
+                                    <div class="flow-steps">
+                                        <h4>Flow Steps:</h4>
+                                        ${flowStepsHtml}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.body.appendChild(modal);
+                } else {
+                    showError(data.message || 'No flow data found for this field');
+                }
+            } catch (error) {
+                showError(`Error tracing field: ${error.message}`);
+            }
         }
 
       // Initialize everything when DOM is ready
