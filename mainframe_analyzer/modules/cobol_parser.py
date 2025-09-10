@@ -477,52 +477,30 @@ class COBOLParser:
         
         return programs
     
-    def _extract_complete_cics_command_(self, lines: List[str], start: int) -> Tuple[str, int]:
-        """
-        FIXED: Extract complete CICS command across multiple lines with proper termination detection
-        Returns: (complete_command, end_line_index)
-        """
-        cics_command = ""
-        end_line = start
+    def _extract_complete_cics_command(self, lines: List[str], start_idx: int) -> str:
+        """Extract complete CICS command across multiple lines"""
+        command_parts = []
+        current_idx = start_idx
         
-        for i in range(start, min(len(lines), start + 20)):  # Increased search range
-            program_area = self.extract_program_area_only(lines[i])
-            if not program_area:
-                continue
+        while current_idx < len(lines):
+            line = lines[current_idx]
+            program_area = self.extract_program_area_only(line)
             
-            cics_command += " " + program_area.strip()
-            end_line = i
-            
-            # Check for various termination patterns
-            command_upper = cics_command.upper()
-            
-            # Primary termination: END-EXEC
-            if 'END-EXEC' in command_upper:
-                logger.debug(f"CICS command terminated by END-EXEC at line {i+1}")
-                break
-            
-            # Secondary termination: Period after substantial content
-            if (cics_command.strip().endswith('.') and 
-                len(cics_command.strip()) > 30 and
-                ('CALL' in command_upper or 'XCTL' in command_upper or 'LINK' in command_upper)):
-                logger.debug(f"CICS command terminated by period at line {i+1}")
-                break
-            
-            # Tertiary termination: Next COBOL statement
-            if (i > start and 
-                (program_area.strip().upper().startswith(('IF', 'MOVE', 'PERFORM', 'CALL', 'EXEC')) or
-                 re.match(r'^\s*[A-Z0-9\-]+\s*\.', program_area))):  # Paragraph/section
-                # Check if this might be continuation of USING clause
-                if not ('USING' in command_upper and 
-                       any(keyword in program_area.upper() for keyword in ['DFHEIBLK', 'DFHCOMMAREA'])):
-                    logger.debug(f"CICS command terminated by next statement at line {i+1}")
-                    end_line = i - 1  # Don't include the next statement
+            if program_area:
+                command_parts.append(program_area.strip())
+                
+                if 'END-EXEC' in program_area.upper():
                     break
+                
+                if program_area.strip().endswith('.') and len(' '.join(command_parts)) > 20:
+                    break
+            
+            current_idx += 1
+            
+            if current_idx - start_idx > 15:
+                break
         
-        complete_command = cics_command.strip()
-        logger.debug(f"Complete CICS command extracted ({start+1}-{end_line+1}): {complete_command[:150]}...")
-        
-        return complete_command, end_line
+        return ' '.join(command_parts)
 
 
     def _parse_cics_command_enhanced(self, cics_command: str, line_number: int) -> List[Dict]:
@@ -1662,38 +1640,37 @@ Rules:
         logger.info(f"Extracted {len(dynamic_calls)} dynamic program calls")
         return dynamic_calls
     
-    def _build_variable_value_map(self, lines: List[str]) -> Dict[str, Any]:
+    def _build_variable_value_map_enhanced(self, lines: List[str]) -> Dict[str, Any]:
         """
-        FIXED: Enhanced variable value map building with comprehensive MOVE tracking
+        ENHANCED: Build comprehensive variable map with proper group field tracking
         """
         variable_map = {}
         current_group = None
         group_stack = []
         
-        logger.info("Building enhanced variable value map with comprehensive MOVE tracking...")
+        logger.info("Building enhanced variable value map with group field tracking...")
         
-        # First pass: Build field structure
+        # First pass: Build complete field structure with group relationships
         for i, line in enumerate(lines, 1):
-            program_area = self.extract_program_area_only(line)
+            program_area = self._extract_program_area_only(line)
             if not program_area:
                 continue
                 
             line_upper = program_area.upper().strip()
-            
             if not line_upper or line_upper.startswith('*'):
                 continue
                 
-            # Check for field definition with level number
+            # Check for field definition
             level_match = re.match(r'^\s*(\d{2})\s+(.+)', line_upper)
             if level_match:
                 level = int(level_match.group(1))
                 field_content = level_match.group(2).strip()
                 
-                # Manage group stack based on level
+                # Manage group stack based on level hierarchy
                 while group_stack and group_stack[-1]['level'] >= level:
                     group_stack.pop()
                 
-                # Extract field name (handle FILLER specially)
+                # Extract field name
                 if field_content.startswith('FILLER'):
                     field_name = f'FILLER-{i}'
                     is_filler = True
@@ -1707,16 +1684,18 @@ Rules:
                     else:
                         continue
                 
-                # Initialize field info
+                # Initialize field info with enhanced group tracking
                 field_info = {
                     'type': 'group' if level == 1 else 'field',
                     'level': level,
                     'line': i,
                     'children': {},
-                    'possible_values': set(),  # Use set to avoid duplicates
+                    'possible_values': set(),
                     'is_filler': is_filler,
                     'parent': group_stack[-1]['name'] if group_stack else None,
-                    'move_operations': []  # Track all MOVE operations
+                    'move_operations': [],
+                    'group_construction_pattern': None,  # NEW: Track construction patterns
+                    'program_name_template': None        # NEW: Track if used as program template
                 }
                 
                 # Check for VALUE clause
@@ -1730,43 +1709,49 @@ Rules:
                 # Add to variable map
                 variable_map[field_name] = field_info
                 
-                # Update parent's children if this is a sub-field
+                # ENHANCED: Update parent's children and track group patterns
                 if group_stack:
                     parent_name = group_stack[-1]['name']
                     if parent_name in variable_map:
                         variable_map[parent_name]['children'][field_name] = field_info
                         
-                        # For fillers with values in groups, track them specially
+                        # Track filler values in groups for program construction
                         if is_filler and 'constant_value' in field_info:
                             if 'filler_values' not in variable_map[parent_name]:
                                 variable_map[parent_name]['filler_values'] = []
                             variable_map[parent_name]['filler_values'].append(value)
-                            logger.debug(f"Added filler value '{value}' to group {parent_name}")
+                            
+                            # Mark parent as potential program template
+                            variable_map[parent_name]['program_name_template'] = True
+                            logger.info(f"Marked {parent_name} as program name template with prefix '{value}'")
                 
-                # Add to group stack if it's a group (level 01 or has potential children)
+                # Add to group stack for hierarchy tracking
                 if level == 1 or (level > 1 and level < 49):
                     group_stack.append({'name': field_name, 'level': level})
         
-        # Second pass: Track ALL MOVE operations comprehensively
-        logger.info("Second pass: Tracking MOVE operations...")
+        # Second pass: ENHANCED MOVE tracking with group awareness
+        logger.info("Second pass: Enhanced MOVE tracking with group field awareness...")
         for i, line in enumerate(lines, 1):
-            program_area = self.extract_program_area_only(line)
+            program_area = self._extract_program_area_only(line)
             if not program_area:
                 continue
                 
             line_upper = program_area.upper().strip()
             
-            # ENHANCED: Multiple MOVE patterns to catch all variations
+            # Enhanced MOVE patterns including array subscripts and complex assignments
             move_patterns = [
                 # Standard MOVE literal TO variable
                 r'MOVE\s+[\'"]([^\'\"]+)[\'"]\s+TO\s+([A-Z0-9\-]+)',
-                # MOVE variable TO variable
+                # MOVE variable TO variable  
                 r'MOVE\s+([A-Z0-9\-]+)\s+TO\s+([A-Z0-9\-]+)',
-                # MOVE with parentheses (array subscripts)
+                # MOVE with parentheses/subscripts
                 r'MOVE\s+[\'"]([^\'\"]+)[\'"]\s+TO\s+([A-Z0-9\-]+\([^)]+\))',
+                # MOVE to group sub-fields
+                r'MOVE\s+[\'"]([^\'\"]+)[\'"]\s+TO\s+([A-Z0-9\-]+\s+OF\s+[A-Z0-9\-]+)',
+                r'MOVE\s+([A-Z0-9\-]+)\s+TO\s+([A-Z0-9\-]+\s+OF\s+[A-Z0-9\-]+)',
                 # MOVE numeric values
                 r'MOVE\s+(\d+)\s+TO\s+([A-Z0-9\-]+)',
-                # MOVE SPACES/ZEROS
+                # MOVE special values
                 r'MOVE\s+(SPACES|ZEROS?|LOW-VALUES?|HIGH-VALUES?)\s+TO\s+([A-Z0-9\-]+)'
             ]
             
@@ -1776,8 +1761,9 @@ Rules:
                     source_val = match[0].strip()
                     target_var = match[1].strip()
                     
-                    # Clean target variable (remove array subscripts)
+                    # Clean target variable (remove subscripts, OF clauses)
                     clean_target = re.sub(r'\([^)]*\)', '', target_var)
+                    clean_target = re.sub(r'\s+OF\s+.*', '', clean_target)
                     
                     # Add to target variable's possible values
                     if clean_target in variable_map:
@@ -1787,54 +1773,82 @@ Rules:
                             'line': i,
                             'statement': line_upper
                         })
-                        logger.debug(f"Added MOVE value '{source_val}' to {clean_target} at line {i}")
-                    
-                    # SPECIAL HANDLING: Check if source is a variable that might be a program name
-                    if source_val in variable_map and 'constant_value' in variable_map[source_val]:
-                        const_val = variable_map[source_val]['constant_value']
-                        if clean_target in variable_map:
-                            variable_map[clean_target]['possible_values'].add(const_val)
-                            logger.debug(f"Added indirect value '{const_val}' from {source_val} to {clean_target}")
+                        logger.debug(f"Enhanced MOVE: '{source_val}' -> {clean_target} at line {i}")
+                        
+                        # ENHANCED: Check if this affects a group's program construction
+                        parent_group = self._find_parent_group(clean_target, variable_map)
+                        if parent_group and variable_map[parent_group].get('program_name_template'):
+                            logger.info(f"MOVE to {clean_target} affects program template {parent_group}")
+                            self._update_group_program_combinations(parent_group, variable_map)
         
-        # Third pass: Handle group field dynamics and program name construction
-        logger.info("Third pass: Analyzing group dynamics for program name construction...")
+        # Third pass: ENHANCED group program name construction
+        logger.info("Third pass: Enhanced group program name construction...")
         for var_name, var_info in variable_map.items():
-            if var_info.get('type') == 'group' and 'children' in var_info:
-                # Look for patterns like WA-TMSBMPM6 structure
-                children = var_info['children']
-                filler_values = var_info.get('filler_values', [])
-                
-                # Find non-filler children that might hold dynamic values
-                dynamic_children = {name: child for name, child in children.items() 
-                                  if not child.get('is_filler', False)}
-                
-                if filler_values and dynamic_children:
-                    # Create program name combinations
-                    for filler_val in filler_values:
-                        for child_name, child_info in dynamic_children.items():
-                            child_values = list(child_info.get('possible_values', set()))
-                            if child_values:
-                                for child_val in child_values:
-                                    if child_val not in ['SPACES', 'ZEROS', 'LOW-VALUES', 'HIGH-VALUES']:
-                                        combined_program = f"{filler_val}{child_val}"
-                                        
-                                        # Add this as a possible value for the group
-                                        var_info['possible_values'].add(combined_program)
-                                        logger.info(f"Generated program combination: {combined_program} from group {var_name}")
+            if var_info.get('program_name_template'):
+                combinations = self._generate_program_name_combinations(var_name, var_info, variable_map)
+                if combinations:
+                    var_info['possible_values'].update(combinations)
+                    var_info['group_construction_pattern'] = 'filler_prefix_plus_variable'
+                    logger.info(f"Generated {len(combinations)} program combinations for {var_name}: {list(combinations)}")
         
-        # Convert sets back to lists for JSON serialization
+        # Convert sets to lists for JSON serialization
         for var_name, var_info in variable_map.items():
             if isinstance(var_info.get('possible_values'), set):
                 var_info['possible_values'] = list(var_info['possible_values'])
         
-        logger.info(f"Built enhanced variable map with {len(variable_map)} variables")
-        
-        # Debug logging for key variables
-        for var_name, var_info in variable_map.items():
-            if var_info.get('possible_values'):
-                logger.debug(f"Variable {var_name}: {var_info['possible_values']}")
-        
         return variable_map
+    
+    def _find_parent_group(self, field_name: str, variable_map: Dict) -> Optional[str]:
+        """Find the parent group for a field"""
+        for var_name, var_info in variable_map.items():
+            if var_info.get('type') == 'group' and field_name in var_info.get('children', {}):
+                return var_name
+        return None
+    
+    def _update_group_program_combinations(self, group_name: str, variable_map: Dict):
+        """Update program combinations when a group member changes"""
+        group_info = variable_map[group_name]
+        combinations = self._generate_program_name_combinations(group_name, group_info, variable_map)
+        if combinations:
+            group_info['possible_values'].update(combinations)
+    
+    def _generate_program_name_combinations(self, group_name: str, group_info: Dict, variable_map: Dict) -> set:
+        """
+        ENHANCED: Generate program name combinations from group structure
+        """
+        combinations = set()
+        
+        filler_values = group_info.get('filler_values', [])
+        children = group_info.get('children', {})
+        
+        logger.debug(f"Generating combinations for {group_name}: fillers={filler_values}, children={list(children.keys())}")
+        
+        if not filler_values:
+            return combinations
+        
+        # Find non-filler children that could be dynamic parts
+        dynamic_children = {}
+        for child_name, child_info in children.items():
+            if not child_info.get('is_filler') and child_name in variable_map:
+                child_possible_values = variable_map[child_name].get('possible_values', [])
+                if child_possible_values:
+                    dynamic_children[child_name] = child_possible_values
+        
+        # Generate combinations
+        for filler_prefix in filler_values:
+            if not dynamic_children:
+                # Just the filler value itself
+                combinations.add(filler_prefix)
+            else:
+                # Combine filler with each dynamic child's possible values
+                for child_name, child_values in dynamic_children.items():
+                    for child_value in child_values:
+                        if child_value not in ['SPACES', 'ZEROS', 'LOW-VALUES', 'HIGH-VALUES']:
+                            combined = f"{filler_prefix}{child_value}"
+                            combinations.add(combined)
+                            logger.debug(f"Generated combination: {filler_prefix} + {child_value} = {combined}")
+        
+        return combinations
 
     def _resolve_group_field_programs(self, group_name: str, group_info: Dict, variable_map: Dict) -> List[Dict]:
         """
@@ -1875,167 +1889,224 @@ Rules:
 
     def _analyze_dynamic_cics_call_enhanced(self, cics_command: str, line_number: int, variable_map: Dict) -> Optional[Dict]:
         """
-        FIXED: Enhanced analysis of dynamic CICS calls with better pattern matching
+        ENHANCED: Analyze dynamic CICS calls with detailed program resolution
         """
         if not variable_map:
-            logger.debug("No variable map available for dynamic call analysis")
             return None
         
         cics_upper = cics_command.upper()
         
-        # Enhanced patterns for dynamic CICS calls (including multi-line variations)
+        # Enhanced patterns for dynamic CICS calls
         patterns = [
-            # Standard patterns
             r'EXEC\s+CICS\s+(XCTL|LINK)\s+PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)',
             r'EXEC\s+CICS\s+(XCTL|LINK)\s+.*?PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)',
-            
-            # Multi-line patterns (command spreads across lines)
-            r'(XCTL|LINK)\s+.*?PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)',
             r'(XCTL|LINK)\s+PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)',
-            
-            # CALL patterns (for batch programs)
-            r'CALL\s+([A-Z0-9\-]+)\s+USING',
-            r'CALL\s+([A-Z0-9\-]+)(?:\s|$)',
-            
-            # Handle spacing variations
-            r'EXEC\s+CICS\s+(XCTL|LINK)\s+.*?PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\).*?USING',
         ]
         
         for pattern in patterns:
-            match = re.search(pattern, cics_upper, re.DOTALL)  # DOTALL for multi-line matching
+            match = re.search(pattern, cics_upper, re.DOTALL)
             if match:
-                groups = match.groups()
-                logger.debug(f"Pattern matched: {pattern}")
-                logger.debug(f"Groups: {groups}")
+                operation = match.group(1)
+                variable_name = match.group(2)
                 
-                if len(groups) >= 2:
-                    operation = groups[0]
-                    variable_name = groups[1]
-                elif len(groups) == 1:
-                    # Handle CALL patterns
-                    operation = 'CALL'
-                    variable_name = groups[0]
-                else:
-                    continue
+                logger.info(f"Found dynamic call: {operation} PROGRAM({variable_name})")
                 
-                logger.info(f"Found dynamic call: operation={operation} variable={variable_name}")
+                # ENHANCED: Resolve variable with detailed analysis
+                resolved_programs = self._resolve_variable_to_programs_enhanced(variable_name, variable_map)
                 
-                # Resolve variable to possible program names
-                try:
-                    resolved_programs = self._resolve_variable_to_programs_enhanced(variable_name, variable_map)
+                if resolved_programs:
+                    # ENHANCED: Add LLM analysis for business context if available
+                    business_context = self._generate_dynamic_call_business_context(
+                        variable_name, resolved_programs, cics_command
+                    )
                     
-                    if resolved_programs:
-                        return {
-                            'operation': f'CICS_{operation}' if operation in ['XCTL', 'LINK'] else operation,
-                            'variable_name': variable_name,
-                            'resolved_programs': resolved_programs,
-                            'line_number': line_number,
-                            'line_content': cics_command[:200],
-                            'call_type': 'dynamic',
-                            'resolution_confidence': self._calculate_resolution_confidence(
-                                variable_name, variable_map, resolved_programs
-                            )
-                        }
-                    else:
-                        logger.debug(f"Could not resolve variable {variable_name}")
-                        
-                except Exception as e:
-                    logger.error(f"Error resolving dynamic call variable {variable_name}: {str(e)}")
-                    return None
+                    return {
+                        'operation': f'CICS_{operation}',
+                        'variable_name': variable_name,
+                        'resolved_programs': resolved_programs,
+                        'line_number': line_number,
+                        'line_content': cics_command[:200],
+                        'call_type': 'dynamic',
+                        'business_context': business_context,
+                        'resolution_details': self._create_resolution_details(variable_name, variable_map),
+                        'group_structure_used': self._check_if_group_structure_used(variable_name, variable_map)
+                    }
         
         return None
+    
+    def _generate_dynamic_call_business_context(self, variable_name: str, resolved_programs: List[Dict], cics_command: str) -> str:
+        """Generate business context for dynamic call using LLM if available"""
+        if not self.llm_client:
+            return f"Dynamic call using {variable_name} variable to programs: {[p['program_name'] for p in resolved_programs]}"
+        
+        try:
+            # Prepare context for LLM
+            program_list = [p['program_name'] for p in resolved_programs]
+            resolution_methods = [p['resolution'] for p in resolved_programs]
+            
+            prompt = f"""
+            Analyze this COBOL dynamic program call and provide business context:
+            
+            Variable: {variable_name}
+            CICS Command: {cics_command}
+            Resolved Programs: {program_list}
+            Resolution Methods: {resolution_methods}
+            
+            This is in a wealth management system. Provide a 1-2 sentence business description of:
+            1. What this dynamic call pattern represents in business terms
+            2. Why the program name is constructed dynamically
+            
+            Focus on business purpose, not technical details.
+            """
+            
+            response = self.llm_client.call_llm(prompt, max_tokens=200, temperature=0.3)
+            
+            if response.success and response.content:
+                return response.content.strip()
+        
+        except Exception as e:
+            logger.warning(f"LLM business context generation failed: {e}")
+        
+        # Fallback
+        return f"Dynamic program dispatch using {variable_name} - calls one of: {program_list}"
+    
+    def _create_resolution_details(self, variable_name: str, variable_map: Dict) -> Dict:
+        """Create detailed resolution information"""
+        if variable_name not in variable_map:
+            return {}
+        
+        var_info = variable_map[variable_name]
+        
+        details = {
+            'variable_type': var_info.get('type', 'unknown'),
+            'possible_values': list(var_info.get('possible_values', [])),
+            'move_operations_count': len(var_info.get('move_operations', [])),
+            'is_group_template': var_info.get('program_name_template', False),
+            'construction_pattern': var_info.get('group_construction_pattern'),
+        }
+        
+        # Add group structure details if it's a group
+        if var_info.get('type') == 'group':
+            details['children_count'] = len(var_info.get('children', {}))
+            details['filler_values'] = var_info.get('filler_values', [])
+            details['dynamic_children'] = [
+                child_name for child_name, child_info in var_info.get('children', {}).items()
+                if not child_info.get('is_filler') and child_info.get('possible_values')
+            ]
+        
+        return details
+    
+    def _check_if_group_structure_used(self, variable_name: str, variable_map: Dict) -> bool:
+        """Check if the variable uses group structure for program name construction"""
+        if variable_name not in variable_map:
+            return False
+        
+        var_info = variable_map[variable_name]
+        return (var_info.get('type') == 'group' and 
+                var_info.get('program_name_template', False) and
+                bool(var_info.get('filler_values')))
 
 
     def _resolve_variable_to_programs_enhanced(self, variable_name: str, variable_map: Dict) -> List[Dict]:
         """
-        FIXED: Enhanced variable resolution with comprehensive value tracking
+        ENHANCED: Resolve variable to programs with detailed source tracking
         """
         resolved_programs = []
         
         logger.debug(f"Enhanced resolving variable {variable_name}...")
         
-        # Strategy 1: Direct variable lookup
-        if variable_name in variable_map:
-            var_info = variable_map[variable_name]
+        if variable_name not in variable_map:
+            logger.warning(f"Variable {variable_name} not found in variable map")
+            return [{
+                'program_name': variable_name,
+                'resolution': 'variable_not_found',
+                'confidence': 0.1,
+                'source': 'Variable not found in analysis'
+            }]
+        
+        var_info = variable_map[variable_name]
+        
+        # ENHANCED: Handle group structures with program templates
+        if var_info.get('program_name_template'):
+            logger.info(f"Processing program template group: {variable_name}")
             
-            # Direct constant value
-            if 'constant_value' in var_info:
-                resolved_programs.append({
-                    'program_name': var_info['constant_value'],
-                    'resolution': 'direct_constant',
-                    'confidence': 1.0,
-                    'source': f"Direct VALUE '{var_info['constant_value']}'"
-                })
-            
-            # All possible values from MOVE operations
+            # Get all possible combinations from the group
             possible_values = var_info.get('possible_values', [])
+            filler_values = var_info.get('filler_values', [])
+            
             for value in possible_values:
-                if (value and 
-                    value not in ['SPACES', 'ZEROS', 'LOW-VALUES', 'HIGH-VALUES'] and
-                    value not in [p['program_name'] for p in resolved_programs]):
+                if value and self._is_valid_program_name(value):
+                    confidence = 0.95 if any(filler in value for filler in filler_values) else 0.8
                     
                     resolved_programs.append({
                         'program_name': value,
-                        'resolution': 'move_operation',
-                        'confidence': 0.9,
-                        'source': f"MOVE operations to {variable_name}"
+                        'resolution': 'group_template_combination',
+                        'confidence': confidence,
+                        'source': f"Group {variable_name} template construction",
+                        'construction_details': {
+                            'filler_prefixes': filler_values,
+                            'group_structure': True,
+                            'template_variable': variable_name
+                        }
                     })
-            
-            # Group structure analysis
-            if var_info.get('type') == 'group':
-                group_programs = self._analyze_group_for_programs(variable_name, var_info, variable_map)
-                resolved_programs.extend(group_programs)
         
-        # Strategy 2: Search for related variables (e.g., WA-TMSBMPM6 might have related WA-* fields)
-        base_name = variable_name.replace('WA-', '').replace('WS-', '')
-        for field_name, field_info in variable_map.items():
-            if (base_name in field_name or field_name in base_name) and field_name != variable_name:
-                # Check if this related field has values that could be program names
-                related_values = field_info.get('possible_values', [])
-                for value in related_values:
-                    if (value and 
-                        len(value) >= 3 and 
-                        value not in ['SPACES', 'ZEROS', 'LOW-VALUES', 'HIGH-VALUES'] and
-                        value not in [p['program_name'] for p in resolved_programs]):
-                        
-                        resolved_programs.append({
-                            'program_name': value,
-                            'resolution': 'related_field',
-                            'confidence': 0.7,
-                            'source': f"Related field {field_name}"
-                        })
+        # Direct constant value
+        if 'constant_value' in var_info:
+            resolved_programs.append({
+                'program_name': var_info['constant_value'],
+                'resolution': 'direct_constant',
+                'confidence': 1.0,
+                'source': f"Direct VALUE '{var_info['constant_value']}'"
+            })
         
-        # Strategy 3: Look for MOVE operations in the entire program that reference this variable
-        logger.debug(f"Looking for additional MOVE operations referencing {variable_name}...")
+        # MOVE operations analysis
+        move_operations = var_info.get('move_operations', [])
+        for move_op in move_operations:
+            source_value = move_op['source']
+            if source_value and self._is_valid_program_name(source_value):
+                resolved_programs.append({
+                    'program_name': source_value,
+                    'resolution': 'move_operation',
+                    'confidence': 0.9,
+                    'source': f"MOVE '{source_value}' at line {move_op['line']}",
+                    'move_details': {
+                        'line_number': move_op['line'],
+                        'statement': move_op['statement']
+                    }
+                })
         
-        # Filter and validate resolved programs
-        valid_programs = []
+        # Remove duplicates while preserving highest confidence
+        unique_programs = {}
         for prog in resolved_programs:
             prog_name = prog['program_name']
-            if (prog_name and 
-                len(prog_name) >= 3 and 
-                len(prog_name) <= 30 and
-                prog_name.replace('-', '').replace('_', '').isalnum() and
-                not prog_name.isdigit() and
-                prog_name not in ['SPACES', 'ZEROS', 'LOW-VALUES', 'HIGH-VALUES']):
-                valid_programs.append(prog)
+            if prog_name not in unique_programs or prog['confidence'] > unique_programs[prog_name]['confidence']:
+                unique_programs[prog_name] = prog
         
-        if valid_programs:
-            logger.info(f"Successfully resolved {variable_name} to {len(valid_programs)} valid programs:")
-            for prog in valid_programs:
+        resolved_list = list(unique_programs.values())
+        
+        if resolved_list:
+            logger.info(f"Resolved {variable_name} to {len(resolved_list)} programs:")
+            for prog in resolved_list:
                 logger.info(f"  -> {prog['program_name']} ({prog['resolution']}, confidence: {prog['confidence']})")
-        else:
-            logger.warning(f"No valid programs resolved for {variable_name}")
-            # Return the variable name itself as a fallback
-            valid_programs = [{
-                'program_name': variable_name, 
-                'resolution': 'unresolved', 
-                'confidence': 0.1,
-                'source': 'Variable could not be resolved to specific programs'
-            }]
         
-        return valid_programs
+        return resolved_list
     
+    def _is_valid_program_name(self, name: str) -> bool:
+        """Enhanced validation for program names"""
+        if not name or len(name) < 3 or len(name) > 8:
+            return False
+        
+        # Must be alphanumeric, start with letter
+        if not re.match(r'^[A-Z][A-Z0-9]{2,7}$', name.upper()):
+            return False
+        
+        # Not a COBOL keyword
+        cobol_keywords = {'SPACES', 'ZEROS', 'HIGH-VALUES', 'LOW-VALUES'}
+        if name.upper() in cobol_keywords:
+            return False
+        
+        return True
+
     def _analyze_group_for_programs(self, group_name: str, group_info: Dict, variable_map: Dict) -> List[Dict]:
             """
             FIXED: Analyze group structure for program name combinations

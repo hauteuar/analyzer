@@ -2160,6 +2160,37 @@ File Content ({filename}):
                 self.db_manager._store_enhanced_dependencies_with_status(session_id, dependencies)
                 logger.info(f"Stored {len(dependencies)} enhanced dependencies for {program_name}")
 
+            # Enhanced dynamic program call dependencies
+                program_calls = main_program.get('program_calls', [])
+                for call in program_calls:
+                    call_type = call.get('call_type', 'static')
+                    
+                    if call_type == 'dynamic':
+                        # Create detailed dependencies for each resolved program
+                        for resolved_prog in call.get('resolved_programs', []):
+                            prog_name = resolved_prog.get('program_name')
+                            if prog_name and self._is_valid_dependency_target(prog_name, program_name):
+                                dependency_status = 'present' if prog_name.upper() in uploaded_programs else 'missing'
+                                
+                                dependency = {
+                                    'source_component': program_name,
+                                    'target_component': prog_name,
+                                    'relationship_type': 'DYNAMIC_PROGRAM_CALL',
+                                    'interface_type': 'CICS',
+                                    'confidence_score': resolved_prog.get('confidence', 0.5),
+                                    'dependency_status': dependency_status,
+                                    'analysis_details_json': json.dumps({
+                                        'call_type': 'dynamic',
+                                        'variable_name': call.get('variable_name'),
+                                        'resolution_method': resolved_prog.get('resolution'),
+                                        'business_context': call.get('business_context'),
+                                        'construction_pattern': resolved_prog.get('construction_details', {}),
+                                        'group_structure_used': call.get('group_structure_used', False)
+                                    })
+                                }
+                                dependencies.append(dependency)
+
+
         except Exception as e:
             logger.error(f"Error in enhanced dependency extraction: {str(e)}")
 
@@ -2979,6 +3010,66 @@ File Content ({filename}):
             'source_code_evidence': f"Line {call.get('line_number', 0)}: {call.get('operation', 'CALL')} {target_prog}"
         }
 
+   
+    def enhanced_extract_dynamic_program_calls(self, content: str, filename: str) -> List[Dict]:
+        """Enhanced dynamic program call extraction"""
+        enhanced_parser = EnhancedDynamicCallParser(self.llm_client)
+        
+        dynamic_calls = []
+        lines = content.split('\n')
+        
+        logger.info(f"Starting ENHANCED dynamic program call extraction from {filename}")
+        
+        try:
+            # Build enhanced variable map
+            variable_values = enhanced_parser._build_variable_value_map_enhanced(lines)
+            logger.info(f"Built enhanced variable map with {len(variable_values)} variables")
+            
+            # Log key program templates found
+            templates = [name for name, info in variable_values.items() 
+                        if info.get('program_name_template')]
+            if templates:
+                logger.info(f"Found program name templates: {templates}")
+            
+            # Find dynamic CICS calls
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                program_area = enhanced_parser._extract_program_area_only(line)
+                if not program_area:
+                    i += 1
+                    continue
+                    
+                line_upper = program_area.upper().strip()
+                
+                if ('EXEC CICS' in line_upper and 
+                    ('XCTL' in line_upper or 'LINK' in line_upper)):
+                    
+                    # Extract complete CICS command
+                    complete_cics_command = enhanced_parser._extract_complete_cics_command(lines, i)
+                    
+                    if complete_cics_command:
+                        # Analyze for dynamic calls
+                        dynamic_call = enhanced_parser._analyze_dynamic_cics_call_enhanced(
+                            complete_cics_command, i + 1, variable_values
+                        )
+                        
+                        if dynamic_call:
+                            dynamic_calls.append(dynamic_call)
+                            logger.info(f"Found ENHANCED dynamic call: {dynamic_call['operation']} "
+                                      f"using {dynamic_call['variable_name']} -> "
+                                      f"{[p['program_name'] for p in dynamic_call['resolved_programs']]}")
+                
+                i += 1
+            
+        except Exception as e:
+            logger.error(f"Enhanced dynamic program call extraction failed: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        logger.info(f"ENHANCED extraction found {len(dynamic_calls)} dynamic program calls")
+        return dynamic_calls
+    
     def _store_enhanced_dependencies_with_status(self, session_id: str, dependencies: List[Dict]):
         """Store dependencies with enhanced status tracking"""
         try:
