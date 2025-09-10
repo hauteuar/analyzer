@@ -2131,6 +2131,7 @@ def analyze_program_flow(session_id, program_name):
         
         # Check if program exists in session
         components = analyzer.db_manager.get_session_components(session_id)
+        logger.info(f"Session has {components} components")
         program_exists = any(c['component_name'].upper() == program_name.upper() for c in components)
         
         if not program_exists:
