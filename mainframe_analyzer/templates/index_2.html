@@ -1920,6 +1920,7 @@
                         </div>
                     </div>
                 </div>
+            </div>
                 <!-- Program Flow -->
                 <div id="program-flow" class="content-section" style="display: none;">
                     <div class="program-flow-container">
@@ -1940,7 +1941,7 @@
                         </div>
                     </div>
                 </div>
-            </div>
+            
         </div>
 
         <!-- Right Panel - Chat -->
@@ -5003,9 +5004,23 @@ function viewLayoutFields(layoutName) {
                 }
             } else if (tabName === 'fieldMapping') {
                 initializeFieldMapping();
+            } else if (tabName === 'program-flow') {  // ADD THIS
+                initializeProgramFlow();
             }
         }
 
+        function initializeProgramFlow() {
+            // Initialize the program flow tab
+            console.log('Program Flow tab initialized');
+        }
+
+        function showLoadingSpinner(message) {
+            showLoading(message);
+        }
+
+        function hideLoadingSpinner() {
+            hideLoading();
+        }
         // Components Library Functions
         async function loadComponentsLibrary() {
             try {
