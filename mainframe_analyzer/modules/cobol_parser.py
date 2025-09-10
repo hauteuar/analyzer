@@ -2130,6 +2130,187 @@ Rules:
                     })
             
             return programs
+    
+    def _extract_table_names_from_sql(self, sql_statement: str) -> List[Tuple[str, str]]:
+        """
+        Extract table names and their operations from SQL statements.
+        Returns list of tuples: (table_name, operation_type)
+        """
+        if not sql_statement:
+            return []
+        
+        sql_upper = sql_statement.upper().strip()
+        table_operations = []
+        
+        try:
+            # Remove EXEC SQL and END-EXEC if present
+            sql_upper = re.sub(r'EXEC\s+SQL\s*', '', sql_upper)
+            sql_upper = re.sub(r'END-EXEC\s*', '', sql_upper)
+            
+            # SELECT statements - tables appear after FROM and JOIN clauses
+            if 'SELECT' in sql_upper:
+                # Extract FROM clause tables
+                from_tables = self._extract_from_clause_tables(sql_upper)
+                for table in from_tables:
+                    table_operations.append((table, 'SELECT'))
+                
+                # Extract JOIN clause tables
+                join_tables = self._extract_join_clause_tables(sql_upper)
+                for table in join_tables:
+                    table_operations.append((table, 'SELECT'))
+            
+            # INSERT statements - table appears after INSERT INTO
+            if 'INSERT' in sql_upper:
+                insert_pattern = r'INSERT\s+INTO\s+([A-Z][A-Z0-9_$#@]{0,127})'
+                insert_matches = re.findall(insert_pattern, sql_upper)
+                for table in insert_matches:
+                    if self._is_valid_table_name(table):
+                        table_operations.append((table, 'INSERT'))
+            
+            # UPDATE statements - table appears after UPDATE
+            if 'UPDATE' in sql_upper:
+                update_pattern = r'UPDATE\s+([A-Z][A-Z0-9_$#@]{0,127})'
+                update_matches = re.findall(update_pattern, sql_upper)
+                for table in update_matches:
+                    if self._is_valid_table_name(table):
+                        table_operations.append((table, 'UPDATE'))
+            
+            # DELETE statements - table appears after DELETE FROM
+            if 'DELETE' in sql_upper:
+                delete_pattern = r'DELETE\s+FROM\s+([A-Z][A-Z0-9_$#@]{0,127})'
+                delete_matches = re.findall(delete_pattern, sql_upper)
+                for table in delete_matches:
+                    if self._is_valid_table_name(table):
+                        table_operations.append((table, 'DELETE'))
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_operations = []
+            for table, operation in table_operations:
+                key = (table, operation)
+                if key not in seen:
+                    seen.add(key)
+                    unique_operations.append(key)
+            
+            logger.debug(f"Extracted {len(unique_operations)} table operations from SQL: {unique_operations}")
+            return unique_operations
+        
+        except Exception as e:
+            logger.warning(f"Error extracting table names from SQL: {str(e)}")
+            return []
+
+    def _extract_from_clause_tables(self, sql_upper: str) -> List[str]:
+        """Extract table names from FROM clause"""
+        tables = []
+        
+        # Pattern to match FROM clause with potential aliases and schema qualifiers
+        from_pattern = r'FROM\s+([A-Z][A-Z0-9_$#@.]{0,127}(?:\s+[A-Z][A-Z0-9_]{0,127})?(?:\s*,\s*[A-Z][A-Z0-9_$#@.]{0,127}(?:\s+[A-Z][A-Z0-9_]{0,127})?)*)'
+        
+        from_match = re.search(from_pattern, sql_upper)
+        if from_match:
+            from_clause = from_match.group(1)
+            
+            # Split by comma for multiple tables
+            table_specs = [spec.strip() for spec in from_clause.split(',')]
+            
+            for table_spec in table_specs:
+                # Extract table name (before alias if present)
+                table_parts = table_spec.split()
+                if table_parts:
+                    table_name = table_parts[0]
+                    
+                    # Remove schema qualifier if present (SCHEMA.TABLE -> TABLE)
+                    if '.' in table_name:
+                        table_name = table_name.split('.')[-1]
+                    
+                    if self._is_valid_table_name(table_name):
+                        tables.append(table_name)
+        
+        return tables
+
+    def _extract_join_clause_tables(self, sql_upper: str) -> List[str]:
+        """Extract table names from JOIN clauses"""
+        tables = []
+        
+        # Patterns for different types of JOINs
+        join_patterns = [
+            r'(?:INNER\s+)?JOIN\s+([A-Z][A-Z0-9_$#@.]{0,127})',
+            r'LEFT\s+(?:OUTER\s+)?JOIN\s+([A-Z][A-Z0-9_$#@.]{0,127})',
+            r'RIGHT\s+(?:OUTER\s+)?JOIN\s+([A-Z][A-Z0-9_$#@.]{0,127})',
+            r'FULL\s+(?:OUTER\s+)?JOIN\s+([A-Z][A-Z0-9_$#@.]{0,127})',
+            r'CROSS\s+JOIN\s+([A-Z][A-Z0-9_$#@.]{0,127})'
+        ]
+        
+        for pattern in join_patterns:
+            join_matches = re.findall(pattern, sql_upper)
+            for table_name in join_matches:
+                # Remove schema qualifier if present
+                if '.' in table_name:
+                    table_name = table_name.split('.')[-1]
+                
+                if self._is_valid_table_name(table_name):
+                    tables.append(table_name)
+        
+        return tables
+
+    def _is_valid_table_name(self, table_name: str) -> bool:
+        """Validate if a string is a valid DB2 table name"""
+        if not table_name or len(table_name) < 1 or len(table_name) > 128:
+            return False
+        
+        table_upper = table_name.upper().strip()
+        
+        # Must start with letter
+        if not re.match(r'^[A-Z]', table_upper):
+            return False
+        
+        # Must contain only valid DB2 identifier characters
+        if not re.match(r'^[A-Z][A-Z0-9_$#@]{0,127}$', table_upper):
+            return False
+        
+        # Exclude SQL keywords that might be misidentified as table names
+        sql_keywords = {
+            'SELECT', 'FROM', 'WHERE', 'INSERT', 'UPDATE', 'DELETE', 'INTO', 'VALUES',
+            'SET', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'FULL', 'CROSS', 'ON',
+            'AND', 'OR', 'NOT', 'NULL', 'IS', 'AS', 'BY', 'ORDER', 'GROUP', 'HAVING',
+            'UNION', 'ALL', 'DISTINCT', 'COUNT', 'SUM', 'MAX', 'MIN', 'AVG', 'CASE',
+            'WHEN', 'THEN', 'ELSE', 'END', 'IF', 'EXISTS', 'IN', 'BETWEEN', 'LIKE',
+            'ASC', 'DESC', 'PRIMARY', 'KEY', 'FOREIGN', 'REFERENCES', 'CREATE',
+            'ALTER', 'DROP', 'TABLE', 'INDEX', 'VIEW', 'GRANT', 'REVOKE', 'COMMIT',
+            'ROLLBACK', 'TRANSACTION', 'BEGIN', 'DECLARE', 'CURSOR', 'OPEN', 'FETCH',
+            'CLOSE', 'FOR', 'WITH', 'RECURSIVE', 'TEMPORARY', 'GLOBAL', 'LOCAL'
+        }
+        
+        if table_upper in sql_keywords:
+            return False
+        
+        # Exclude obvious host variables (starting with colon)
+        if table_name.startswith(':'):
+            return False
+        
+        # Exclude numeric literals
+        if re.match(r'^\d+$', table_upper):
+            return False
+        
+        # Include common DB2 table naming patterns for wealth management
+        # Tables often have prefixes like TBL_, T_, or suffixes like _TBL, _T
+        common_patterns = [
+            r'^TBL_[A-Z0-9_]+$',    # TBL_ACCOUNTS
+            r'^T_[A-Z0-9_]+$',      # T_PORTFOLIO
+            r'^[A-Z0-9_]+_TBL$',    # CUSTOMER_TBL
+            r'^[A-Z0-9_]+_T$',      # POSITION_T
+            r'^[A-Z]{2,}[0-9]{2,}$' # Like TMS92, ACCT01
+        ]
+        
+        # Accept if it matches common patterns or is a reasonable length identifier
+        if any(re.match(pattern, table_upper) for pattern in common_patterns):
+            return True
+        
+        # Accept reasonable length identifiers that aren't keywords
+        if 3 <= len(table_upper) <= 30:
+            return True
+        
+        return False
 
     def _calculate_resolution_confidence(self, variable_name: str, variable_map: Dict, resolved_programs: List[Dict]) -> float:
         """Calculate confidence in variable resolution"""
