@@ -1656,7 +1656,7 @@ Rules:
         
         # First pass: Build complete field structure with group relationships
         for i, line in enumerate(lines, 1):
-            program_area = self._extract_program_area_only(line)
+            program_area = self.extract_program_area_only(line)
             if not program_area:
                 continue
                 
@@ -1736,7 +1736,7 @@ Rules:
         # Second pass: ENHANCED MOVE tracking with group awareness
         logger.info("Second pass: Enhanced MOVE tracking with group field awareness...")
         for i, line in enumerate(lines, 1):
-            program_area = self._extract_program_area_only(line)
+            program_area = self.extract_program_area_only(line)
             if not program_area:
                 continue
                 
