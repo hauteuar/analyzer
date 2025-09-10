@@ -1614,8 +1614,12 @@ Rules:
                     logger.debug(f"Found potential dynamic CICS call at line {i+1}: {line_upper[:80]}...")
                     
                     # Extract complete multi-line CICS command
-                    complete_cics_command, end_line = self._extract_complete_cics_command_enhanced(lines, i)
-                    
+                    complete_cics_command = self._extract_complete_cics_command_enhanced(lines, i)
+                    end_line = i
+                    for j in range(i, min(i + 15, len(lines))):
+                        if 'END-EXEC' in lines[j].upper():
+                            end_line = j
+                            break
                     if complete_cics_command:
                         logger.debug(f"Complete CICS command: {complete_cics_command[:200]}...")
                         
