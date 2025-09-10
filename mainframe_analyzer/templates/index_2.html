@@ -1499,6 +1499,7 @@
                 <button class="tab-btn" onclick="showTab('dependencies')">Dependencies Flow</button>
                 <button class="tab-btn" onclick="showTab('fieldMatrix')">Field Matrix</button>
                 <button class="tab-btn" onclick="showTab('fieldMapping')">Field Mapping Analysis</button>
+                <button class="tab-btn" onclick="showTab('program-flow')">Program Flow</button>
             </div>
 
             <!-- Tab Contents -->
@@ -1717,6 +1718,26 @@
                         </div>
                     </div>
                 </div>
+                <!-- Program Flow -->
+                <div id="program-flow" class="content-section" style="display: none;">
+                    <div class="program-flow-container">
+                        <div class="flow-controls">
+                            <input type="text" id="startingProgram" placeholder="Enter program name (e.g., TMSTM6)">
+                            <button onclick="analyzeFlow()">Analyze Program Flow</button>
+                        </div>
+                        
+                        <div id="flowVisualization" class="flow-visualization">
+                            <!-- Flow diagram will be rendered here -->
+                        </div>
+                        
+                        <div id="flowDetails" class="flow-details">
+                            <div class="flow-summary"></div>
+                            <div class="missing-programs"></div>
+                            <div class="field-flows"></div>
+                            <div class="file-operations"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1779,7 +1800,7 @@
             <div id="processingStatus" style="margin-top: 1rem;"></div>
         </div>
     </div>
-
+    <script src="https://d3js.org/d3.v7.min.js"></script>
     <script>
         // Global variables
         let currentSessionId = null;
