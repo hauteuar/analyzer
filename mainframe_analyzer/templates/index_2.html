@@ -2789,8 +2789,11 @@ function createFileComponent(file, className) {
     const interfaceIcon = file.interface === 'CICS' ? '🏦' : '📁';
     const statusClass = file.hasLayoutAssociation ? 'file-with-layout' : 'file-only';
     
+    // Fix: Use proper onclick handler
+    const onClickHandler = `onclick="event.stopPropagation(); showFileDetails('${file.name}')"`;
+    
     return `
-        <div class="flow-component ${className} ${statusClass}" onclick="showFileDetails('${file.name}')">
+        <div class="flow-component ${className} ${statusClass}" ${onClickHandler}>
             <div class="component-name">${interfaceIcon} ${file.name}</div>
             <div class="component-type-badge">${file.type}</div>
             <div class="component-description">
@@ -2804,6 +2807,7 @@ function createFileComponent(file, className) {
         </div>
     `;
 }
+
 
 // Function to show DB2 table details (modal)
 function showDB2TableDetails(tableName, sourceProgram) {
@@ -3000,34 +3004,37 @@ function analyzeDB2TableFields(tableName) {
         }
 
         function createProgramLayer(title, items, className) {
-            let html = `
-                <div class="flow-level">
-                    <div class="flow-level-title">${title}</div>
-                    <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-left: 160px;">
-            `;
-            
-            items.forEach(item => {
-                const displayName = item.name || item.friendly_name || 'UNKNOWN';
-                const confidenceClass = item.confidence > 0.8 ? 'confidence-high' : 
-                                       item.confidence > 0.5 ? 'confidence-medium' : 'confidence-low';
-                
-                html += `
-                    <div class="flow-component ${className}" onclick="showProgramDetails('${item.name}')">
-                        <div class="confidence-indicator ${confidenceClass}"></div>
-                        <div class="component-name">${displayName}</div>
-                        <div class="component-type-badge">${item.type}</div>
-                        <div class="component-description">
-                            Confidence: ${(item.confidence * 100).toFixed(0)}%
-                            ${item.reason ? `<br><small>${item.reason}</small>` : ''}
-                            ${item.calledFrom ? `<br><small>Called from: ${item.calledFrom}</small>` : ''}
-                        </div>
-                    </div>
-                `;
-            });
-            
-            html += '</div></div>';
-            return html;
-        }
+    let html = `
+        <div class="flow-level">
+            <div class="flow-level-title">${title}</div>
+            <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-left: 160px;">
+    `;
+    
+    items.forEach(item => {
+        const displayName = item.name || item.friendly_name || 'UNKNOWN';
+        const confidenceClass = item.confidence > 0.8 ? 'confidence-high' : 
+                               item.confidence > 0.5 ? 'confidence-medium' : 'confidence-low';
+        
+        // Fix: Use proper onclick handler with event.stopPropagation()
+        const onClickHandler = `onclick="event.stopPropagation(); showProgramDetails('${item.name}')"`;
+        
+        html += `
+            <div class="flow-component ${className}" ${onClickHandler}>
+                <div class="confidence-indicator ${confidenceClass}"></div>
+                <div class="component-name">${displayName}</div>
+                <div class="component-type-badge">${item.type}</div>
+                <div class="component-description">
+                    Confidence: ${(item.confidence * 100).toFixed(0)}%
+                    ${item.reason ? `<br><small>${item.reason}</small>` : ''}
+                    ${item.calledFrom ? `<br><small>Called from: ${item.calledFrom}</small>` : ''}
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div></div>';
+    return html;
+}
 
 
 
