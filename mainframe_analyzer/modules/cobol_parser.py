@@ -253,33 +253,38 @@ class COBOLParser:
         
         return operations
 
-    def extract_program_calls(self, content: str, filename: str) -> List[Dict]:
+    def extract_all_program_calls(self, content: str, filename: str) -> List[Dict]:
         """
-        Enhanced program call extraction including CICS LINK/XCTL calls
-        FIXED: Now properly calls CICS program parsing methods
+        Enhanced program call extraction including both static and dynamic calls
+        Handles: CALL 'LITERAL', CALL VARIABLE, EXEC CICS XCTL/LINK
         """
         program_calls = []
         lines = content.split('\n')
         
-        logger.info(f"Starting program call extraction from {filename}")
+        logger.info(f"Starting comprehensive program call extraction from {filename}")
         
         try:
-            # Extract static calls (existing logic)
+            # 1. Extract static calls (existing logic)
             static_calls = self._extract_static_program_calls(content, filename)
             program_calls.extend(static_calls)
             logger.info(f"Found {len(static_calls)} static program calls")
             
-            # FIXED: Extract CICS program calls (LINK/XCTL) - this was missing!
+            # 2. Extract CICS program calls (LINK/XCTL) - existing
             cics_program_calls = self._extract_cics_program_calls(lines)
             program_calls.extend(cics_program_calls)
             logger.info(f"Found {len(cics_program_calls)} CICS program calls")
             
-            # Extract dynamic calls (with improved error handling)
+            # 3. NEW: Extract regular dynamic CALL statements
+            regular_dynamic_calls = self._extract_regular_dynamic_calls(content, filename, lines)
+            program_calls.extend(regular_dynamic_calls)
+            logger.info(f"Found {len(regular_dynamic_calls)} regular dynamic calls")
+            
+            # 4. Extract enhanced dynamic calls (existing)
             try:
-                dynamic_calls = self.extract_dynamic_program_calls(content, filename)
+                enhanced_dynamic_calls = self.extract_dynamic_program_calls(content, filename)
                 
-                # Convert dynamic calls to program call format
-                for dynamic_call in dynamic_calls:
+                # Convert to program call format
+                for dynamic_call in enhanced_dynamic_calls:
                     for resolved_program in dynamic_call['resolved_programs']:
                         program_calls.append({
                             'operation': dynamic_call['operation'],
@@ -293,20 +298,91 @@ class COBOLParser:
                             'business_context': f"Dynamic call via {dynamic_call['variable_name']} variable"
                         })
                 
-                logger.info(f"Found {len(dynamic_calls)} dynamic program calls")
+                logger.info(f"Found {len(enhanced_dynamic_calls)} enhanced dynamic calls")
                 
             except Exception as e:
-                logger.error(f"Dynamic program call extraction failed: {str(e)}")
-                # Continue without dynamic calls
+                logger.error(f"Enhanced dynamic program call extraction failed: {str(e)}")
         
         except Exception as e:
             logger.error(f"Program call extraction failed: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
         
         logger.info(f"Total program calls extracted: {len(program_calls)}")
         return program_calls
 
 
+    def _extract_regular_dynamic_calls(self, content: str, filename: str, lines: List[str]) -> List[Dict]:
+        """
+        Extract regular dynamic CALL statements like CALL WS-PROGRAM-VAR
+        NEW METHOD to handle the gap in your current detection
+        """
+        regular_dynamic_calls = []
+        
+        # Build variable map for resolution
+        variable_values = self._build_variable_value_map_enhanced(lines)
+        logger.info(f"Built variable map with {len(variable_values)} variables for regular CALL resolution")
+        
+        for i, line in enumerate(lines):
+            program_area = self.extract_program_area_only(line)
+            if not program_area:
+                continue
+                
+            line_upper = program_area.upper().strip()
+            
+            # Pattern for dynamic CALL statements
+            # Matches: CALL VARIABLE-NAME, CALL WS-PROGRAM, etc.
+            dynamic_call_pattern = r'CALL\s+([A-Z][A-Z0-9\-]{2,})\s*(?:\.|$|USING)'
+            
+            match = re.search(dynamic_call_pattern, line_upper)
+            if match:
+                variable_name = match.group(1)
+                
+                # Skip if it's a quoted literal (already handled by static calls)
+                if variable_name.startswith('"') or variable_name.startswith("'"):
+                    continue
+                
+                # Skip obvious COBOL keywords
+                if variable_name in ['USING', 'BY', 'REFERENCE', 'CONTENT', 'VALUE']:
+                    continue
+                
+                logger.debug(f"Found regular dynamic CALL at line {i+1}: CALL {variable_name}")
+                
+                # Resolve variable to possible program names
+                resolved_programs = self._resolve_variable_to_programs_enhanced(variable_name, variable_values)
+                
+                if resolved_programs:
+                    # Create call entry
+                    call_entry = {
+                        'operation': 'CALL',
+                        'variable_name': variable_name,
+                        'resolved_programs': resolved_programs,
+                        'line_number': i + 1,
+                        'line_content': program_area[:100],
+                        'call_type': 'regular_dynamic',
+                        'business_context': f"Regular dynamic CALL using {variable_name} variable",
+                        'resolution_details': {
+                            'variable_type': variable_values.get(variable_name, {}).get('type', 'unknown'),
+                            'possible_values': variable_values.get(variable_name, {}).get('possible_values', [])
+                        }
+                    }
+                    
+                    regular_dynamic_calls.append(call_entry)
+                    logger.info(f"Resolved CALL {variable_name} to {len(resolved_programs)} programs: {[p['program_name'] for p in resolved_programs]}")
+                else:
+                    # Create unresolved call entry
+                    logger.warning(f"Could not resolve CALL {variable_name} at line {i+1}")
+                    unresolved_call = {
+                        'operation': 'CALL',
+                        'variable_name': variable_name,
+                        'resolved_programs': [],
+                        'line_number': i + 1,
+                        'line_content': program_area[:100],
+                        'call_type': 'regular_dynamic_unresolved',
+                        'business_context': f"Unresolved regular dynamic CALL using {variable_name}",
+                        'resolution_status': 'unresolved'
+                    }
+                    regular_dynamic_calls.append(unresolved_call)
+        
+        return regular_dynamic_calls
     def _extract_cics_program_calls(self, lines: List[str]) -> List[Dict]:
         """
         Extract CICS LINK and XCTL program calls
