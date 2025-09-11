@@ -355,10 +355,11 @@ class DatabaseManager:
                             relationship_type TEXT NOT NULL,
                             interface_type TEXT,
                             confidence_score REAL DEFAULT 0.0,
-                            dependency_status TEXT DEFAULT 'unknown',  -- ADD THIS LINE
+                            dependency_status TEXT DEFAULT 'unknown',
                             analysis_details_json TEXT,
-                            source_code_evidence TEXT,                            
+                            source_code_evidence TEXT,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             FOREIGN KEY (session_id) REFERENCES analysis_sessions(session_id)
                         )
                     ''')
@@ -2337,7 +2338,7 @@ class DatabaseManager:
         
         return mainframe_length, oracle_length, oracle_type, mainframe_data_type
 
-    def _store_enhanced_dependencies_with_status(self, session_id: str, dependencies: List[Dict]):
+    def store_enhanced_dependencies_with_status(self, session_id: str, dependencies: List[Dict]):
         """Store dependencies with enhanced status tracking"""
         try:
             with self.get_connection() as conn:
@@ -2359,7 +2360,8 @@ class DatabaseManager:
                             cursor.execute('''
                                 UPDATE dependency_relationships
                                 SET confidence_score = ?, analysis_details_json = ?, 
-                                    source_code_evidence = ?, dependency_status = ?
+                                    source_code_evidence = ?, dependency_status = ?, 
+                                    updated_at = CURRENT_TIMESTAMP
                                 WHERE id = ?
                             ''', (
                                 max(existing[1] or 0, dep.get('confidence_score', 0)),
@@ -2385,12 +2387,10 @@ class DatabaseManager:
                             
                     except Exception as store_error:
                         logger.error(f"Error storing enhanced dependency: {store_error}")
-                        logger.error(f"Problematic dependency: {dep}")
                         continue
                             
         except Exception as e:
             logger.error(f"Error in enhanced dependency storage: {str(e)}")
-            raise
     
     def get_enhanced_dependencies_with_dynamic_summary(self, session_id: str) -> List[Dict]:
         """Get enhanced dependencies with better dynamic call summarization"""
@@ -2805,8 +2805,126 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting enhanced dependencies: {str(e)}")
             return []
+    
+    def migrate_database_for_program_flow(self):
+        """Migrate database schema for enhanced program flow analysis"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check and add missing columns
+                migrations = [
+                    {
+                        'table': 'dependency_relationships',
+                        'column': 'dependency_status',
+                        'definition': 'TEXT DEFAULT "unknown"',
+                        'check_sql': "SELECT sql FROM sqlite_master WHERE type='table' AND name='dependency_relationships'"
+                    },
+                    {
+                        'table': 'dependency_relationships', 
+                        'column': 'updated_at',
+                        'definition': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+                        'check_sql': "SELECT sql FROM sqlite_master WHERE type='table' AND name='dependency_relationships'"
+                    },
+                    {
+                        'table': 'program_flow_traces',
+                        'column': 'layout_associations_json',
+                        'definition': 'TEXT',
+                        'check_sql': "SELECT sql FROM sqlite_master WHERE type='table' AND name='program_flow_traces'"
+                    },
+                    {
+                        'table': 'field_data_flow',
+                        'column': 'parameter_type', 
+                        'definition': 'TEXT DEFAULT "BY_REFERENCE"',
+                        'check_sql': "SELECT sql FROM sqlite_master WHERE type='table' AND name='field_data_flow'"
+                    }
+                ]
+                
+                for migration in migrations:
+                    try:
+                        # Check if column exists
+                        cursor.execute(migration['check_sql'])
+                        table_sql = cursor.fetchone()
+                        
+                        if table_sql and migration['column'] not in table_sql[0]:
+                            # Add the missing column
+                            alter_sql = f"ALTER TABLE {migration['table']} ADD COLUMN {migration['column']} {migration['definition']}"
+                            cursor.execute(alter_sql)
+                            logger.info(f"Added column {migration['column']} to {migration['table']}")
+                    
+                    except Exception as col_error:
+                        if "duplicate column" not in str(col_error).lower():
+                            logger.warning(f"Migration warning for {migration['table']}.{migration['column']}: {str(col_error)}")
+                
+                # Create indexes for performance
+                indexes = [
+                    "CREATE INDEX IF NOT EXISTS idx_dep_status ON dependency_relationships(dependency_status)",
+                    "CREATE INDEX IF NOT EXISTS idx_dep_target ON dependency_relationships(target_component)",
+                    "CREATE INDEX IF NOT EXISTS idx_dep_source ON dependency_relationships(source_component)",
+                    "CREATE INDEX IF NOT EXISTS idx_flow_session ON program_flow_traces(session_id, flow_id)",
+                    "CREATE INDEX IF NOT EXISTS idx_field_flow_session ON field_data_flow(session_id, flow_id)"
+                ]
+                
+                for index_sql in indexes:
+                    try:
+                        cursor.execute(index_sql)
+                    except Exception as idx_error:
+                        logger.warning(f"Index creation warning: {str(idx_error)}")
+                
+                logger.info("Database migration for program flow completed successfully")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Database migration failed: {str(e)}")
+            return False
 
-
+    def refresh_dependency_status(self, session_id: str):
+        """Refresh dependency status to reflect newly uploaded programs"""
+        try:
+            # Get all uploaded programs
+            components = self.get_session_components(session_id)
+            uploaded_programs = set(comp['component_name'].upper() for comp in components)
+            
+            logger.info(f"Refreshing dependency status. Uploaded programs: {len(uploaded_programs)}")
+            
+            # Update dependency status in database
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get all dependencies that might need status updates
+                cursor.execute('''
+                    SELECT id, target_component, dependency_status, interface_type, relationship_type
+                    FROM dependency_relationships 
+                    WHERE session_id = ? AND relationship_type IN ('PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL')
+                ''', (session_id,))
+                
+                dependencies = cursor.fetchall()
+                updated_count = 0
+                
+                for dep_id, target_component, current_status, interface_type, rel_type in dependencies:
+                    target_upper = target_component.upper()
+                    
+                    # Determine new status
+                    if interface_type == 'COBOL' and rel_type in ['PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL']:
+                        new_status = 'present' if target_upper in uploaded_programs else 'missing'
+                    else:
+                        # Files, CICS, etc. remain as they are
+                        continue
+                    
+                    # Update if status changed
+                    if new_status != current_status:
+                        cursor.execute('''
+                            UPDATE dependency_relationships 
+                            SET dependency_status = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        ''', (new_status, dep_id))
+                        updated_count += 1
+                        logger.info(f"Updated {target_component}: {current_status} -> {new_status}")
+                
+                logger.info(f"Refreshed {updated_count} dependency statuses")
+                
+        except Exception as e:
+            logger.error(f"Error refreshing dependency status: {str(e)}")
     def get_enhanced_field_mappings(self, session_id: str, target_file: str) -> List[Dict]:
         """Get field mappings with enhanced validation and lengths"""
         try:

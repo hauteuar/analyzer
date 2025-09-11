@@ -62,6 +62,7 @@ class MainframeAnalyzer:
         self.cobol_parser = COBOLParser()
         self.field_analyzer = FieldAnalyzer(self.llm_client, self.token_manager, self.db_manager)
         self.component_extractor = ComponentExtractor(self.llm_client, self.token_manager, self.db_manager)
+        self.db_manager.migrate_database_for_program_flow()
         # Add after line ~40 where other analyzers are initialized
         self.program_flow_analyzer = ProgramFlowAnalyzer(
             self.db_manager, 
@@ -2294,43 +2295,102 @@ def get_dynamic_call_analysis_api(session_id):
         })
     
 @app.route('/api/program-flow/<session_id>/<program_name>', methods=['GET'])
-def analyze_program_flow(session_id, program_name):
-    """Analyze complete program flow starting from a given program"""
+def analyze_program_flow_fixed(session_id, program_name):
+    """FIXED: Analyze complete program flow with dependency refresh"""
     try:
         logger.info(f"Program flow analysis request: {program_name} in session {session_id[:8]}")
         
         # Check if program exists in session
         components = analyzer.db_manager.get_session_components(session_id)
-        logger.info(f"Session has {components} components")
         program_exists = any(c['component_name'].upper() == program_name.upper() for c in components)
         
         if not program_exists:
+            available_programs = [c['component_name'] for c in components if c.get('component_type') == 'PROGRAM']
             return jsonify({
                 'success': False,
-                'error': f'Program {program_name} not found in session'
+                'error': f'Program {program_name} not found in session',
+                'available_programs': available_programs
             })
         
-        # Analyze program flow
+        # FIXED: Force dependency refresh before analysis
+        analyzer.program_flow_analyzer._refresh_dependency_status(session_id)
+        
+        # Analyze program flow with refreshed dependencies
         flow_analysis = analyzer.program_flow_analyzer.analyze_complete_program_flow(session_id, program_name)
+        
+        # Enhanced response with status breakdown
+        program_chain = flow_analysis.get('program_chain', [])
+        available_count = len([s for s in program_chain if not s.get('is_missing')])
+        missing_count = len([s for s in program_chain if s.get('is_missing')])
         
         return jsonify({
             'success': True,
             'flow_analysis': flow_analysis,
             'program_name': program_name,
-            'analysis_type': 'complete_program_flow'
+            'analysis_type': 'complete_program_flow',
+            'statistics': {
+                'total_programs': len(program_chain),
+                'available_programs': available_count,
+                'missing_programs': missing_count,
+                'field_flows': len(flow_analysis.get('field_flows', [])),
+                'file_operations': len(flow_analysis.get('file_operations', []))
+            },
+            'dependency_refresh': True  # Indicate that dependencies were refreshed
         })
         
     except Exception as e:
         logger.error(f"Error in program flow analysis: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc() if app.debug else None
+        })
+
+@app.route('/api/refresh-dependencies/<session_id>', methods=['POST'])
+def refresh_dependencies_status(session_id):
+    """Manually refresh dependency status after uploading new programs"""
+    try:
+        logger.info(f"Manual dependency refresh requested for session {session_id[:8]}")
+        
+        # Get current component count
+        components = analyzer.db_manager.get_session_components(session_id)
+        program_count = len([c for c in components if c.get('component_type') == 'PROGRAM'])
+        
+        # Refresh dependency status
+        analyzer.program_flow_analyzer._refresh_dependency_status(session_id)
+        
+        # Get updated dependency counts
+        dependencies = analyzer.db_manager.get_enhanced_dependencies(session_id)
+        status_counts = {}
+        for dep in dependencies:
+            status = dep.get('dependency_status', 'unknown')
+            status_counts[status] = status_counts.get(status, 0) + 1
+        
+        return jsonify({
+            'success': True,
+            'message': 'Dependencies refreshed successfully',
+            'program_count': program_count,
+            'dependency_status_counts': status_counts,
+            'total_dependencies': len(dependencies)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error refreshing dependencies: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
         })
 
 @app.route('/api/program-flow-visualization/<session_id>/<program_name>', methods=['GET'])
-def get_program_flow_visualization(session_id, program_name):
-    """Get program flow data for visualization"""
+def get_program_flow_visualization_fixed(session_id, program_name):
+    """FIXED: Get program flow data for visualization with proper status"""
     try:
+        # Force refresh dependencies first
+        analyzer.program_flow_analyzer._refresh_dependency_status(session_id)
+        
+        # Get fresh flow analysis
         flow_analysis = analyzer.program_flow_analyzer.analyze_complete_program_flow(session_id, program_name)
         
         # Transform for visualization
@@ -2339,26 +2399,37 @@ def get_program_flow_visualization(session_id, program_name):
             'edges': [],
             'field_flows': {},
             'missing_programs': [],
-            'file_operations': []
+            'file_operations': [],
+            'layout_associations': []
         }
         
-        # Create nodes
+        # Create nodes for programs
         programs_in_flow = set()
         for step in flow_analysis.get('program_chain', []):
             programs_in_flow.add(step['source_program'])
             programs_in_flow.add(step['target_program'])
         
         for program in programs_in_flow:
-            is_missing = any(step.get('is_missing') for step in flow_analysis.get('program_chain', []) 
-                           if step['target_program'] == program)
+            # Check if program is missing based on flow analysis
+            is_missing = any(step.get('is_missing') and step['target_program'] == program 
+                           for step in flow_analysis.get('program_chain', []))
             
-            visualization_data['nodes'].append({
+            node = {
                 'id': program,
                 'label': program,
                 'type': 'program',
                 'status': 'missing' if is_missing else 'present',
                 'is_starting_program': program == program_name
-            })
+            }
+            
+            # Add business purpose if available
+            components = analyzer.db_manager.get_session_components(session_id)
+            for comp in components:
+                if comp['component_name'] == program:
+                    node['business_purpose'] = comp.get('business_purpose', '')
+                    break
+            
+            visualization_data['nodes'].append(node)
         
         # Create edges for program calls
         for step in flow_analysis.get('program_chain', []):
@@ -2369,16 +2440,22 @@ def get_program_flow_visualization(session_id, program_name):
                 'call_type': step.get('call_type', 'CALL'),
                 'status': 'missing' if step.get('is_missing') else 'present',
                 'sequence': step['sequence'],
-                'data_fields': step.get('data_passed', [])
+                'data_fields': [f['field_name'] for f in step.get('data_passed', [])],
+                'confidence': step.get('confidence', 0.8)
             }
             
             if step.get('variable_name'):
                 edge_data['variable_name'] = step['variable_name']
                 edge_data['label'] = f"via {step['variable_name']}"
+                edge_data['is_dynamic'] = True
+            
+            # Add layout associations
+            if step.get('layout_associations'):
+                edge_data['layout_associations'] = step['layout_associations']
             
             visualization_data['edges'].append(edge_data)
         
-        # Add file operations
+        # Add file operations as nodes and edges
         for file_op in flow_analysis.get('file_operations', []):
             # File node
             file_node = {
@@ -2387,8 +2464,13 @@ def get_program_flow_visualization(session_id, program_name):
                 'type': 'file',
                 'interface': file_op['interface_type'],
                 'io_direction': file_op['io_direction'],
-                'has_layout': file_op.get('has_layout_resolution', False)
+                'has_layout': file_op.get('has_layout_resolution', False),
+                'associated_layouts': file_op.get('associated_layouts', [])
             }
+            
+            if file_op.get('layout_details'):
+                file_node['layout_details'] = file_op['layout_details']
+            
             visualization_data['nodes'].append(file_node)
             
             # Edge from program to file
@@ -2397,8 +2479,14 @@ def get_program_flow_visualization(session_id, program_name):
                 'to': f"FILE_{file_op['file_name']}",
                 'type': 'file_operation',
                 'io_direction': file_op['io_direction'],
-                'operations': file_op['operations']
+                'operations': file_op['operations'],
+                'interface_type': file_op['interface_type'],
+                'has_layout_resolution': file_op.get('has_layout_resolution', False)
             }
+            
+            if file_op.get('fields_involved'):
+                file_edge['fields_involved'] = file_op['fields_involved']
+            
             visualization_data['edges'].append(file_edge)
         
         # Field flow summary
@@ -2410,28 +2498,47 @@ def get_program_flow_visualization(session_id, program_name):
             field_flow_summary[field_name].append({
                 'from': field_flow['source_program'],
                 'to': field_flow['target_program'],
-                'type': field_flow['flow_type']
+                'type': field_flow['flow_type'],
+                'business_purpose': field_flow.get('business_purpose', ''),
+                'parameter_type': field_flow.get('parameter_type', 'BY_REFERENCE')
             })
         
         visualization_data['field_flows'] = field_flow_summary
-        visualization_data['missing_programs'] = [
-            step['target_program'] for step in flow_analysis.get('program_chain', [])
-            if step.get('is_missing')
-        ]
+        
+        # Missing programs with impact analysis
+        missing_programs = flow_analysis.get('missing_programs', [])
+        visualization_data['missing_programs'] = missing_programs
+        
+        # Layout associations
+        layout_associations = []
+        for step in flow_analysis.get('program_chain', []):
+            if step.get('layout_associations'):
+                layout_associations.extend(step['layout_associations'])
+        visualization_data['layout_associations'] = layout_associations
         
         return jsonify({
             'success': True,
             'visualization_data': visualization_data,
             'business_summary': flow_analysis.get('business_flow_summary', ''),
             'total_programs': len(programs_in_flow),
-            'missing_count': len(visualization_data['missing_programs'])
+            'missing_count': len(missing_programs),
+            'available_count': len(programs_in_flow) - len(missing_programs),
+            'dependency_refreshed': True,
+            'statistics': {
+                'field_flows': len(field_flow_summary),
+                'file_operations': len(flow_analysis.get('file_operations', [])),
+                'layout_associations': len(layout_associations)
+            }
         })
         
     except Exception as e:
         logger.error(f"Error getting flow visualization: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'traceback': traceback.format_exc() if app.debug else None
         })
 
 @app.route('/api/field-flow-trace/<session_id>/<field_name>', methods=['GET'])

@@ -185,7 +185,7 @@ class ComponentExtractor:
                 'program_calls': parsed_data['program_calls'],
                 'copybooks': parsed_data['copybooks'],
                 'cics_operations': enhanced_cics_ops,  # Use enhanced operations
-                'db2_operations': parsed_data['db2_operations', ''], 
+                'db2_operations': parsed_data['db2_operations'], 
                 'derived_components': [],
                 'record_layouts': [],
                 'fields': []
