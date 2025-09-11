@@ -2405,6 +2405,8 @@ def get_program_flow_visualization_with_files_and_db2(session_id, program_name):
             'file_operations': [],
             'layout_associations': []
         }
+
+        
         
         # Collect all programs in the flow
         programs_in_flow = set()
@@ -2501,6 +2503,8 @@ def get_program_flow_visualization_with_files_and_db2(session_id, program_name):
                 visualization_data['edges'].append(db2_edge)
         
         # Add program call edges from flow analysis
+        group_variable_info = {}  # Track group variable information for tooltip/details
+
         for step in flow_analysis.get('program_chain', []):
             edge_data = {
                 'from': step['source_program'],
@@ -2512,12 +2516,61 @@ def get_program_flow_visualization_with_files_and_db2(session_id, program_name):
                 'data_fields': [f['field_name'] for f in step.get('data_passed', [])],
                 'confidence': step.get('confidence', 0.8)
             }
-            
-            if step.get('variable_name'):
-                edge_data['variable_name'] = step['variable_name']
-                edge_data['label'] = f"via {step['variable_name']}"
-                edge_data['is_dynamic'] = True
-                edge_data['type'] = 'dynamic_call'
+    
+            if step.get('call_type') == 'dynamic_group':
+            # This is a group variable resolution
+                group_info = step.get('group_variable_info', {})
+                variable_name = step.get('variable_name', 'UNKNOWN')
+                
+                edge_data.update({
+                    'variable_name': variable_name,
+                    'label': f"via {variable_name} → {step['target_program']}",
+                    'is_dynamic': True,
+                    'is_group_variable': True,
+                    'type': 'dynamic_group_call',
+                    'resolution_method': step.get('resolution_method', 'group_construction'),
+                    'resolution_index': group_info.get('resolution_index', 1),
+                    'total_resolutions': group_info.get('total_resolutions', 1),
+                    'all_possible_programs': group_info.get('all_possible_programs', []),
+                    'construction_method': group_info.get('construction_method', {})
+                })
+                
+                # Store group variable info for enhanced tooltips
+                if variable_name not in group_variable_info:
+                    group_variable_info[variable_name] = {
+                        'source_program': step['source_program'],
+                        'variable_name': variable_name,
+                        'all_possible_programs': group_info.get('all_possible_programs', []),
+                        'resolved_programs': [],
+                        'missing_programs': [],
+                        'present_programs': [],
+                        'construction_details': group_info.get('construction_method', {}),
+                        'total_resolutions': group_info.get('total_resolutions', 1)
+                    }
+                
+                # Track resolved program status
+                if step.get('is_missing'):
+                    group_variable_info[variable_name]['missing_programs'].append(step['target_program'])
+                else:
+                    group_variable_info[variable_name]['present_programs'].append(step['target_program'])
+                
+                group_variable_info[variable_name]['resolved_programs'].append({
+                    'program_name': step['target_program'],
+                    'status': 'missing' if step.get('is_missing') else 'present',
+                    'confidence': step.get('confidence', 0.5),
+                    'resolution_method': step.get('resolution_method', 'unknown')
+                })
+                
+            elif step.get('variable_name') and step.get('call_type') in ['dynamic', 'regular_dynamic']:
+                # Regular dynamic call (not group variable)
+                edge_data.update({
+                    'variable_name': step['variable_name'],
+                    'label': f"via {step['variable_name']}",
+                    'is_dynamic': True,
+                    'is_group_variable': False,
+                    'type': 'dynamic_call',
+                    'resolution_method': step.get('resolution_method', 'variable_analysis')
+                })
             
             visualization_data['edges'].append(edge_data)
         
@@ -2544,6 +2597,7 @@ def get_program_flow_visualization_with_files_and_db2(session_id, program_name):
         return jsonify({
             'success': True,
             'visualization_data': visualization_data,
+            'group_variable_info': group_variable_info,  # NEW: Group variable details
             'business_summary': flow_analysis.get('business_flow_summary', ''),
             'total_programs': len(programs_in_flow),
             'total_files': len(files_added),
@@ -2551,11 +2605,14 @@ def get_program_flow_visualization_with_files_and_db2(session_id, program_name):
             'missing_count': len(flow_analysis.get('missing_programs', [])),
             'dependency_refreshed': True,
             'enhanced_with_data_sources': True,
+            'enhanced_group_variable_handling': True,  # NEW: Feature flag
             'statistics': {
                 'field_flows': len(field_flow_summary),
                 'file_operations': len(files_added),
                 'db2_operations': len(db2_tables_added),
-                'layout_associations': len(flow_analysis.get('layout_associations', []))
+                'layout_associations': len(flow_analysis.get('layout_associations', [])),
+                'group_variables': len(group_variable_info),  # NEW: Group variable count
+                'total_dynamic_resolutions': sum(info['total_resolutions'] for info in group_variable_info.values())  # NEW
             }
         })
         
@@ -2568,6 +2625,26 @@ def get_program_flow_visualization_with_files_and_db2(session_id, program_name):
             'error': str(e),
             'traceback': traceback.format_exc() if app.debug else None
         })
+
+def _create_group_variable_summary(self, group_variable_info: Dict) -> Dict:
+    """Create summary of group variable information for UI display"""
+    summary = {
+        'total_group_variables': len(group_variable_info),
+        'variables': {}
+    }
+    
+    for var_name, var_info in group_variable_info.items():
+        summary['variables'][var_name] = {
+            'source_program': var_info['source_program'],
+            'total_possible': len(var_info['all_possible_programs']),
+            'total_resolved': len(var_info['resolved_programs']),
+            'present_count': len(var_info['present_programs']),
+            'missing_count': len(var_info['missing_programs']),
+            'resolution_rate': len(var_info['present_programs']) / len(var_info['resolved_programs']) if var_info['resolved_programs'] else 0,
+            'status': 'complete' if len(var_info['missing_programs']) == 0 else 'partial' if len(var_info['present_programs']) > 0 else 'missing'
+        }
+    
+    return summary
 
 @app.route('/api/field-flow-trace/<session_id>/<field_name>', methods=['GET'])
 def trace_field_flow(session_id, field_name):

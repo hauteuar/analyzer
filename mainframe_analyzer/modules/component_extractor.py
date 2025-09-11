@@ -3079,21 +3079,19 @@ File Content ({filename}):
     
 
     def _create_dynamic_call_dependencies(self, session_id: str, program_name: str, 
-                                     dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
+                                 dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
         """Create dependencies for dynamic calls with multiple possible targets"""
         dependencies = []
         variable_name = dynamic_call.get('variable_name', 'UNKNOWN')
         operation = dynamic_call.get('operation', 'DYNAMIC_CALL')
         line_number = dynamic_call.get('line_number', 0)
         
-        # Get resolved programs from the dynamic call analysis
         resolved_programs = dynamic_call.get('resolved_programs', [])
         
         logger.info(f"Processing dynamic call: {variable_name} with {len(resolved_programs)} resolved programs")
         
         if not resolved_programs:
-            # Create a fallback dependency for unresolved dynamic calls
-            logger.warning(f"No resolved programs for dynamic call {variable_name}, creating fallback dependency")
+            # Create fallback dependency for unresolved
             dependencies.append({
                 'source_component': program_name,
                 'target_component': f'DYNAMIC_{variable_name}',
@@ -3113,7 +3111,7 @@ File Content ({filename}):
             })
             return dependencies
         
-        # Create a dependency for EACH resolved program
+        # FIXED: Create individual dependencies for EACH resolved program
         for i, resolved_program in enumerate(resolved_programs):
             target_prog = resolved_program.get('program_name')
             if target_prog and self._is_valid_dependency_target(target_prog, program_name):
@@ -3134,22 +3132,21 @@ File Content ({filename}):
                     'total_resolutions': len(resolved_programs),
                     'business_context': f"Dynamic call via {variable_name} -> {target_prog}",
                     
-                    # Include construction details if available
+                    # CRITICAL: Add group variable info for proper flow analysis
+                    'is_group_variable': True,
+                    'group_variable_name': variable_name,
+                    'all_resolved_programs': [p.get('program_name') for p in resolved_programs],
                     'construction_details': resolved_program.get('construction_details', {}),
                     'group_structure_used': dynamic_call.get('group_structure_used', False),
-                    
-                    # Add all resolved programs for context
-                    'all_resolved_programs': [p.get('program_name') for p in resolved_programs],
-                    'variable_resolution_summary': f"{variable_name} resolves to {len(resolved_programs)} programs: {[p.get('program_name') for p in resolved_programs]}"
                 }
                 
                 dependency = {
                     'source_component': program_name,
-                    'target_component': target_prog,
+                    'target_component': target_prog,  # FIXED: Use actual program name, not variable
                     'relationship_type': 'DYNAMIC_PROGRAM_CALL',
                     'interface_type': 'COBOL',
                     'confidence_score': resolved_program.get('confidence', 0.5),
-                    'dependency_status': dependency_status,
+                    'dependency_status': dependency_status,  # FIXED: Proper status check
                     'analysis_details_json': json.dumps(analysis_details),
                     'source_code_evidence': f"Line {line_number}: {operation} PROGRAM({variable_name}) -> {target_prog} via {resolved_program.get('resolution', 'unknown')}"
                 }

@@ -2881,19 +2881,18 @@ class DatabaseManager:
     def refresh_dependency_status(self, session_id: str):
         """Refresh dependency status to reflect newly uploaded programs"""
         try:
-            # Get all uploaded programs
             components = self.get_session_components(session_id)
             uploaded_programs = set(comp['component_name'].upper() for comp in components)
             
             logger.info(f"Refreshing dependency status. Uploaded programs: {len(uploaded_programs)}")
             
-            # Update dependency status in database
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Get all dependencies that might need status updates
                 cursor.execute('''
-                    SELECT id, target_component, dependency_status, interface_type, relationship_type
+                    SELECT id, target_component, dependency_status, interface_type, 
+                        relationship_type, analysis_details_json
                     FROM dependency_relationships 
                     WHERE session_id = ? AND relationship_type IN ('PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL')
                 ''', (session_id,))
@@ -2901,14 +2900,19 @@ class DatabaseManager:
                 dependencies = cursor.fetchall()
                 updated_count = 0
                 
-                for dep_id, target_component, current_status, interface_type, rel_type in dependencies:
+                for dep_id, target_component, current_status, interface_type, rel_type, analysis_json in dependencies:
+                    
+                    # FIXED: Don't try to update status for variable names
+                    if target_component.startswith('DYNAMIC_') and not target_component.replace('DYNAMIC_', '') in uploaded_programs:
+                        # This is an unresolved dynamic call variable, skip
+                        continue
+                    
                     target_upper = target_component.upper()
                     
                     # Determine new status
                     if interface_type == 'COBOL' and rel_type in ['PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL']:
                         new_status = 'present' if target_upper in uploaded_programs else 'missing'
                     else:
-                        # Files, CICS, etc. remain as they are
                         continue
                     
                     # Update if status changed
@@ -2925,6 +2929,7 @@ class DatabaseManager:
                 
         except Exception as e:
             logger.error(f"Error refreshing dependency status: {str(e)}")
+            
     def get_enhanced_field_mappings(self, session_id: str, target_file: str) -> List[Dict]:
         """Get field mappings with enhanced validation and lengths"""
         try:

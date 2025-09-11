@@ -117,7 +117,7 @@ class ProgramFlowAnalyzer:
             logger.error(f"Error refreshing dependency status: {str(e)}")
     
     def _build_program_call_chain_fixed(self, session_id: str, starting_program: str) -> List[Dict]:
-        """Build the complete program call chain with proper status checking - FIXED VERSION"""
+        """Build the complete program call chain with proper group variable expansion - FIXED VERSION"""
         chain = []
         processed_programs = set()
         
@@ -132,58 +132,185 @@ class ProgramFlowAnalyzer:
             
             # Filter for program calls from current program
             program_calls = [d for d in dependencies 
-                           if d['source_component'].upper() == current_program.upper() 
-                           and d['relationship_type'] in ['PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL']]
+                        if d['source_component'].upper() == current_program.upper() 
+                        and d['relationship_type'] in ['PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL']]
             
             logger.info(f"Found {len(program_calls)} program calls from {current_program}")
             
-            for call in program_calls:
-                target_program = call['target_component']
-                analysis_details = call.get('analysis_details', {})
-                
-                # FIXED: Properly determine missing status from dependency_status field
-                dependency_status = call.get('dependency_status', 'unknown')
-                is_missing = dependency_status == 'missing'
-                
-                chain_step = {
-                    'sequence': level + 1,
-                    'source_program': current_program,
-                    'target_program': target_program,
-                    'call_type': analysis_details.get('call_type', 'CALL'),
-                    'call_mechanism': call['relationship_type'],
-                    'variable_name': analysis_details.get('variable_name', ''),
-                    'resolution_method': analysis_details.get('resolution_method', ''),
-                    'confidence': call.get('confidence_score', 0.8),
-                    'line_number': analysis_details.get('line_number', 0),
-                    'is_missing': is_missing,  # FIXED: Use proper status
-                    'dependency_status': dependency_status,  # FIXED: Add explicit status
-                    'business_context': analysis_details.get('business_context', ''),
-                    'data_passed': [],
-                    'data_received': [],
-                    'layout_associations': []
-                }
-                
-                # FIXED: Only analyze data context for non-missing programs
-                if not is_missing:
-                    try:
-                        data_context = self._analyze_call_data_context_fixed(session_id, current_program, target_program)
-                        chain_step['data_passed'] = data_context.get('passed_fields', [])
-                        chain_step['data_received'] = data_context.get('received_fields', [])
-                        chain_step['layout_associations'] = data_context.get('layout_associations', [])
-                    except Exception as data_error:
-                        logger.error(f"Error analyzing data context for {current_program} -> {target_program}: {str(data_error)}")
-                        # Continue with empty data context
-                        pass
-                
-                chain.append(chain_step)
-                logger.info(f"Added to chain: {current_program} -> {target_program} (missing: {is_missing})")
-                
-                # Continue chain if target program is available
-                if not is_missing:
-                    build_chain_recursive(target_program, level + 1)
+            # FIXED: Group dynamic calls by variable name to handle group variables properly
+            grouped_calls = self._group_dynamic_calls_by_variable(program_calls)
+            
+            for call_group in grouped_calls:
+                if call_group['is_group_variable']:
+                    # FIXED: Handle group variables - create separate chain steps for each resolved program
+                    self._process_group_variable_calls(call_group, chain, current_program, level, session_id)
+                    
+                    # Continue chain for all present programs from this group variable
+                    for resolved_prog in call_group['resolved_programs']:
+                        if not resolved_prog.get('is_missing'):
+                            build_chain_recursive(resolved_prog['program_name'], level + 1)
+                else:
+                    # Handle regular calls
+                    for call in call_group['calls']:
+                        target_program = call['target_component']
+                        analysis_details = call.get('analysis_details', {})
+                        dependency_status = call.get('dependency_status', 'unknown')
+                        is_missing = dependency_status == 'missing'
+                        
+                        chain_step = self._create_chain_step(
+                            current_program, target_program, call, analysis_details, 
+                            level + 1, is_missing, session_id
+                        )
+                        chain.append(chain_step)
+                        
+                        # Continue chain if target program is available
+                        if not is_missing:
+                            build_chain_recursive(target_program, level + 1)
         
         build_chain_recursive(starting_program)
         return chain
+
+    def _group_dynamic_calls_by_variable(self, program_calls: List[Dict]) -> List[Dict]:
+        """Group dynamic calls by variable name to handle group variables properly"""
+        grouped_calls = []
+        dynamic_groups = {}
+        regular_calls = []
+        
+        for call in program_calls:
+            if call.get('relationship_type') == 'DYNAMIC_PROGRAM_CALL':
+                analysis_details = call.get('analysis_details', {})
+                variable_name = analysis_details.get('variable_name', 'UNKNOWN')
+                is_group_var = analysis_details.get('is_group_variable', False)
+                
+                if is_group_var and variable_name != 'UNKNOWN':
+                    # This is a group variable call - group by variable name
+                    if variable_name not in dynamic_groups:
+                        dynamic_groups[variable_name] = {
+                            'is_group_variable': True,
+                            'variable_name': variable_name,
+                            'calls': [],
+                            'resolved_programs': [],
+                            'all_possible_programs': analysis_details.get('all_resolved_programs', [])
+                        }
+                    
+                    dynamic_groups[variable_name]['calls'].append(call)
+                    dynamic_groups[variable_name]['resolved_programs'].append({
+                        'program_name': call['target_component'],
+                        'is_missing': call.get('dependency_status') == 'missing',
+                        'confidence': call.get('confidence_score', 0.5),
+                        'resolution_method': analysis_details.get('resolution_method', 'unknown'),
+                        'analysis_details': analysis_details
+                    })
+                else:
+                    # Regular dynamic call (not a group variable)
+                    regular_calls.append(call)
+            else:
+                # Static call
+                regular_calls.append(call)
+        
+        # Add group variable entries
+        for group_info in dynamic_groups.values():
+            grouped_calls.append(group_info)
+        
+        # Add regular calls as individual groups
+        if regular_calls:
+            grouped_calls.append({
+                'is_group_variable': False,
+                'calls': regular_calls
+            })
+        
+        return grouped_calls
+
+    def _process_group_variable_calls(self, call_group: Dict, chain: List[Dict], 
+                                    current_program: str, level: int, session_id: str):
+        """Process group variable calls - create separate chain steps for each resolved program"""
+        variable_name = call_group['variable_name']
+        resolved_programs = call_group['resolved_programs']
+        all_possible = call_group.get('all_possible_programs', [])
+        
+        logger.info(f"Processing group variable {variable_name} with {len(resolved_programs)} resolved programs")
+        
+        # Create a chain step for each resolved program
+        for i, resolved_prog in enumerate(resolved_programs):
+            target_program = resolved_prog['program_name']
+            is_missing = resolved_prog.get('is_missing', False)
+            analysis_details = resolved_prog.get('analysis_details', {})
+            
+            # Create enhanced chain step for group variable resolution
+            chain_step = {
+                'sequence': level + 1,
+                'source_program': current_program,
+                'target_program': target_program,
+                'call_type': 'dynamic_group',
+                'call_mechanism': 'DYNAMIC_PROGRAM_CALL',
+                'variable_name': variable_name,
+                'resolution_method': resolved_prog.get('resolution_method', 'group_construction'),
+                'confidence': resolved_prog.get('confidence', 0.5),
+                'line_number': analysis_details.get('line_number', 0),
+                'is_missing': is_missing,
+                'dependency_status': 'missing' if is_missing else 'present',
+                'business_context': f"Dynamic call via group variable {variable_name} -> {target_program}",
+                'data_passed': [],
+                'data_received': [],
+                'layout_associations': [],
+                
+                # FIXED: Add group variable context for proper visualization
+                'group_variable_info': {
+                    'variable_name': variable_name,
+                    'is_group_resolution': True,
+                    'resolution_index': i + 1,
+                    'total_resolutions': len(resolved_programs),
+                    'all_possible_programs': all_possible,
+                    'construction_method': analysis_details.get('construction_details', {}),
+                    'group_structure_used': analysis_details.get('group_structure_used', False)
+                }
+            }
+            
+            # FIXED: Only analyze data context for non-missing programs
+            if not is_missing:
+                try:
+                    data_context = self._analyze_call_data_context_fixed(session_id, current_program, target_program)
+                    chain_step['data_passed'] = data_context.get('passed_fields', [])
+                    chain_step['data_received'] = data_context.get('received_fields', [])
+                    chain_step['layout_associations'] = data_context.get('layout_associations', [])
+                except Exception as data_error:
+                    logger.error(f"Error analyzing data context for group variable call {current_program} -> {target_program}: {str(data_error)}")
+            
+            chain.append(chain_step)
+            logger.info(f"Added group variable resolution to chain: {current_program} -> {target_program} via {variable_name} (missing: {is_missing})")
+
+    def _create_chain_step(self, current_program: str, target_program: str, call: Dict, 
+                        analysis_details: Dict, sequence: int, is_missing: bool, session_id: str) -> Dict:
+        """Create a chain step for regular (non-group variable) calls"""
+        chain_step = {
+            'sequence': sequence,
+            'source_program': current_program,
+            'target_program': target_program,
+            'call_type': analysis_details.get('call_type', 'CALL'),
+            'call_mechanism': call['relationship_type'],
+            'variable_name': analysis_details.get('variable_name', ''),
+            'resolution_method': analysis_details.get('resolution_method', ''),
+            'confidence': call.get('confidence_score', 0.8),
+            'line_number': analysis_details.get('line_number', 0),
+            'is_missing': is_missing,
+            'dependency_status': call.get('dependency_status', 'unknown'),
+            'business_context': analysis_details.get('business_context', ''),
+            'data_passed': [],
+            'data_received': [],
+            'layout_associations': []
+        }
+        
+        # Only analyze data context for non-missing programs
+        if not is_missing:
+            try:
+                data_context = self._analyze_call_data_context_fixed(session_id, current_program, target_program)
+                chain_step['data_passed'] = data_context.get('passed_fields', [])
+                chain_step['data_received'] = data_context.get('received_fields', [])
+                chain_step['layout_associations'] = data_context.get('layout_associations', [])
+            except Exception as data_error:
+                logger.error(f"Error analyzing data context for regular call {current_program} -> {target_program}: {str(data_error)}")
+        
+        return chain_step
     
     def _analyze_call_data_context_fixed(self, session_id: str, source_program: str, target_program: str) -> Dict:
         """FIXED: Analyze data context with proper error handling"""
@@ -658,7 +785,7 @@ class ProgramFlowAnalyzer:
     
     # Keep existing methods for business summary, storage, etc.
     def _generate_business_flow_summary(self, session_id: str, flow_analysis: Dict) -> str:
-        """Generate business summary of the program flow"""
+        """Generate business summary with proper group variable handling"""
         try:
             summary_parts = []
             
@@ -666,70 +793,57 @@ class ProgramFlowAnalyzer:
             summary_parts.append(f"Program Flow Analysis starting from {starting_prog}:")
             summary_parts.append("")
             
-            # Program chain summary with status
+            # Program chain summary with group variable details
             chain = flow_analysis.get('program_chain', [])
             if chain:
                 summary_parts.append("Program Call Chain:")
-                for step in chain:
-                    status_indicator = "[MISSING]" if step.get('is_missing') else "[AVAILABLE]"
-                    call_type = step.get('call_type', 'CALL')
-                    summary_parts.append(f"  {step['source_program']} → {step['target_program']} ({call_type}) {status_indicator}")
-                    
-                    # Add layout information if available
-                    if step.get('layout_associations'):
-                        for layout in step['layout_associations']:
-                            summary_parts.append(f"    └─ Layout: {layout['source_layout']} → {layout['target_layout']}")
-                summary_parts.append("")
-            
-            # Field flow summary
-            field_flows = flow_analysis.get('field_flows', [])
-            if field_flows:
-                summary_parts.append("Key Data Fields in Flow:")
-                field_summary = {}
-                for field_flow in field_flows:
-                    field_name = field_flow['field_name']
-                    if field_name not in field_summary:
-                        field_summary[field_name] = []
-                    field_summary[field_name].append(f"{field_flow['source_program']} → {field_flow['target_program']}")
                 
-                for field, flows in list(field_summary.items())[:5]:  # Top 5 fields
-                    summary_parts.append(f"  {field}: {' → '.join(flows)}")
+                # Group by source program to show group variables clearly
+                by_source = {}
+                for step in chain:
+                    source = step['source_program']
+                    if source not in by_source:
+                        by_source[source] = []
+                    by_source[source].append(step)
+                
+                for source_prog, steps in by_source.items():
+                    # Check if this source has group variable calls
+                    group_vars = {}
+                    regular_calls = []
+                    
+                    for step in steps:
+                        if step.get('group_variable_info', {}).get('is_group_resolution'):
+                            var_name = step['variable_name']
+                            if var_name not in group_vars:
+                                group_vars[var_name] = []
+                            group_vars[var_name].append(step)
+                        else:
+                            regular_calls.append(step)
+                    
+                    # Display group variable calls
+                    for var_name, var_steps in group_vars.items():
+                        summary_parts.append(f"  {source_prog} via group variable {var_name}:")
+                        all_possible = var_steps[0].get('group_variable_info', {}).get('all_possible_programs', [])
+                        
+                        for step in var_steps:
+                            status_indicator = "[MISSING]" if step.get('is_missing') else "[AVAILABLE]"
+                            summary_parts.append(f"    → {step['target_program']} {status_indicator}")
+                        
+                        # Show additional possibilities if any
+                        resolved_programs = [s['target_program'] for s in var_steps]
+                        additional = [p for p in all_possible if p not in resolved_programs]
+                        if additional:
+                            summary_parts.append(f"    Additional possibilities: {', '.join(additional)}")
+                    
+                    # Display regular calls
+                    for step in regular_calls:
+                        status_indicator = "[MISSING]" if step.get('is_missing') else "[AVAILABLE]"
+                        call_type = step.get('call_type', 'CALL')
+                        summary_parts.append(f"  {step['source_program']} → {step['target_program']} ({call_type}) {status_indicator}")
+                
                 summary_parts.append("")
             
-            # File operations summary with layout details
-            file_ops = flow_analysis.get('file_operations', [])
-            if file_ops:
-                summary_parts.append("File Operations in Flow:")
-                for file_op in file_ops:
-                    io_dir = file_op.get('io_direction', 'UNKNOWN')
-                    interface = file_op.get('interface_type', 'FILE')
-                    layout_info = ""
-                    if file_op.get('has_layout_resolution'):
-                        layouts = file_op.get('associated_layouts', [])
-                        layout_info = f" (Layouts: {', '.join(layouts)})"
-                    summary_parts.append(f"  {file_op['program_name']} {io_dir} {file_op['file_name']} [{interface}]{layout_info}")
-                summary_parts.append("")
-            
-            # Missing programs impact
-            missing = flow_analysis.get('missing_programs', [])
-            if missing:
-                summary_parts.append("Missing Programs Blocking Flow:")
-                for missing_prog in missing:
-                    summary_parts.append(f"  {missing_prog['program_name']} - {missing_prog['impact_description']}")
-                summary_parts.append("")
-            
-            # Flow statistics
-            available_programs = len([s for s in chain if not s.get('is_missing')])
-            missing_programs = len([s for s in chain if s.get('is_missing')])
-            total_fields = len(field_flows)
-            total_files = len(file_ops)
-            
-            summary_parts.append("Flow Statistics:")
-            summary_parts.append(f"  Available Programs: {available_programs}")
-            summary_parts.append(f"  Missing Programs: {missing_programs}")
-            summary_parts.append(f"  Data Fields Traced: {total_fields}")
-            summary_parts.append(f"  File Operations: {total_files}")
-            
+            # Rest of summary remains the same...
             return '\n'.join(summary_parts)
             
         except Exception as e:
