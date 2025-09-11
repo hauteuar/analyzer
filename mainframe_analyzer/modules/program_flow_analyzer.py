@@ -362,3 +362,281 @@ class ProgramFlowAnalyzer:
         except Exception as e:
             logger.error(f"Error getting field info: {str(e)}")
             return {}
+        
+    def _analyze_call_data_context(self, session_id: str, source_program: str, target_program: str) -> Dict:
+        """Analyze data context around a program call to identify passed/received fields"""
+        try:
+            # Get source program content
+            source_data = self.db_manager.get_component_source_code(session_id, source_program)
+            if not source_data.get('success'):
+                return {'passed_fields': [], 'received_fields': []}
+            
+            source_content = source_data['components'][0].get('source_for_chat', '')
+            
+            # Get target program content if available
+            target_data = self.db_manager.get_component_source_code(session_id, target_program)
+            target_content = ''
+            if target_data.get('success'):
+                target_content = target_data['components'][0].get('source_for_chat', '')
+            
+            data_context = {
+                'passed_fields': [],
+                'received_fields': [],
+                'call_context': '',
+                'linkage_section_fields': []
+            }
+            
+            # Analyze source program for fields passed in the call
+            passed_fields = self._extract_call_parameters(source_content, target_program)
+            data_context['passed_fields'] = passed_fields
+            
+            # Analyze target program for received fields (LINKAGE SECTION)
+            if target_content:
+                linkage_fields = self._extract_linkage_section_fields(target_content)
+                data_context['linkage_section_fields'] = linkage_fields
+                data_context['received_fields'] = linkage_fields
+            
+            # Extract call context (surrounding lines)
+            call_context = self._extract_call_context(source_content, target_program)
+            data_context['call_context'] = call_context
+            
+            # Correlate passed and received fields
+            data_context['field_correlations'] = self._correlate_passed_received_fields(
+                passed_fields, data_context['received_fields']
+            )
+            
+            return data_context
+            
+        except Exception as e:
+            logger.error(f"Error analyzing call data context: {str(e)}")
+            return {'passed_fields': [], 'received_fields': []}
+
+    def _extract_call_parameters(self, source_content: str, target_program: str) -> List[Dict]:
+        """Extract parameters from program call statements"""
+        passed_fields = []
+        
+        try:
+            lines = source_content.split('\n')
+            
+            for i, line in enumerate(lines):
+                line_upper = line.upper().strip()
+                
+                # Look for calls to target program
+                if target_program.upper() in line_upper:
+                    # Check for CALL, LINK, or XCTL statements
+                    if any(keyword in line_upper for keyword in ['CALL', 'LINK', 'XCTL']):
+                        
+                        # Look for USING clause in this line or next few lines
+                        using_lines = [lines[j] for j in range(i, min(i+3, len(lines)))]
+                        using_text = ' '.join(using_lines).upper()
+                        
+                        if 'USING' in using_text:
+                            # Extract field names from USING clause
+                            using_match = re.search(r'USING\s+(.*?)(?:\.|$)', using_text)
+                            if using_match:
+                                using_clause = using_match.group(1)
+                                
+                                # Split by common separators and extract field names
+                                field_candidates = re.findall(r'\b[A-Z][A-Z0-9\-]{2,30}\b', using_clause)
+                                
+                                for field_name in field_candidates:
+                                    if field_name not in ['USING', 'BY', 'REFERENCE', 'CONTENT', 'VALUE']:
+                                        field_info = {
+                                            'field_name': field_name,
+                                            'line_number': i + 1,
+                                            'context': line.strip(),
+                                            'parameter_type': 'BY_REFERENCE'  # Default assumption
+                                        }
+                                        
+                                        # Detect parameter passing method
+                                        if 'BY CONTENT' in using_text:
+                                            field_info['parameter_type'] = 'BY_CONTENT'
+                                        elif 'BY VALUE' in using_text:
+                                            field_info['parameter_type'] = 'BY_VALUE'
+                                        
+                                        passed_fields.append(field_info)
+        
+        except Exception as e:
+            logger.error(f"Error extracting call parameters: {str(e)}")
+        
+        return passed_fields
+
+    def _extract_linkage_section_fields(self, target_content: str) -> List[Dict]:
+        """Extract fields from LINKAGE SECTION of target program"""
+        linkage_fields = []
+        
+        try:
+            lines = target_content.split('\n')
+            in_linkage_section = False
+            
+            for i, line in enumerate(lines):
+                line_upper = line.upper().strip()
+                
+                # Detect start of LINKAGE SECTION
+                if 'LINKAGE SECTION' in line_upper:
+                    in_linkage_section = True
+                    continue
+                
+                # Detect end of LINKAGE SECTION
+                if in_linkage_section and ('PROCEDURE DIVISION' in line_upper or 
+                                        (line_upper.endswith('SECTION') and 'LINKAGE' not in line_upper)):
+                    in_linkage_section = False
+                    break
+                
+                # Extract field definitions in LINKAGE SECTION
+                if in_linkage_section and line_upper:
+                    # Look for level numbers (01, 02, 05, etc.)
+                    level_match = re.match(r'^\s*(\d{2})\s+([A-Z][A-Z0-9\-]+)', line_upper)
+                    if level_match:
+                        level_number = level_match.group(1)
+                        field_name = level_match.group(2)
+                        
+                        # Extract PIC clause if present
+                        pic_match = re.search(r'PIC\s+([X9A\(\)V\.S\-\+]+)', line_upper)
+                        picture_clause = pic_match.group(1) if pic_match else ''
+                        
+                        field_info = {
+                            'field_name': field_name,
+                            'level_number': level_number,
+                            'picture_clause': picture_clause,
+                            'line_number': i + 1,
+                            'definition': line.strip()
+                        }
+                        
+                        linkage_fields.append(field_info)
+        
+        except Exception as e:
+            logger.error(f"Error extracting linkage section fields: {str(e)}")
+        
+        return linkage_fields
+
+    def _extract_call_context(self, source_content: str, target_program: str) -> str:
+        """Extract context around program call for better understanding"""
+        try:
+            lines = source_content.split('\n')
+            
+            for i, line in enumerate(lines):
+                if target_program.upper() in line.upper():
+                    # Get context: 2 lines before and after the call
+                    start_idx = max(0, i - 2)
+                    end_idx = min(len(lines), i + 3)
+                    
+                    context_lines = []
+                    for j in range(start_idx, end_idx):
+                        prefix = ">>> " if j == i else "    "
+                        context_lines.append(f"{prefix}{j+1:4d}: {lines[j].strip()}")
+                    
+                    return '\n'.join(context_lines)
+            
+            return f"Call to {target_program} found but context extraction failed"
+            
+        except Exception as e:
+            logger.error(f"Error extracting call context: {str(e)}")
+            return "Context extraction failed"
+
+    def _correlate_passed_received_fields(self, passed_fields: List[Dict], received_fields: List[Dict]) -> List[Dict]:
+        """Correlate passed fields with received fields based on position and naming"""
+        correlations = []
+        
+        try:
+            # Simple position-based correlation (most common in COBOL)
+            for i, passed_field in enumerate(passed_fields):
+                correlation = {
+                    'passed_field': passed_field['field_name'],
+                    'passed_context': passed_field.get('context', ''),
+                    'parameter_position': i + 1,
+                    'received_field': None,
+                    'correlation_confidence': 0.0
+                }
+                
+                # Try to match by position in linkage section
+                if i < len(received_fields):
+                    received_field = received_fields[i]
+                    correlation['received_field'] = received_field['field_name']
+                    correlation['received_definition'] = received_field.get('definition', '')
+                    correlation['correlation_confidence'] = 0.9  # High confidence for position-based matching
+                
+                # Try to match by name similarity if no position match
+                elif not correlation['received_field']:
+                    passed_name = passed_field['field_name']
+                    for received_field in received_fields:
+                        received_name = received_field['field_name']
+                        
+                        # Simple name matching
+                        if passed_name == received_name:
+                            correlation['received_field'] = received_name
+                            correlation['correlation_confidence'] = 1.0
+                            break
+                        elif passed_name.replace('-', '') == received_name.replace('-', ''):
+                            correlation['received_field'] = received_name
+                            correlation['correlation_confidence'] = 0.8
+                            break
+                
+                correlations.append(correlation)
+        
+        except Exception as e:
+            logger.error(f"Error correlating fields: {str(e)}")
+        
+        return correlations
+
+    def _get_layout_fields(self, session_id: str, layout_names: List[str]) -> List[Dict]:
+        """Get field details for record layouts"""
+        layout_fields = []
+        
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                for layout_name in layout_names:
+                    cursor.execute('''
+                        SELECT fad.field_name, fad.usage_type, fad.business_purpose
+                        FROM field_analysis_details fad
+                        JOIN record_layouts rl ON fad.field_id = rl.id
+                        WHERE fad.session_id = ? AND rl.layout_name = ?
+                    ''', (session_id, layout_name))
+                    
+                    fields = cursor.fetchall()
+                    for field in fields:
+                        layout_fields.append({
+                            'field_name': field[0],
+                            'usage_type': field[1],
+                            'business_purpose': field[2],
+                            'layout_name': layout_name
+                        })
+        
+        except Exception as e:
+            logger.error(f"Error getting layout fields: {str(e)}")
+        
+        return layout_fields
+
+    def _identify_missing_programs_in_flow(self, session_id: str, program_chain: List[Dict]) -> List[Dict]:
+        """Identify missing programs and their impact on the flow"""
+        missing_programs = []
+        
+        try:
+            for step in program_chain:
+                if step.get('is_missing'):
+                    missing_info = {
+                        'program_name': step['target_program'],
+                        'called_by': step['source_program'],
+                        'call_type': step.get('call_type', 'UNKNOWN'),
+                        'sequence_position': step.get('sequence', 0),
+                        'impact_description': f"Flow blocked: {step['source_program']} cannot complete call to {step['target_program']}",
+                        'recommended_action': f"Upload {step['target_program']} to continue flow analysis",
+                        'confidence': step.get('confidence', 0.8)
+                    }
+                    
+                    # Check if this blocks further analysis
+                    blocked_programs = [s['source_program'] for s in program_chain 
+                                    if s['source_program'] == step['target_program']]
+                    
+                    if blocked_programs:
+                        missing_info['blocks_further_analysis'] = True
+                        missing_info['impact_description'] += f" and blocks analysis of calls from {step['target_program']}"
+                    
+                    missing_programs.append(missing_info)
+        
+        except Exception as e:
+            logger.error(f"Error identifying missing programs: {str(e)}")
+        
+        return missing_programs
