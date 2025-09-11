@@ -5562,21 +5562,39 @@ function createProgramFlowView(sessionId) {
         function renderFlowVisualization(vizData) {
     const container = document.getElementById('flowVisualization');
     
-    // Clear and setup SVG
+    // Enhanced SVG with better dimensions
     const svg = d3.select(container)
         .html('')
         .append('svg')
         .attr('width', '100%')
-        .attr('height', '700px')
-        .attr('viewBox', '0 0 1200 700');
+        .attr('height', '800px')
+        .attr('viewBox', '0 0 1400 800');
     
     // Add legend
     const legend = d3.select(container)
         .append('div')
         .attr('class', 'flow-legend');
     
-    // Create hierarchical layout
-    const { layoutNodes, layoutEdges } = createHierarchicalLayout(vizData);
+    // Create hierarchical layout with error handling
+    let layoutResult;
+    try {
+        layoutResult = createHierarchicalLayout(vizData);
+    } catch (error) {
+        console.error('Error creating layout:', error);
+        container.innerHTML = '<p style="color: red;">Error creating program flow layout. Please check the data.</p>';
+        return;
+    }
+    
+    const { layoutNodes, layoutEdges } = layoutResult;
+    
+    console.log(`Rendering: ${layoutNodes.length} nodes, ${layoutEdges.length} edges`);
+    
+    // Validate data
+    if (!Array.isArray(layoutNodes) || !Array.isArray(layoutEdges)) {
+        console.error('Invalid layout data:', { layoutNodes, layoutEdges });
+        container.innerHTML = '<p style="color: red;">Invalid layout data structure.</p>';
+        return;
+    }
     
     // Add arrow markers
     const defs = svg.append('defs');
@@ -5590,8 +5608,12 @@ function createProgramFlowView(sessionId) {
         .attr('class', 'flow-edge');
     
     // Draw edge paths with enhanced styling
-    edges.each(function(d) {
-        drawEnhancedEdge(d3.select(this), d);
+    edges.each(function(d, i) {
+        try {
+            drawEnhancedEdge(d3.select(this), d);
+        } catch (error) {
+            console.error(`Error drawing edge ${i}:`, error, d);
+        }
     });
     
     // Draw nodes with custom shapes
@@ -5603,15 +5625,27 @@ function createProgramFlowView(sessionId) {
         .attr('transform', d => `translate(${d.x},${d.y})`);
     
     // Draw custom shapes for each node type
-    nodes.each(function(d) {
-        drawCustomShape(d3.select(this), d);
+    nodes.each(function(d, i) {
+        try {
+            drawCustomShape(d3.select(this), d);
+        } catch (error) {
+            console.error(`Error drawing node ${i}:`, error, d);
+        }
     });
     
-    // Add interactivity
-    addInteractivity(nodes, edges);
+    // Add interactivity with proper error handling
+    try {
+        addInteractivity(nodes, layoutEdges);
+    } catch (error) {
+        console.error('Error adding interactivity:', error);
+    }
     
     // Create legend
-    createVisualizationLegend(legend);
+    try {
+        createVisualizationLegend(legend);
+    } catch (error) {
+        console.error('Error creating legend:', error);
+    }
 }
 
 function createHierarchicalLayout(vizData) {
@@ -5624,23 +5658,25 @@ function createHierarchicalLayout(vizData) {
     const fileNodes = nodes.filter(n => n.type === 'file');
     const dbNodes = nodes.filter(n => n.type === 'db2_table');
     
-    // Calculate hierarchy levels
+    // Calculate hierarchy levels with better spacing
     const hierarchy = calculateHierarchy(nodes, edges, startingNodes[0]);
     
-    // Position nodes in layers
+    // Enhanced positioning with proper gaps
     const layoutNodes = [];
-    const layerHeight = 120;
-    const layerWidth = 1200;
+    const layerHeight = 150; // Increased from 120
+    const layerWidth = 1400; // Increased from 1200
+    const minNodeSpacing = 180; // Minimum space between nodes
     
     Object.keys(hierarchy).forEach((level, levelIndex) => {
         const nodesInLevel = hierarchy[level];
-        const nodeWidth = layerWidth / (nodesInLevel.length + 1);
+        const totalNodesWidth = nodesInLevel.length * minNodeSpacing;
+        const startX = (layerWidth - totalNodesWidth) / 2;
         
         nodesInLevel.forEach((node, nodeIndex) => {
             const enhancedNode = {
                 ...node,
-                x: nodeWidth * (nodeIndex + 1),
-                y: 80 + (levelIndex * layerHeight),
+                x: startX + (nodeIndex * minNodeSpacing) + (minNodeSpacing / 2),
+                y: 100 + (levelIndex * layerHeight), // Increased top margin
                 level: parseInt(level),
                 width: getNodeWidth(node),
                 height: getNodeHeight(node)
@@ -5649,23 +5685,27 @@ function createHierarchicalLayout(vizData) {
         });
     });
     
-    // Add file and DB nodes at bottom
-    const dataNodesY = 80 + (Object.keys(hierarchy).length * layerHeight);
+    // Position data nodes (files and DB2) with better spacing
+    const dataNodesY = 100 + (Object.keys(hierarchy).length * layerHeight) + 80; // Extra gap
     const allDataNodes = [...fileNodes, ...dbNodes];
-    const dataNodeWidth = layerWidth / (allDataNodes.length + 1);
     
-    allDataNodes.forEach((node, index) => {
-        layoutNodes.push({
-            ...node,
-            x: dataNodeWidth * (index + 1),
-            y: dataNodesY,
-            level: 999,
-            width: getNodeWidth(node),
-            height: getNodeHeight(node)
+    if (allDataNodes.length > 0) {
+        const dataNodeSpacing = Math.max(minNodeSpacing, layerWidth / (allDataNodes.length + 1));
+        const dataStartX = (layerWidth - (allDataNodes.length * dataNodeSpacing)) / 2;
+        
+        allDataNodes.forEach((node, index) => {
+            layoutNodes.push({
+                ...node,
+                x: dataStartX + (index * dataNodeSpacing) + (dataNodeSpacing / 2),
+                y: dataNodesY,
+                level: 999,
+                width: getNodeWidth(node),
+                height: getNodeHeight(node)
+            });
         });
-    });
+    }
     
-    // Calculate edge positions
+    // Calculate edge positions with better curves
     const layoutEdges = edges.map(edge => {
         const sourceNode = layoutNodes.find(n => n.id === edge.from);
         const targetNode = layoutNodes.find(n => n.id === edge.to);
@@ -5808,16 +5848,27 @@ function drawCustomShape(selection, node) {
             drawDefaultShape(g, node);
     }
     
-    // Add node label
+    // Enhanced node label with better positioning
     g.append('text')
         .attr('class', 'node-label')
         .attr('text-anchor', 'middle')
         .attr('dy', '0.35em')
-        .style('font-size', '11px')
+        .style('font-size', '10px') // Slightly smaller for better fit
         .style('font-weight', 'bold')
         .style('fill', node.status === 'missing' ? '#d32f2f' : 'white')
         .style('pointer-events', 'none')
-        .text(node.label.length > 12 ? node.label.substring(0, 12) + '...' : node.label);
+        .each(function(d) {
+            // Multi-line text for long labels
+            const text = d3.select(this);
+            const words = node.label.split(/\s+/);
+            if (words.length > 1 && node.label.length > 10) {
+                text.text('');
+                text.append('tspan').attr('x', 0).attr('dy', '-0.3em').text(words[0]);
+                text.append('tspan').attr('x', 0).attr('dy', '1.2em').text(words.slice(1).join(' '));
+            } else {
+                text.text(node.label.length > 12 ? node.label.substring(0, 12) + '...' : node.label);
+            }
+        });
 }
 
 function drawProgramShape(g, node) {
@@ -6071,9 +6122,13 @@ function getMarkerEnd(edge) {
 }
 
 function getStrokeWidth(edge) {
+    if (!edge) return 2;
+    
     switch (edge.call_type || edge.type) {
         case 'XCTL': return 3;
         case 'LINK': return 2;
+        case 'file_operation': return 2;
+        case 'db2_operation': return 2;
         default: return 2;
     }
 }
@@ -6106,19 +6161,65 @@ function calculateEdgePath(sourceNode, targetNode, edge) {
 }
 
 function addInteractivity(nodes, edges) {
+    // Store edges data globally for later use
+    window.currentFlowEdges = edges;
+    
     nodes.on('click', function(event, d) {
         showEnhancedNodeDetails(d);
     });
     
     nodes.on('mouseover', function(event, d) {
         d3.select(this).style('transform', 'scale(1.1)');
-        highlightConnectedComponents(d, edges);
+        highlightConnectedComponents(d);
     });
     
     nodes.on('mouseout', function(event, d) {
         d3.select(this).style('transform', 'scale(1)');
         resetHighlights();
     });
+}
+
+function highlightConnectedComponents(node) {
+    // Check if edges data is available
+    const edges = window.currentFlowEdges;
+    if (!edges || !Array.isArray(edges)) {
+        console.warn('Edges data not available for highlighting');
+        return;
+    }
+    
+    // Highlight all edges connected to this node
+    d3.selectAll('.flow-edge').style('opacity', 0.3);
+    
+    // Find and highlight connected edges
+    let connectedEdgeCount = 0;
+    edges.forEach((edge, index) => {
+        if (edge.source && edge.target && 
+            (edge.source.id === node.id || edge.target.id === node.id)) {
+            
+            // Use index-based selection which is more reliable
+            d3.selectAll('.flow-edge').filter(function(d, i) {
+                return i === index;
+            })
+            .style('opacity', 1)
+            .style('stroke-width', function(d) {
+                const currentWidth = d3.select(this).style('stroke-width');
+                return (parseInt(currentWidth) || 2) + 1;
+            });
+            
+            connectedEdgeCount++;
+        }
+    });
+    
+    console.log(`Highlighted ${connectedEdgeCount} edges for node ${node.id}`);
+}
+
+function resetHighlights() {
+    d3.selectAll('.flow-edge')
+        .style('opacity', 1)
+        .style('stroke-width', function(d) {
+            // Reset to original width based on edge type
+            return getStrokeWidth(d) || 2;
+        });
 }
 
 function highlightConnectedComponents(node, edges) {

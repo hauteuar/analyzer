@@ -2384,14 +2384,17 @@ def refresh_dependencies_status(session_id):
         })
 
 @app.route('/api/program-flow-visualization/<session_id>/<program_name>', methods=['GET'])
-def get_program_flow_visualization_fixed(session_id, program_name):
-    """FIXED: Get program flow data for visualization with proper status"""
+def get_program_flow_visualization_with_files_and_db2(session_id, program_name):
+    """Enhanced program flow with files and DB2 tables included"""
     try:
         # Force refresh dependencies first
         analyzer.program_flow_analyzer._refresh_dependency_status(session_id)
         
         # Get fresh flow analysis
         flow_analysis = analyzer.program_flow_analyzer.analyze_complete_program_flow(session_id, program_name)
+        
+        # Get all dependencies to include files and DB2
+        all_dependencies = analyzer.db_manager.get_dependencies_with_layout_resolution_complete(session_id)
         
         # Transform for visualization
         visualization_data = {
@@ -2403,14 +2406,14 @@ def get_program_flow_visualization_fixed(session_id, program_name):
             'layout_associations': []
         }
         
-        # Create nodes for programs
+        # Collect all programs in the flow
         programs_in_flow = set()
         for step in flow_analysis.get('program_chain', []):
             programs_in_flow.add(step['source_program'])
             programs_in_flow.add(step['target_program'])
         
+        # Create program nodes
         for program in programs_in_flow:
-            # Check if program is missing based on flow analysis
             is_missing = any(step.get('is_missing') and step['target_program'] == program 
                            for step in flow_analysis.get('program_chain', []))
             
@@ -2431,12 +2434,78 @@ def get_program_flow_visualization_fixed(session_id, program_name):
             
             visualization_data['nodes'].append(node)
         
-        # Create edges for program calls
+        # Add file and DB2 nodes from dependencies
+        files_added = set()
+        db2_tables_added = set()
+        
+        for dep in all_dependencies:
+            source_prog = dep.get('source_component')
+            target_comp = dep.get('target_component')
+            rel_type = dep.get('relationship_type', '')
+            interface_type = dep.get('interface_type', '')
+            analysis = dep.get('analysis_details', {})
+            
+            # Only include dependencies from programs in our flow
+            if source_prog not in programs_in_flow:
+                continue
+            
+            # Add file nodes
+            if 'FILE' in rel_type and target_comp not in files_added:
+                file_node = {
+                    'id': f"FILE_{target_comp}",
+                    'label': target_comp,
+                    'type': 'file',
+                    'interface': interface_type,
+                    'io_direction': analysis.get('io_direction', 'UNKNOWN'),
+                    'has_layout': analysis.get('layout_resolved', False),
+                    'associated_layouts': analysis.get('associated_layouts', []),
+                    'operations': analysis.get('operations', [])
+                }
+                visualization_data['nodes'].append(file_node)
+                files_added.add(target_comp)
+                
+                # Add edge from program to file
+                file_edge = {
+                    'from': source_prog,
+                    'to': f"FILE_{target_comp}",
+                    'type': 'file_operation',
+                    'io_direction': analysis.get('io_direction', 'UNKNOWN'),
+                    'operations': analysis.get('operations', []),
+                    'interface_type': interface_type,
+                    'has_layout_resolution': analysis.get('layout_resolved', False)
+                }
+                visualization_data['edges'].append(file_edge)
+            
+            # Add DB2 table nodes
+            elif interface_type == 'DB2' and target_comp not in db2_tables_added:
+                db2_node = {
+                    'id': f"DB2_{target_comp}",
+                    'label': target_comp,
+                    'type': 'db2_table',
+                    'sql_operation': analysis.get('sql_operation', 'UNKNOWN'),
+                    'io_direction': analysis.get('io_direction', 'UNKNOWN'),
+                    'interface': 'DB2'
+                }
+                visualization_data['nodes'].append(db2_node)
+                db2_tables_added.add(target_comp)
+                
+                # Add edge from program to DB2 table
+                db2_edge = {
+                    'from': source_prog,
+                    'to': f"DB2_{target_comp}",
+                    'type': 'db2_operation',
+                    'sql_operation': analysis.get('sql_operation', 'UNKNOWN'),
+                    'io_direction': analysis.get('io_direction', 'UNKNOWN'),
+                    'interface_type': 'DB2'
+                }
+                visualization_data['edges'].append(db2_edge)
+        
+        # Add program call edges from flow analysis
         for step in flow_analysis.get('program_chain', []):
             edge_data = {
                 'from': step['source_program'],
                 'to': step['target_program'],
-                'type': step['call_mechanism'],
+                'type': 'program_call',
                 'call_type': step.get('call_type', 'CALL'),
                 'status': 'missing' if step.get('is_missing') else 'present',
                 'sequence': step['sequence'],
@@ -2448,48 +2517,11 @@ def get_program_flow_visualization_fixed(session_id, program_name):
                 edge_data['variable_name'] = step['variable_name']
                 edge_data['label'] = f"via {step['variable_name']}"
                 edge_data['is_dynamic'] = True
-            
-            # Add layout associations
-            if step.get('layout_associations'):
-                edge_data['layout_associations'] = step['layout_associations']
+                edge_data['type'] = 'dynamic_call'
             
             visualization_data['edges'].append(edge_data)
         
-        # Add file operations as nodes and edges
-        for file_op in flow_analysis.get('file_operations', []):
-            # File node
-            file_node = {
-                'id': f"FILE_{file_op['file_name']}",
-                'label': file_op['file_name'],
-                'type': 'file',
-                'interface': file_op['interface_type'],
-                'io_direction': file_op['io_direction'],
-                'has_layout': file_op.get('has_layout_resolution', False),
-                'associated_layouts': file_op.get('associated_layouts', [])
-            }
-            
-            if file_op.get('layout_details'):
-                file_node['layout_details'] = file_op['layout_details']
-            
-            visualization_data['nodes'].append(file_node)
-            
-            # Edge from program to file
-            file_edge = {
-                'from': file_op['program_name'],
-                'to': f"FILE_{file_op['file_name']}",
-                'type': 'file_operation',
-                'io_direction': file_op['io_direction'],
-                'operations': file_op['operations'],
-                'interface_type': file_op['interface_type'],
-                'has_layout_resolution': file_op.get('has_layout_resolution', False)
-            }
-            
-            if file_op.get('fields_involved'):
-                file_edge['fields_involved'] = file_op['fields_involved']
-            
-            visualization_data['edges'].append(file_edge)
-        
-        # Field flow summary
+        # Field flow summary (existing code)
         field_flow_summary = {}
         for field_flow in flow_analysis.get('field_flows', []):
             field_name = field_flow['field_name']
@@ -2504,35 +2536,31 @@ def get_program_flow_visualization_fixed(session_id, program_name):
             })
         
         visualization_data['field_flows'] = field_flow_summary
+        visualization_data['missing_programs'] = flow_analysis.get('missing_programs', [])
         
-        # Missing programs with impact analysis
-        missing_programs = flow_analysis.get('missing_programs', [])
-        visualization_data['missing_programs'] = missing_programs
-        
-        # Layout associations
-        layout_associations = []
-        for step in flow_analysis.get('program_chain', []):
-            if step.get('layout_associations'):
-                layout_associations.extend(step['layout_associations'])
-        visualization_data['layout_associations'] = layout_associations
+        logger.info(f"Enhanced flow visualization: {len(visualization_data['nodes'])} nodes, {len(visualization_data['edges'])} edges")
+        logger.info(f"Files: {len(files_added)}, DB2 tables: {len(db2_tables_added)}")
         
         return jsonify({
             'success': True,
             'visualization_data': visualization_data,
             'business_summary': flow_analysis.get('business_flow_summary', ''),
             'total_programs': len(programs_in_flow),
-            'missing_count': len(missing_programs),
-            'available_count': len(programs_in_flow) - len(missing_programs),
+            'total_files': len(files_added),
+            'total_db2_tables': len(db2_tables_added),
+            'missing_count': len(flow_analysis.get('missing_programs', [])),
             'dependency_refreshed': True,
+            'enhanced_with_data_sources': True,
             'statistics': {
                 'field_flows': len(field_flow_summary),
-                'file_operations': len(flow_analysis.get('file_operations', [])),
-                'layout_associations': len(layout_associations)
+                'file_operations': len(files_added),
+                'db2_operations': len(db2_tables_added),
+                'layout_associations': len(flow_analysis.get('layout_associations', []))
             }
         })
         
     except Exception as e:
-        logger.error(f"Error getting flow visualization: {str(e)}")
+        logger.error(f"Error getting enhanced flow visualization: {str(e)}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({
