@@ -185,7 +185,7 @@ class ComponentExtractor:
                 'program_calls': parsed_data['program_calls'],
                 'copybooks': parsed_data['copybooks'],
                 'cics_operations': enhanced_cics_ops,  # Use enhanced operations
-                'db2_operations': parsed_data['db2_operations'], 
+                'db2_operations': parsed_data['db2_operations', ''], 
                 'derived_components': [],
                 'record_layouts': [],
                 'fields': []
@@ -331,11 +331,8 @@ class ComponentExtractor:
             logger.info(f"Program {program_name} has {program_component['total_fields']} fields across {program_component['total_layouts']} layouts")
             # Extract and store dependencies
             self._extract_and_store_enhanced_dependencies(session_id, components, filename)
-    
-            # IMPORTANT: Verify dependencies were stored
-            stored_deps = self.db_manager.get_enhanced_dependencies(session_id)
-            dynamic_deps = [d for d in stored_deps if d.get('relationship_type') == 'DYNAMIC_PROGRAM_CALL']
-            logger.info(f"Verification: Stored {len(dynamic_deps)} dynamic program call dependencies")
+            
+            logger.info(f"Analysis complete: 1 program + {len(layout_components)} layout components, {program_component['total_fields']} total fields")
             
             return components
             
@@ -2083,7 +2080,9 @@ File Content ({filename}):
         return components
     
     def _extract_and_store_enhanced_dependencies(self, session_id: str, components: List[Dict], filename: str):
-        """Enhanced dependency extraction with CICS file-layout resolution"""
+        """
+        Complete enhanced dependency extraction with dynamic calls, CICS files, and missing program detection
+        """
         try:
             main_program = None
             for component in components:
@@ -2091,58 +2090,53 @@ File Content ({filename}):
                     main_program = component
                     break
             
+            if not main_program:
+                logger.warning("No main program found in components")
+                return
+            
             dependencies = []
             program_name = main_program['name']
             
-            # Get all uploaded components for missing dependency detection
+            # Get all uploaded programs for missing detection
             all_session_components = self.db_manager.get_session_components(session_id)
             uploaded_programs = set(comp['component_name'].upper() for comp in all_session_components)
             
-            # FIXED: Enhanced program calls with dynamic resolution
+            logger.info(f"Extracting dependencies for {program_name} with {len(uploaded_programs)} uploaded programs")
+            
+            # 1. ENHANCED PROGRAM CALL DEPENDENCIES (including dynamic calls)
             program_calls = main_program.get('program_calls', [])
+            logger.info(f"Processing {len(program_calls)} program calls")
+            
             for call in program_calls:
                 call_type = call.get('call_type', 'static')
+                operation = call.get('operation', 'CALL')
                 
                 if call_type == 'dynamic':
-                    # Create detailed dependencies for each resolved program
-                    resolved_programs = call.get('resolved_programs', [])
-                    for resolved_prog in resolved_programs:
-                        prog_name = resolved_prog.get('program_name')
-                        if prog_name and self._is_valid_dependency_target(prog_name, program_name):
-                            dependency_status = 'present' if prog_name.upper() in uploaded_programs else 'missing'
-                            
-                            dependency = {
-                                'source_component': program_name,
-                                'target_component': prog_name,
-                                'relationship_type': 'DYNAMIC_PROGRAM_CALL',
-                                'interface_type': 'COBOL',
-                                'confidence_score': resolved_prog.get('confidence', 0.5),
-                                'dependency_status': dependency_status,
-                                'analysis_details_json': json.dumps({
-                                    'call_type': 'dynamic',
-                                    'variable_name': call.get('variable_name'),
-                                    'resolution_method': resolved_prog.get('resolution'),
-                                    'business_context': call.get('business_context'),
-                                    'line_number': call.get('line_number', 0),
-                                    'construction_details': resolved_prog.get('construction_details', {}),
-                                    'group_structure_used': call.get('group_structure_used', False)
-                                })
-                            }
-                            dependencies.append(dependency)
+                    # Handle dynamic calls with multiple resolved programs
+                    dependencies.extend(self._create_dynamic_call_dependencies(
+                        session_id, program_name, call, uploaded_programs
+                    ))
+                elif call_type == 'regular_dynamic':
+                    # Handle regular dynamic calls (CALL VARIABLE)
+                    dependencies.extend(self._create_regular_dynamic_dependencies(
+                        session_id, program_name, call, uploaded_programs
+                    ))
                 else:
-                    # Handle static calls with enhanced call type information
+                    # Handle static calls (CALL 'LITERAL', CICS LINK 'PROGRAM')
                     target_prog = call.get('program_name')
                     if target_prog and self._is_valid_dependency_target(target_prog, program_name):
-                        dependency = self._create_enhanced_program_call_dependency(
+                        dependency = self._create_static_program_call_dependency(
                             program_name, call, uploaded_programs
                         )
                         if dependency:
                             dependencies.append(dependency)
             
-            # File dependencies (batch files)
+            # 2. FILE OPERATION DEPENDENCIES (batch files)
             file_operations = main_program.get('file_operations', [])
             file_classifications = self._classify_file_io_direction_enhanced(file_operations)
             processed_files = set()
+            
+            logger.info(f"Processing {len(file_operations)} file operations")
             
             for file_op in file_operations:
                 file_name = file_op.get('file_name')
@@ -2160,67 +2154,183 @@ File Content ({filename}):
                         'analysis_details_json': json.dumps({
                             'io_direction': io_direction,
                             'operations': [op.get('operation') for op in file_operations if op.get('file_name') == file_name],
-                            'file_type': 'BATCH_FILE'
-                        })
+                            'file_type': 'BATCH_FILE',
+                            'line_numbers': [op.get('line_number', 0) for op in file_operations if op.get('file_name') == file_name]
+                        }),
+                        'source_code_evidence': f"File operations: {', '.join(set(op.get('operation', 'UNKNOWN') for op in file_operations if op.get('file_name') == file_name))}"
                     })
             
-            # Enhanced CICS dependencies with layout resolution
+            # 3. ENHANCED CICS DEPENDENCIES with layout resolution
             cics_operations = main_program.get('cics_operations', [])
             if cics_operations:
+                logger.info(f"Processing {len(cics_operations)} CICS operations")
                 enhanced_cics_deps = self._resolve_cics_file_dependencies_with_layouts(
                     session_id, cics_operations, program_name, uploaded_programs
                 )
                 dependencies.extend(enhanced_cics_deps)
             
+            # 4. DB2 TABLE DEPENDENCIES
             db2_operations = main_program.get('db2_operations', [])
             if db2_operations:
+                logger.info(f"Processing {len(db2_operations)} DB2 operations")
                 db2_deps = self._extract_db2_table_dependencies(
                     session_id, db2_operations, program_name
                 )
                 dependencies.extend(db2_deps)
-
-            # Store enhanced dependencies
+            
+            # 5. COPYBOOK DEPENDENCIES
+            copybooks = main_program.get('copybooks', [])
+            if copybooks:
+                logger.info(f"Processing {len(copybooks)} copybook dependencies")
+                for copybook in copybooks:
+                    copybook_name = copybook.get('copybook_name')
+                    if copybook_name and self._is_valid_dependency_target(copybook_name, program_name):
+                        dependencies.append({
+                            'source_component': program_name,
+                            'target_component': copybook_name,
+                            'relationship_type': 'COPYBOOK_INCLUDE',
+                            'interface_type': 'COBOL',
+                            'confidence_score': 0.98,
+                            'dependency_status': 'copybook',
+                            'analysis_details_json': json.dumps({
+                                'line_number': copybook.get('line_number', 0),
+                                'include_type': 'COPY_STATEMENT'
+                            }),
+                            'source_code_evidence': f"Line {copybook.get('line_number', 0)}: COPY {copybook_name}"
+                        })
+            
+            # 6. STORE DEPENDENCIES with deduplication
             if dependencies:
-                self.db_manager._store_enhanced_dependencies_with_status(session_id, dependencies)
-                logger.info(f"Stored {len(dependencies)} enhanced dependencies for {program_name}")
-
-            # Enhanced dynamic program call dependencies
-                program_calls = main_program.get('program_calls', [])
-                for call in program_calls:
-                    call_type = call.get('call_type', 'static')
-                    
-                    if call_type == 'dynamic':
-                        # Create detailed dependencies for each resolved program
-                        for resolved_prog in call.get('resolved_programs', []):
-                            prog_name = resolved_prog.get('program_name')
-                            if prog_name and self._is_valid_dependency_target(prog_name, program_name):
-                                dependency_status = 'present' if prog_name.upper() in uploaded_programs else 'missing'
-                                
-                                dependency = {
-                                    'source_component': program_name,
-                                    'target_component': prog_name,
-                                    'relationship_type': 'DYNAMIC_PROGRAM_CALL',
-                                    'interface_type': 'CICS',
-                                    'confidence_score': resolved_prog.get('confidence', 0.5),
-                                    'dependency_status': dependency_status,
-                                    'analysis_details_json': json.dumps({
-                                        'call_type': 'dynamic',
-                                        'variable_name': call.get('variable_name'),
-                                        'resolution_method': resolved_prog.get('resolution'),
-                                        'business_context': call.get('business_context'),
-                                        'construction_pattern': resolved_prog.get('construction_details', {}),
-                                        'group_structure_used': call.get('group_structure_used', False)
-                                    })
-                                }
-                                dependencies.append(dependency)
-
-
+                unique_dependencies = self._deduplicate_dependencies(dependencies)
+                logger.info(f"Storing {len(unique_dependencies)} unique dependencies (deduplicated from {len(dependencies)})")
+                
+                # Log dependency breakdown
+                dep_breakdown = {}
+                for dep in unique_dependencies:
+                    rel_type = dep.get('relationship_type', 'UNKNOWN')
+                    dep_breakdown[rel_type] = dep_breakdown.get(rel_type, 0) + 1
+                logger.info(f"Dependency breakdown: {dep_breakdown}")
+                
+                # Store using enhanced method
+                self.db_manager._store_enhanced_dependencies_with_status(session_id, unique_dependencies)
+                
+                # Verify storage
+                stored_deps = self.db_manager.get_enhanced_dependencies(session_id)
+                stored_for_program = [d for d in stored_deps if d.get('source_component') == program_name]
+                logger.info(f"Verification: {len(stored_for_program)} dependencies stored for {program_name}")
+                
+            else:
+                logger.warning(f"No dependencies found for program {program_name}")
+                
         except Exception as e:
-            logger.error(f"Error in enhanced dependency extraction: {str(e)}")
+            logger.error(f"Error in enhanced dependency extraction for {filename}: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+    def _deduplicate_dependencies(self, dependencies: List[Dict]) -> List[Dict]:
+        """Remove duplicate dependencies while preserving highest confidence"""
+        unique_dependencies = {}
+        
+        for dep in dependencies:
+            # Create unique key
+            key = (
+                dep['source_component'],
+                dep['target_component'],
+                dep['relationship_type'],
+                dep['interface_type']
+            )
+            
+            # Keep highest confidence entry
+            if key not in unique_dependencies or dep['confidence_score'] > unique_dependencies[key]['confidence_score']:
+                unique_dependencies[key] = dep
+        
+        return list(unique_dependencies.values())
 
     # Add this method to integrate CICS parsing into the main COBOL extraction process
 # This should be added to component_extractor.py
+    def _create_static_program_call_dependency(self, program_name: str, call: Dict, uploaded_programs: set) -> Optional[Dict]:
+        """Create dependency for static program call"""
+        target_prog = call.get('program_name')
+        if not target_prog:
+            return None
+        
+        call_type = call.get('call_type', 'static')
+        operation = call.get('operation', 'CALL')
+        
+        # Check if target program is uploaded
+        dependency_status = 'present' if target_prog.upper() in uploaded_programs else 'missing'
+        
+        return {
+            'source_component': program_name,
+            'target_component': target_prog,
+            'relationship_type': 'PROGRAM_CALL',
+            'interface_type': 'COBOL',
+            'confidence_score': call.get('confidence_score', 0.98),
+            'dependency_status': dependency_status,
+            'analysis_details_json': json.dumps({
+                'call_type': call_type,
+                'operation': operation,
+                'line_number': call.get('line_number', 0),
+                'business_context': call.get('business_context', f'Static {operation} to {target_prog}')
+            }),
+            'source_code_evidence': f"Line {call.get('line_number', 0)}: {operation} {target_prog}"
+        }
 
+    def _create_regular_dynamic_dependencies(self, session_id: str, program_name: str,
+                                       regular_dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
+        """Create dependencies for regular dynamic calls (CALL VARIABLE)"""
+        dependencies = []
+        variable_name = regular_dynamic_call.get('variable_name', 'UNKNOWN')
+        operation = regular_dynamic_call.get('operation', 'CALL')
+        line_number = regular_dynamic_call.get('line_number', 0)
+        
+        resolved_programs = regular_dynamic_call.get('resolved_programs', [])
+        
+        if not resolved_programs:
+            # Create unresolved dependency
+            dependencies.append({
+                'source_component': program_name,
+                'target_component': f'REGULAR_DYNAMIC_{variable_name}',
+                'relationship_type': 'DYNAMIC_PROGRAM_CALL',
+                'interface_type': 'COBOL',
+                'confidence_score': 0.2,
+                'dependency_status': 'unresolved',
+                'analysis_details_json': json.dumps({
+                    'call_type': 'regular_dynamic',
+                    'variable_name': variable_name,
+                    'operation': operation,
+                    'line_number': line_number,
+                    'business_context': f"Unresolved regular dynamic call: CALL {variable_name}"
+                }),
+                'source_code_evidence': f"Line {line_number}: CALL {variable_name} - unresolved"
+            })
+            return dependencies
+        
+        # Create dependencies for resolved programs
+        for resolved_program in resolved_programs:
+            target_prog = resolved_program.get('program_name')
+            if target_prog and self._is_valid_dependency_target(target_prog, program_name):
+                dependency_status = 'present' if target_prog.upper() in uploaded_programs else 'missing'
+                
+                dependencies.append({
+                    'source_component': program_name,
+                    'target_component': target_prog,
+                    'relationship_type': 'DYNAMIC_PROGRAM_CALL',
+                    'interface_type': 'COBOL',
+                    'confidence_score': resolved_program.get('confidence', 0.6),
+                    'dependency_status': dependency_status,
+                    'analysis_details_json': json.dumps({
+                        'call_type': 'regular_dynamic',
+                        'variable_name': variable_name,
+                        'operation': operation,
+                        'resolution_method': resolved_program.get('resolution', 'variable_analysis'),
+                        'line_number': line_number,
+                        'business_context': f"Regular dynamic call: CALL {variable_name} -> {target_prog}"
+                    }),
+                    'source_code_evidence': f"Line {line_number}: CALL {variable_name} -> {target_prog}"
+                })
+        
+        return dependencies
     def _extract_enhanced_cics_operations(self, source_content: str, program_name: str) -> List[Dict]:
         """Extract CICS operations with enhanced layout association detection"""
         try:
@@ -2969,8 +3079,8 @@ File Content ({filename}):
     
 
     def _create_dynamic_call_dependencies(self, session_id: str, program_name: str, 
-                           dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
-        """Create dependencies for dynamic calls with multiple possible targets - FIXED"""
+                                     dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
+        """Create dependencies for dynamic calls with multiple possible targets"""
         dependencies = []
         variable_name = dynamic_call.get('variable_name', 'UNKNOWN')
         operation = dynamic_call.get('operation', 'DYNAMIC_CALL')
