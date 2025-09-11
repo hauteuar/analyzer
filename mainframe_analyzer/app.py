@@ -1978,8 +1978,11 @@ def get_dependency_impact_api(session_id, program_name):
 def get_enhanced_dependencies_with_dynamic_api(session_id):
     """Get enhanced dependencies with proper dynamic call grouping"""
     try:
-        # Get enhanced dependencies
         dependencies = analyzer.db_manager.get_enhanced_dependencies(session_id)
+        
+        # Debug logging
+        dynamic_deps = [d for d in dependencies if d.get('relationship_type') == 'DYNAMIC_PROGRAM_CALL']
+        logger.info(f"API: Found {len(dynamic_deps)} dynamic dependencies out of {len(dependencies)} total")
         
         # Group dynamic calls by variable for better display
         dynamic_call_groups = {}

@@ -253,7 +253,7 @@ class COBOLParser:
         
         return operations
 
-    def extract_all_program_calls(self, content: str, filename: str) -> List[Dict]:
+    def extract_program_calls(self, content: str, filename: str) -> List[Dict]:
         """
         Enhanced program call extraction including both static and dynamic calls
         Handles: CALL 'LITERAL', CALL VARIABLE, EXEC CICS XCTL/LINK
@@ -308,7 +308,6 @@ class COBOLParser:
         
         logger.info(f"Total program calls extracted: {len(program_calls)}")
         return program_calls
-
 
     def _extract_regular_dynamic_calls(self, content: str, filename: str, lines: List[str]) -> List[Dict]:
         """
@@ -383,6 +382,8 @@ class COBOLParser:
                     regular_dynamic_calls.append(unresolved_call)
         
         return regular_dynamic_calls
+
+
     def _extract_cics_program_calls(self, lines: List[str]) -> List[Dict]:
         """
         Extract CICS LINK and XCTL program calls

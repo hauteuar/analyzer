@@ -63,26 +63,29 @@ class ProgramFlowAnalyzer:
             return flow_analysis
     
     def _build_program_call_chain(self, session_id: str, starting_program: str) -> List[Dict]:
-        """Build the complete program call chain"""
+        """Build the complete program call chain including dynamic calls"""
         chain = []
         processed_programs = set()
         
         def build_chain_recursive(current_program: str, level: int = 0):
-            if current_program in processed_programs or level > 10:  # Prevent infinite loops
+            if current_program in processed_programs or level > 10:
                 return
             
             processed_programs.add(current_program)
             
             # Get dependencies for current program
             dependencies = self.db_manager.get_enhanced_dependencies(session_id)
+            
+            # FIXED: Include both static and dynamic program calls
             program_calls = [d for d in dependencies 
-                           if d['source_component'] == current_program 
-                           and d['relationship_type'] in ['PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL']]
+                        if d['source_component'] == current_program 
+                        and d['relationship_type'] in ['PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL']]
             
             for call in program_calls:
                 target_program = call['target_component']
                 analysis_details = call.get('analysis_details', {})
                 
+                # FIXED: Enhanced chain step for dynamic calls
                 chain_step = {
                     'sequence': level + 1,
                     'source_program': current_program,
@@ -93,10 +96,11 @@ class ProgramFlowAnalyzer:
                     'resolution_method': analysis_details.get('resolution_method', ''),
                     'confidence': call.get('confidence_score', 0.8),
                     'line_number': analysis_details.get('line_number', 0),
-                    'is_missing': call.get('display_status') == 'missing'
+                    'is_missing': call.get('dependency_status') == 'missing',  # FIXED
+                    'business_context': analysis_details.get('business_context', '')
                 }
                 
-                # Add data flow context
+                # Add data flow context for non-missing programs
                 if not chain_step['is_missing']:
                     data_context = self._analyze_call_data_context(session_id, current_program, target_program)
                     chain_step['data_passed'] = data_context.get('passed_fields', [])

@@ -185,7 +185,7 @@ class ComponentExtractor:
                 'program_calls': parsed_data['program_calls'],
                 'copybooks': parsed_data['copybooks'],
                 'cics_operations': enhanced_cics_ops,  # Use enhanced operations
-                'db2_operations': parsed_data['db2_operations', ''], 
+                'db2_operations': parsed_data['db2_operations'], 
                 'derived_components': [],
                 'record_layouts': [],
                 'fields': []
@@ -331,8 +331,11 @@ class ComponentExtractor:
             logger.info(f"Program {program_name} has {program_component['total_fields']} fields across {program_component['total_layouts']} layouts")
             # Extract and store dependencies
             self._extract_and_store_enhanced_dependencies(session_id, components, filename)
-            
-            logger.info(f"Analysis complete: 1 program + {len(layout_components)} layout components, {program_component['total_fields']} total fields")
+    
+            # IMPORTANT: Verify dependencies were stored
+            stored_deps = self.db_manager.get_enhanced_dependencies(session_id)
+            dynamic_deps = [d for d in stored_deps if d.get('relationship_type') == 'DYNAMIC_PROGRAM_CALL']
+            logger.info(f"Verification: Stored {len(dynamic_deps)} dynamic program call dependencies")
             
             return components
             
@@ -2101,10 +2104,31 @@ File Content ({filename}):
                 call_type = call.get('call_type', 'static')
                 
                 if call_type == 'dynamic':
-                    # Handle dynamic calls with multiple possible targets
-                    dependencies.extend(self._create_dynamic_call_dependencies(
-                        session_id, program_name, call, uploaded_programs
-                    ))
+                    # Create detailed dependencies for each resolved program
+                    resolved_programs = call.get('resolved_programs', [])
+                    for resolved_prog in resolved_programs:
+                        prog_name = resolved_prog.get('program_name')
+                        if prog_name and self._is_valid_dependency_target(prog_name, program_name):
+                            dependency_status = 'present' if prog_name.upper() in uploaded_programs else 'missing'
+                            
+                            dependency = {
+                                'source_component': program_name,
+                                'target_component': prog_name,
+                                'relationship_type': 'DYNAMIC_PROGRAM_CALL',
+                                'interface_type': 'COBOL',
+                                'confidence_score': resolved_prog.get('confidence', 0.5),
+                                'dependency_status': dependency_status,
+                                'analysis_details_json': json.dumps({
+                                    'call_type': 'dynamic',
+                                    'variable_name': call.get('variable_name'),
+                                    'resolution_method': resolved_prog.get('resolution'),
+                                    'business_context': call.get('business_context'),
+                                    'line_number': call.get('line_number', 0),
+                                    'construction_details': resolved_prog.get('construction_details', {}),
+                                    'group_structure_used': call.get('group_structure_used', False)
+                                })
+                            }
+                            dependencies.append(dependency)
                 else:
                     # Handle static calls with enhanced call type information
                     target_prog = call.get('program_name')
