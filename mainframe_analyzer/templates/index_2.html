@@ -2875,11 +2875,11 @@ function createFileComponent(file, className) {
     const interfaceIcon = file.interface === 'CICS' ? '🏦' : '📁';
     const statusClass = file.hasLayoutAssociation ? 'file-with-layout' : 'file-only';
     
-    // Fix: Use proper onclick handler
-    const onClickHandler = `onclick="event.stopPropagation(); showFileDetails('${file.name}')"`;
-    
     return `
-        <div class="flow-component ${className} ${statusClass}" ${onClickHandler}>
+        <div class="flow-component ${className} ${statusClass}" 
+             data-component-name="${file.name}" 
+             data-component-type="file"
+             style="cursor: pointer;">
             <div class="component-name">${interfaceIcon} ${file.name}</div>
             <div class="component-type-badge">${file.type}</div>
             <div class="component-description">
@@ -3090,40 +3090,78 @@ function analyzeDB2TableFields(tableName) {
         }
 
         function createProgramLayer(title, items, className) {
-    let html = `
-        <div class="flow-level">
-            <div class="flow-level-title">${title}</div>
-            <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-left: 160px;">
-    `;
+            let html = `
+                <div class="flow-level">
+                    <div class="flow-level-title">${title}</div>
+                    <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-left: 160px;">
+            `;
+            
+            items.forEach(item => {
+                const displayName = item.name || item.friendly_name || 'UNKNOWN';
+                const confidenceClass = item.confidence > 0.8 ? 'confidence-high' : 
+                                    item.confidence > 0.5 ? 'confidence-medium' : 'confidence-low';
+                
+                html += `
+                    <div class="flow-component ${className}" 
+                        data-component-name="${item.name}" 
+                        data-component-type="program"
+                        style="cursor: pointer;">
+                        <div class="confidence-indicator ${confidenceClass}"></div>
+                        <div class="component-name">${displayName}</div>
+                        <div class="component-type-badge">${item.type}</div>
+                        <div class="component-description">
+                            Confidence: ${(item.confidence * 100).toFixed(0)}%
+                            ${item.reason ? `<br><small>${item.reason}</small>` : ''}
+                            ${item.calledFrom ? `<br><small>Called from: ${item.calledFrom}</small>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div></div>';
+            return html;
+        }
+
+function initializeDependencyFlowInteractivity() {
+    // Remove any existing event listeners
+    document.removeEventListener('click', handleDependencyFlowClick);
     
-    items.forEach(item => {
-        const displayName = item.name || item.friendly_name || 'UNKNOWN';
-        const confidenceClass = item.confidence > 0.8 ? 'confidence-high' : 
-                               item.confidence > 0.5 ? 'confidence-medium' : 'confidence-low';
-        
-        // Fix: Use proper onclick handler with event.stopPropagation()
-        const onClickHandler = `onclick="event.stopPropagation(); showProgramDetails('${item.name}')"`;
-        
-        html += `
-            <div class="flow-component ${className}" ${onClickHandler}>
-                <div class="confidence-indicator ${confidenceClass}"></div>
-                <div class="component-name">${displayName}</div>
-                <div class="component-type-badge">${item.type}</div>
-                <div class="component-description">
-                    Confidence: ${(item.confidence * 100).toFixed(0)}%
-                    ${item.reason ? `<br><small>${item.reason}</small>` : ''}
-                    ${item.calledFrom ? `<br><small>Called from: ${item.calledFrom}</small>` : ''}
-                </div>
-            </div>
-        `;
-    });
-    
-    html += '</div></div>';
-    return html;
+    // Add event delegation for dependency flow clicks
+    document.addEventListener('click', handleDependencyFlowClick);
 }
 
-
-
+function handleDependencyFlowClick(event) {
+    const target = event.target.closest('.flow-component');
+    if (!target) return;
+    
+    // Prevent event bubbling
+    event.preventDefault();
+    event.stopPropagation();
+    
+    // Get component info from data attributes
+    const componentName = target.getAttribute('data-component-name');
+    const componentType = target.getAttribute('data-component-type');
+    
+    if (!componentName) {
+        console.warn('No component name found for clicked element');
+        return;
+    }
+    
+    // Route to appropriate detail function
+    switch (componentType) {
+        case 'program':
+            showProgramDetails(componentName);
+            break;
+        case 'file':
+            showFileDetails(componentName);
+            break;
+        case 'db2':
+            showDB2TableDetails(componentName);
+            break;
+        default:
+            console.warn('Unknown component type:', componentType);
+    }
+}
 
 function displayFieldMatrix(matrixData) {
             const tbody = document.getElementById('fieldMatrixTableBody');
@@ -4820,6 +4858,9 @@ function getDB2TableType(sqlOperation) {
                 console.error('Error loading dependency flow:', error);
                 displayEmptyDependencyFlow();
             }
+            setTimeout(() => {
+                initializeDependencyFlowInteractivity();
+            }, 100);
         }
 
         async function displayEnhancedDependencyFlowWithLayouts(dependencies, selectedComponent) {
