@@ -1974,6 +1974,173 @@ def get_dependency_impact_api(session_id, program_name):
             'error': str(e)
         })
 
+@app.route('/api/dependencies-enhanced-with-dynamic/<session_id>')
+def get_enhanced_dependencies_with_dynamic_api(session_id):
+    """Get enhanced dependencies with proper dynamic call grouping"""
+    try:
+        # Get enhanced dependencies
+        dependencies = analyzer.db_manager.get_enhanced_dependencies(session_id)
+        
+        # Group dynamic calls by variable for better display
+        dynamic_call_groups = {}
+        regular_dependencies = []
+        
+        for dep in dependencies:
+            if dep.get('relationship_type') == 'DYNAMIC_PROGRAM_CALL':
+                analysis = dep.get('analysis_details', {})
+                variable_name = analysis.get('variable_name', 'UNKNOWN')
+                source_program = dep.get('source_component')
+                
+                # Create a unique key for each variable+source combination
+                group_key = f"{source_program}::{variable_name}"
+                
+                if group_key not in dynamic_call_groups:
+                    dynamic_call_groups[group_key] = {
+                        'variable_name': variable_name,
+                        'source_program': source_program,
+                        'operation': analysis.get('operation', 'DYNAMIC_CALL'),
+                        'line_number': analysis.get('line_number', 0),
+                        'call_type': 'dynamic',
+                        'resolved_programs': [],
+                        'total_programs': 0,
+                        'missing_programs': 0,
+                        'present_programs': 0,
+                        'resolution_methods': set(),
+                        'confidence_scores': [],
+                        'group_business_context': analysis.get('business_context', f'Dynamic call via {variable_name}')
+                    }
+                
+                group = dynamic_call_groups[group_key]
+                group['resolved_programs'].append({
+                    'program_name': dep.get('target_component'),
+                    'status': dep.get('dependency_status', 'unknown'),
+                    'confidence': dep.get('confidence_score', 0.5),
+                    'resolution_method': analysis.get('resolution_method', 'unknown'),
+                    'source_info': analysis.get('source_info', '')
+                })
+                group['total_programs'] += 1
+                group['confidence_scores'].append(dep.get('confidence_score', 0.5))
+                group['resolution_methods'].add(analysis.get('resolution_method', 'unknown'))
+                
+                if dep.get('dependency_status') == 'missing':
+                    group['missing_programs'] += 1
+                elif dep.get('dependency_status') == 'present':
+                    group['present_programs'] += 1
+            else:
+                regular_dependencies.append(dep)
+        
+        # Convert dynamic call groups to categorized format
+        categorized_deps = {
+            'program_calls': [],
+            'file_operations': [],
+            'cics_operations': [],
+            'dynamic_calls': [],
+            'db2_operations': []
+        }
+        
+        # Process regular dependencies
+        for dep in regular_dependencies:
+            rel_type = dep.get('relationship_type', '')
+            interface_type = dep.get('interface_type', '')
+            analysis_details = dep.get('analysis_details', {})
+            
+            dep_info = {
+                'source_component': dep.get('source_component'),
+                'target_component': dep.get('target_component'),
+                'relationship_type': rel_type,
+                'interface_type': interface_type,
+                'confidence_score': dep.get('confidence_score', 0),
+                'display_status': dep.get('display_status', 'unknown'),
+                'analysis_details': analysis_details,
+                'source_code_evidence': dep.get('source_code_evidence', ''),
+                'created_at': dep.get('created_at', '')
+            }
+            
+            # Categorize
+            if 'PROGRAM_CALL' in rel_type and rel_type != 'DYNAMIC_PROGRAM_CALL':
+                dep_info['call_type'] = analysis_details.get('call_type', 'static')
+                categorized_deps['program_calls'].append(dep_info)
+            elif 'FILE' in rel_type and interface_type == 'CICS':
+                dep_info['io_direction'] = analysis_details.get('io_direction', 'unknown')
+                dep_info['operations'] = analysis_details.get('operations', [])
+                categorized_deps['cics_operations'].append(dep_info)
+            elif 'FILE' in rel_type:
+                dep_info['io_direction'] = analysis_details.get('io_direction', 'unknown')
+                dep_info['operations'] = analysis_details.get('operations', [])
+                categorized_deps['file_operations'].append(dep_info)
+            elif 'DB2' in rel_type:
+                dep_info['sql_operation'] = analysis_details.get('sql_operation', 'unknown')
+                dep_info['io_direction'] = analysis_details.get('io_direction', 'unknown')
+                categorized_deps['db2_operations'].append(dep_info)
+        
+        # Process dynamic call groups
+        for group_key, group in dynamic_call_groups.items():
+            # Calculate group statistics
+            avg_confidence = sum(group['confidence_scores']) / len(group['confidence_scores']) if group['confidence_scores'] else 0.5
+            
+            dynamic_call_info = {
+                'variable_name': group['variable_name'],
+                'source_component': group['source_program'],
+                'operation': group['operation'],
+                'line_number': group['line_number'],
+                'call_type': 'dynamic',
+                'relationship_type': 'DYNAMIC_PROGRAM_CALL',
+                'interface_type': 'COBOL',
+                'confidence_score': avg_confidence,
+                
+                # Dynamic call specific information
+                'total_resolved_programs': group['total_programs'],
+                'resolved_programs': group['resolved_programs'],
+                'missing_count': group['missing_programs'],
+                'present_count': group['present_programs'],
+                'resolution_methods': list(group['resolution_methods']),
+                'business_context': group['group_business_context'],
+                
+                # Status determination for UI
+                'display_status': 'missing' if group['missing_programs'] > 0 else 'present',
+                'has_missing_programs': group['missing_programs'] > 0,
+                'all_programs_present': group['missing_programs'] == 0 and group['present_programs'] > 0,
+                
+                # Summary for display
+                'summary': f"Dynamic call {group['variable_name']} resolves to {group['total_programs']} programs: {[p['program_name'] for p in group['resolved_programs']]}",
+                'resolution_summary': f"Resolved via: {', '.join(group['resolution_methods'])}"
+            }
+            
+            categorized_deps['dynamic_calls'].append(dynamic_call_info)
+        
+        # Calculate status counts
+        status_counts = {
+            'present': len([d for d in dependencies if d.get('display_status') == 'present']),
+            'missing': len([d for d in dependencies if d.get('display_status') == 'missing']),
+            'file': len([d for d in dependencies if d.get('display_status') == 'file']),
+            'unknown': len([d for d in dependencies if d.get('display_status') == 'unknown'])
+        }
+        
+        # Add dynamic call statistics
+        dynamic_stats = {
+            'total_dynamic_variables': len(dynamic_call_groups),
+            'total_resolved_programs': sum(g['total_programs'] for g in dynamic_call_groups.values()),
+            'dynamic_calls_with_missing': len([g for g in dynamic_call_groups.values() if g['missing_programs'] > 0])
+        }
+        
+        return jsonify({
+            'success': True,
+            'dependencies': dependencies,
+            'categorized_dependencies': categorized_deps,
+            'status_counts': status_counts,
+            'dynamic_call_statistics': dynamic_stats,
+            'total_count': len(dependencies),
+            'enhanced_features': True,
+            'dynamic_call_grouping': True
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting enhanced dependencies with dynamic grouping: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
 @app.route('/api/dependencies-enhanced/<session_id>')
 def get_enhanced_dependencies_api(session_id):
     """Get enhanced dependencies with status information"""

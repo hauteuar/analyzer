@@ -910,8 +910,9 @@
         }
 
         /* Modal Styles */
+        /* Modal Styles */
         .modal {
-            display: none;
+            display: none !important; /* Force hidden by default */
             position: fixed;
             z-index: 10000;
             left: 0;
@@ -920,6 +921,10 @@
             height: 100%;
             background-color: rgba(0, 0, 0, 0.6);
             backdrop-filter: blur(5px);
+        }
+
+        .modal.show {
+            display: block !important;
         }
 
         .modal-content {
@@ -2042,12 +2047,14 @@
 
         function openConfigModal() {
             updateConfigForm();
-            document.getElementById('configModal').style.display = 'block';
+            const modal = document.getElementById('configModal');
+            modal.classList.add('show');
             document.body.style.overflow = 'hidden';
         }
 
         function closeConfigModal() {
-            document.getElementById('configModal').style.display = 'none';
+            const modal = document.getElementById('configModal');
+            modal.classList.remove('show');
             document.body.style.overflow = 'auto';
             
             // Hide status messages
@@ -3402,7 +3409,7 @@ function displayFieldMatrix(matrixData) {
                 
                 const modal = document.getElementById('fieldDetailsModal');
                 if (modal) {
-                    modal.style.display = 'block';
+                    modal.classList.add('show');
                     document.body.style.overflow = 'hidden';
                 }
             } catch (error) {
@@ -3411,6 +3418,94 @@ function displayFieldMatrix(matrixData) {
             }
         }
 
+        function closeFieldDetailsModal() {
+            const modal = document.getElementById('fieldDetailsModal');
+            modal.classList.remove('show');
+            document.body.style.overflow = 'auto';
+        }
+        // Add this function to handle dynamic call details
+        async function showDynamicCallDetails(variableName, sourceProgram) {
+            try {
+                const response = await fetch(`/api/dynamic-call-analysis/${currentSessionId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const programAnalysis = data.dynamic_call_analysis.find(p => 
+                        p.program_name === sourceProgram && 
+                        p.variables_used.includes(variableName)
+                    );
+                    
+                    if (programAnalysis) {
+                        displayDynamicCallModal(programAnalysis, variableName);
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading dynamic call details:', error);
+            }
+        }
+
+        function displayDynamicCallModal(programAnalysis, variableName) {
+            const modalHtml = `
+                <div class="modal show" style="z-index: 10001;">
+                    <div class="modal-content" style="width: 80%; max-width: 900px;">
+                        <div class="modal-header">
+                            <h3 class="modal-title">🔄 Dynamic Call: ${variableName}</h3>
+                            <button class="close" onclick="closeDynamicCallModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+                                <div>
+                                    <h5>Dynamic Call Information</h5>
+                                    <table style="width: 100%; font-size: 0.9rem;">
+                                        <tr><td><strong>Variable Name:</strong></td><td>${variableName}</td></tr>
+                                        <tr><td><strong>Source Program:</strong></td><td>${programAnalysis.program_name}</td></tr>
+                                        <tr><td><strong>Total Dynamic Calls:</strong></td><td>${programAnalysis.total_dynamic_calls}</td></tr>
+                                        <tr><td><strong>Resolved Programs:</strong></td><td>${programAnalysis.resolved_programs.length}</td></tr>
+                                    </table>
+                                </div>
+                                <div>
+                                    <h5>Resolution Details</h5>
+                                    <div id="dynamicCallResolution">
+                                        ${programAnalysis.resolved_programs.map(prog => `
+                                            <div style="padding: 0.5rem; margin-bottom: 0.5rem; background: #f8f9fa; border-left: 3px solid #667eea; border-radius: 4px;">
+                                                <strong>${prog.program_name}</strong>
+                                                <br><small>Status: ${prog.status || 'Unknown'}</small>
+                                                <br><small>Method: ${prog.resolution_method || 'Code Analysis'}</small>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div style="margin-bottom: 2rem;">
+                                <h5>Business Logic Summary</h5>
+                                <div style="padding: 1rem; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #667eea;">
+                                    ${programAnalysis.business_logic_summary || 'Dynamic call analysis available but summary not generated'}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="analyzeVariableUsage('${variableName}')">Analyze Variable Usage</button>
+                            <button class="btn btn-secondary" onclick="askAboutDynamicCall('${variableName}')">Ask AI About This</button>
+                            <button class="btn btn-secondary" onclick="closeDynamicCallModal()">Close</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeDynamicCallModal() {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                if (modal.style.zIndex === '10001') {
+                    modal.remove();
+                }
+            });
+            document.body.style.overflow = 'auto';
+        }
         function createFieldDetailsContent(fieldDetails) {
             const operationsSummary = fieldDetails.operations ? 
                 fieldDetails.operations.map(op => 
@@ -3486,10 +3581,7 @@ function displayFieldMatrix(matrixData) {
             `;
         }
 
-        function closeFieldDetailsModal() {
-            document.getElementById('fieldDetailsModal').style.display = 'none';
-            document.body.style.overflow = 'auto';
-        }
+       
 
         function exportFieldMappings() {
             const table = document.getElementById('fieldMappingTableBody');
@@ -4828,7 +4920,7 @@ function viewLayoutFields(layoutName) {
     try {
         showLoading('Loading enhanced dependencies...');
         
-        const response = await fetch(`/api/dependencies-enhanced/${currentSessionId}`);
+        const response = await fetch(`/api/dependencies-enhanced-with-dynamic/${currentSessionId}`);
         
         if (response.ok) {
             const data = await response.json();
@@ -4914,41 +5006,65 @@ function viewLayoutFields(layoutName) {
         }
 
         function createDependencySection(title, dependencies, type) {
-            let html = `
-            <div class="dependency-section">
-                <h3>${title}</h3>
-                <div class="dependency-grid">
-            `;
-            
-            dependencies.forEach(dep => {
-                const statusIcon = getStatusIcon(dep.display_status);
-                const statusClass = getStatusClass(dep.display_status);
-                const confidenceClass = getConfidenceClass(dep.confidence_score);
-                
-                html += `
-                <div class="dependency-card ${statusClass}">
-                    <div class="confidence-indicator ${confidenceClass}">
-                        ${Math.round((dep.confidence_score || 0) * 100)}%
-                    </div>
-                    <div class="dependency-header">
-                        ${statusIcon} <strong>${dep.target_component}</strong>
-                    </div>
-                    <div class="dependency-details">
-                        <p><strong>Called from:</strong> <span>${dep.source_component}</span></p>
-                        ${type === 'dynamic' ? 
-                            `<p><strong>Variable:</strong> <span>${dep.analysis_details?.variable_name || 'Unknown'}</span></p>
-                            <p><strong>Resolution:</strong> <span>${dep.analysis_details?.resolution_method || 'Unknown'}</span></p>` : ''}
-                        ${type === 'cics' || type === 'file' ? 
-                            `<p><strong>I/O Type:</strong> <span>${dep.analysis_details?.io_direction || 'Unknown'}</span></p>
-                            <p><strong>Operations:</strong> <span>${(dep.analysis_details?.operations || []).join(', ')}</span></p>` : ''}
-                        <p><strong>Type:</strong> <span>${dep.relationship_type}</span></p>
-                    </div>
-                </div>`;
-            });
-            
-            html += '</div></div>';
-            return html;
+    let html = `
+    <div class="dependency-section">
+        <h3>${title}</h3>
+        <div class="dependency-grid">
+    `;
+    
+    dependencies.forEach(dep => {
+        const statusIcon = getStatusIcon(dep.display_status);
+        const statusClass = getStatusClass(dep.display_status);
+        const confidenceClass = getConfidenceClass(dep.confidence_score);
+        
+        // Special handling for dynamic calls
+        if (type === 'dynamic') {
+            html += `
+            <div class="dependency-card ${statusClass}">
+                <div class="confidence-indicator ${confidenceClass}">
+                    ${Math.round((dep.confidence_score || 0) * 100)}%
+                </div>
+                <div class="dependency-header">
+                    ${statusIcon} <strong>${dep.variable_name || dep.target_component}</strong>
+                </div>
+                <div class="dependency-details">
+                    <p><strong>Source Program:</strong> <span>${dep.source_component}</span></p>
+                    <p><strong>Variable:</strong> <span>${dep.variable_name || 'Unknown'}</span></p>
+                    <p><strong>Resolved Programs:</strong> <span>${dep.total_resolved_programs || 0}</span></p>
+                    <p><strong>Resolution Methods:</strong> <span>${(dep.resolution_methods || []).join(', ')}</span></p>
+                    ${dep.has_missing_programs ? '<p style="color: #dc3545;"><strong>Has Missing Programs</strong></p>' : ''}
+                </div>
+                <div style="margin-top: 1rem;">
+                    <button class="btn btn-secondary" onclick="showDynamicCallDetails('${dep.variable_name}', '${dep.source_component}')" 
+                            style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
+                        View Details
+                    </button>
+                </div>
+            </div>`;
+        } else {
+            // Regular dependency handling (existing code)
+            html += `
+            <div class="dependency-card ${statusClass}">
+                <div class="confidence-indicator ${confidenceClass}">
+                    ${Math.round((dep.confidence_score || 0) * 100)}%
+                </div>
+                <div class="dependency-header">
+                    ${statusIcon} <strong>${dep.target_component}</strong>
+                </div>
+                <div class="dependency-details">
+                    <p><strong>Called from:</strong> <span>${dep.source_component}</span></p>
+                    ${type === 'cics' || type === 'file' ? 
+                        `<p><strong>I/O Type:</strong> <span>${dep.analysis_details?.io_direction || 'Unknown'}</span></p>
+                        <p><strong>Operations:</strong> <span>${(dep.analysis_details?.operations || []).join(', ')}</span></p>` : ''}
+                    <p><strong>Type:</strong> <span>${dep.relationship_type}</span></p>
+                </div>
+            </div>`;
         }
+    });
+    
+    html += '</div></div>';
+    return html;
+}
 
         function getStatusIcon(status) {
             switch (status) {
@@ -5259,7 +5375,8 @@ function createProgramFlowView(sessionId) {
     `;
 }
 
-        async function analyzeFlow(sessionId) {
+        // Update the analyzeFlow function to use the correct session parameter
+        async function analyzeFlow() {
             const programName = document.getElementById('startingProgram').value;
             if (!programName) {
                 alert('Please enter a program name');
@@ -5269,8 +5386,8 @@ function createProgramFlowView(sessionId) {
             showLoadingSpinner('Analyzing program flow...');
             
             try {
-                // Get flow analysis
-                const flowResponse = await fetch(`/api/program-flow/${sessionId}/${programName}`);
+                // Use currentSessionId from global scope
+                const flowResponse = await fetch(`/api/program-flow/${currentSessionId}/${programName}`);
                 const flowData = await flowResponse.json();
                 
                 if (!flowData.success) {
@@ -5279,7 +5396,7 @@ function createProgramFlowView(sessionId) {
                 }
                 
                 // Get visualization data
-                const vizResponse = await fetch(`/api/program-flow-visualization/${sessionId}/${programName}`);
+                const vizResponse = await fetch(`/api/program-flow-visualization/${currentSessionId}/${programName}`);
                 const vizData = await vizResponse.json();
                 
                 if (vizData.success) {
@@ -5294,6 +5411,20 @@ function createProgramFlowView(sessionId) {
             }
         }
 
+
+        function analyzeVariableUsage(variableName) {
+            closeDynamicCallModal();
+            const chatInput = document.getElementById('chatInput');
+            chatInput.value = `Analyze the usage of variable ${variableName}. How is it populated and what programs can it call?`;
+            chatInput.focus();
+        }
+
+        function askAboutDynamicCall(variableName) {
+            closeDynamicCallModal();
+            const chatInput = document.getElementById('chatInput');
+            chatInput.value = `Tell me about the dynamic call using variable ${variableName}. What business logic determines which program gets called?`;
+            chatInput.focus();
+        }
         function renderFlowVisualization(vizData) {
             const container = document.getElementById('flowVisualization');
             

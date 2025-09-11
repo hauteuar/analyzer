@@ -2945,45 +2945,85 @@ File Content ({filename}):
     
 
     def _create_dynamic_call_dependencies(self, session_id: str, program_name: str, 
-                               dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
+                           dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
         """Create dependencies for dynamic calls with multiple possible targets - FIXED"""
         dependencies = []
         variable_name = dynamic_call.get('variable_name', 'UNKNOWN')
+        operation = dynamic_call.get('operation', 'DYNAMIC_CALL')
+        line_number = dynamic_call.get('line_number', 0)
         
         # Get resolved programs from the dynamic call analysis
         resolved_programs = dynamic_call.get('resolved_programs', [])
+        
+        logger.info(f"Processing dynamic call: {variable_name} with {len(resolved_programs)} resolved programs")
+        
         if not resolved_programs:
-            resolved_programs = [{'program_name': variable_name, 'resolution': 'unresolved', 'confidence': 0.1}]
+            # Create a fallback dependency for unresolved dynamic calls
+            logger.warning(f"No resolved programs for dynamic call {variable_name}, creating fallback dependency")
+            dependencies.append({
+                'source_component': program_name,
+                'target_component': f'DYNAMIC_{variable_name}',
+                'relationship_type': 'DYNAMIC_PROGRAM_CALL',
+                'interface_type': 'COBOL',
+                'confidence_score': 0.1,
+                'dependency_status': 'unresolved',
+                'analysis_details_json': json.dumps({
+                    'call_type': 'dynamic',
+                    'variable_name': variable_name,
+                    'operation': operation,
+                    'resolution_method': 'unresolved',
+                    'line_number': line_number,
+                    'business_context': f"Unresolved dynamic call via {variable_name}"
+                }),
+                'source_code_evidence': f"Line {line_number}: {operation} PROGRAM({variable_name}) - unresolved"
+            })
+            return dependencies
         
-        logger.info(f"Creating dependencies for dynamic call with {len(resolved_programs)} resolved programs")
-        
-        for resolved_program in resolved_programs:
+        # Create a dependency for EACH resolved program
+        for i, resolved_program in enumerate(resolved_programs):
             target_prog = resolved_program.get('program_name')
             if target_prog and self._is_valid_dependency_target(target_prog, program_name):
                 
                 # Check if target program is uploaded
                 dependency_status = 'present' if target_prog.upper() in uploaded_programs else 'missing'
                 
+                # Build comprehensive analysis details
+                analysis_details = {
+                    'call_type': 'dynamic',
+                    'variable_name': variable_name,
+                    'operation': operation,
+                    'resolution_method': resolved_program.get('resolution', 'unknown'),
+                    'source_info': resolved_program.get('source', ''),
+                    'line_number': line_number,
+                    'confidence': resolved_program.get('confidence', 0.5),
+                    'resolution_index': i + 1,
+                    'total_resolutions': len(resolved_programs),
+                    'business_context': f"Dynamic call via {variable_name} -> {target_prog}",
+                    
+                    # Include construction details if available
+                    'construction_details': resolved_program.get('construction_details', {}),
+                    'group_structure_used': dynamic_call.get('group_structure_used', False),
+                    
+                    # Add all resolved programs for context
+                    'all_resolved_programs': [p.get('program_name') for p in resolved_programs],
+                    'variable_resolution_summary': f"{variable_name} resolves to {len(resolved_programs)} programs: {[p.get('program_name') for p in resolved_programs]}"
+                }
+                
                 dependency = {
                     'source_component': program_name,
                     'target_component': target_prog,
                     'relationship_type': 'DYNAMIC_PROGRAM_CALL',
-                    'interface_type': 'CICS',
+                    'interface_type': 'COBOL',
                     'confidence_score': resolved_program.get('confidence', 0.5),
                     'dependency_status': dependency_status,
-                    'analysis_details_json': json.dumps({
-                        'call_type': 'dynamic',
-                        'variable_name': variable_name,
-                        'resolution_method': resolved_program.get('resolution', 'unknown'),
-                        'source_info': resolved_program.get('source', ''),
-                        'line_number': dynamic_call.get('line_number', 0),
-                        'business_context': f"Dynamic call via {variable_name} variable -> {target_prog}"
-                    }),
-                    'source_code_evidence': f"Line {dynamic_call.get('line_number', 0)}: {dynamic_call.get('operation')} PROGRAM({variable_name}) -> {target_prog}"
+                    'analysis_details_json': json.dumps(analysis_details),
+                    'source_code_evidence': f"Line {line_number}: {operation} PROGRAM({variable_name}) -> {target_prog} via {resolved_program.get('resolution', 'unknown')}"
                 }
+                
                 dependencies.append(dependency)
-                logger.info(f"Created dynamic dependency: {program_name} -> {target_prog} (via {variable_name})")
+                logger.info(f"Created dynamic dependency: {program_name} -> {target_prog} (via {variable_name}, method: {resolved_program.get('resolution')})")
         
+        logger.info(f"Total dynamic dependencies created for {variable_name}: {len(dependencies)}")
         return dependencies
 
     def _create_program_call_dependency(self, program_name: str, call: Dict, uploaded_programs: set) -> Optional[Dict]:

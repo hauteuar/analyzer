@@ -2391,7 +2391,83 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error in enhanced dependency storage: {str(e)}")
             raise
-
+    
+    def get_enhanced_dependencies_with_dynamic_summary(self, session_id: str) -> List[Dict]:
+        """Get enhanced dependencies with better dynamic call summarization"""
+        try:
+            # Get regular enhanced dependencies
+            dependencies = self.get_enhanced_dependencies(session_id)
+            
+            # Group dynamic calls by variable for better display
+            dynamic_call_groups = {}
+            other_dependencies = []
+            
+            for dep in dependencies:
+                if dep.get('relationship_type') == 'DYNAMIC_PROGRAM_CALL':
+                    analysis = dep.get('analysis_details', {})
+                    variable_name = analysis.get('variable_name', 'UNKNOWN')
+                    
+                    if variable_name not in dynamic_call_groups:
+                        dynamic_call_groups[variable_name] = {
+                            'variable_name': variable_name,
+                            'source_program': dep.get('source_component'),
+                            'operation': analysis.get('operation', 'DYNAMIC_CALL'),
+                            'line_number': analysis.get('line_number', 0),
+                            'resolved_programs': [],
+                            'total_programs': 0,
+                            'missing_programs': 0,
+                            'present_programs': 0,
+                            'resolution_methods': set()
+                        }
+                    
+                    group = dynamic_call_groups[variable_name]
+                    group['resolved_programs'].append({
+                        'program_name': dep.get('target_component'),
+                        'status': dep.get('dependency_status'),
+                        'confidence': dep.get('confidence_score'),
+                        'resolution_method': analysis.get('resolution_method')
+                    })
+                    group['total_programs'] += 1
+                    group['resolution_methods'].add(analysis.get('resolution_method', 'unknown'))
+                    
+                    if dep.get('dependency_status') == 'missing':
+                        group['missing_programs'] += 1
+                    elif dep.get('dependency_status') == 'present':
+                        group['present_programs'] += 1
+                else:
+                    other_dependencies.append(dep)
+            
+            # Convert groups back to individual dependencies with summary info
+            enhanced_dependencies = other_dependencies.copy()
+            
+            for variable_name, group in dynamic_call_groups.items():
+                # Add summary information to each dependency in the group
+                for i, resolved_prog in enumerate(group['resolved_programs']):
+                    # Find the original dependency
+                    original_dep = next((d for d in dependencies 
+                                    if (d.get('relationship_type') == 'DYNAMIC_PROGRAM_CALL' and 
+                                        d.get('target_component') == resolved_prog['program_name'] and
+                                        d.get('analysis_details', {}).get('variable_name') == variable_name)), None)
+                    
+                    if original_dep:
+                        # Enhance with group summary
+                        enhanced_dep = original_dep.copy()
+                        enhanced_dep['dynamic_call_summary'] = {
+                            'variable_name': variable_name,
+                            'total_resolved_programs': group['total_programs'],
+                            'all_programs': [p['program_name'] for p in group['resolved_programs']],
+                            'missing_count': group['missing_programs'],
+                            'present_count': group['present_programs'],
+                            'resolution_methods': list(group['resolution_methods']),
+                            'group_index': i + 1
+                        }
+                        enhanced_dependencies.append(enhanced_dep)
+            
+            return enhanced_dependencies
+            
+        except Exception as e:
+            logger.error(f"Error getting enhanced dependencies with dynamic summary: {str(e)}")
+            return self.get_enhanced_dependencies(session_id)
     # Add method to get missing dependencies summary
     def get_missing_dependencies_summary(self, session_id: str) -> Dict:
         """Get summary of missing dependencies"""
