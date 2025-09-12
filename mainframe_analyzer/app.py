@@ -23,14 +23,37 @@ from modules.component_extractor import ComponentExtractor
 from modules.program_flow_analyzer import ProgramFlowAnalyzer
 logger = logging.getLogger(__name__)
 # CHANGE 1: Import the Agentic RAG system instead of regular chat
+AGENTIC_RAG_AVAILABLE = False
 try:
-    from modules.agentic_rag_chat import AgenticRAGChatManager, create_agentic_rag_chat_manager
+    # Try to import the rewritten Agentic RAG system
+    from modules.agentic_rag_chat import AgenticRAGChatManager, VectorStore
     AGENTIC_RAG_AVAILABLE = True
-    logger.info("Agentic RAG system imported successfully")
+    logger.info("✅ Agentic RAG system available")
+    
+    # Try to import enhanced analyzers
+    try:
+        from modules.agentic_rag_chat import EnhancedFieldAnalyzer, EnhancedProgramFlowAnalyzer
+        from modules.enhanced_field_query_analyzer import EnhancedFieldQueryAnalyzer
+        from modules.program_flow_query_analyzer import ProgramFlowQueryAnalyzer
+        ENHANCED_ANALYZERS_AVAILABLE = True
+        logger.info("✅ Enhanced analyzers available")
+    except ImportError as enhanced_error:
+        ENHANCED_ANALYZERS_AVAILABLE = False
+        logger.warning(f"⚠️  Enhanced analyzers not available: {enhanced_error}")
+        
 except ImportError as e:
-    logger.warning(f"Agentic RAG not available, falling back to basic chat: {e}")
-    from modules.chat_manager import ChatManager
+    logger.warning(f"⚠️  Agentic RAG not available, falling back to basic chat: {e}")
     AGENTIC_RAG_AVAILABLE = False
+    ENHANCED_ANALYZERS_AVAILABLE = False
+    
+    # Import fallback chat manager
+    try:
+        from modules.chat_manager import ChatManager
+        logger.info("✅ Basic chat manager available")
+    except ImportError as fallback_error:
+        logger.error(f"❌ Even basic chat manager failed: {fallback_error}")
+        raise Exception("No chat system available")
+
 
 app = Flask(__name__)
 CORS(app)
@@ -73,59 +96,116 @@ class MainframeAnalyzer:
         self.chat_system_type = "unknown"
         try:
             if AGENTIC_RAG_AVAILABLE:
-                try:
-                    
-                        from modules.chat_manager import ChatManager
-                        fallback_chat = ChatManager(self.llm_client, self.token_manager, self.db_manager)
-                        
-                        self.chat_manager = AgenticRAGChatManager(
-                            self.llm_client, 
-                            self.db_manager,
-                            fallback_chat_manager=fallback_chat
-                        )
-                        
-                        # CRITICAL: Force initialize both enhanced components
-                        field_ready = self.chat_manager.initialize_enhanced_field_analysis()
-                        flow_ready = self.chat_manager.initialize_program_flow_analysis()
-                        
-                        # Set proper system type based on what's available
-                        if field_ready and flow_ready:
-                            self.chat_system_type = "agentic_rag_super_enhanced"
-                            logger.info("✅ Super Enhanced RAG with field + program flow analysis")
-                        elif field_ready:
-                            self.chat_system_type = "agentic_rag_field_enhanced" 
-                            logger.info("✅ Field Enhanced RAG")
-                        elif flow_ready:
-                            self.chat_system_type = "agentic_rag_flow_enhanced"
-                            logger.info("✅ Program Flow Enhanced RAG")
-                        else:
-                            self.chat_system_type = "agentic_rag_basic"
-                            logger.info("✅ Basic RAG")
-                        
-                except Exception as init_error:
-                    logger.error(f"RAG initialization failed: {init_error}")
+                logger.info("🤖 Initializing Enhanced RAG System...")
+                
+                # Create vector store for RAG
+                from modules.agentic_rag_chat import VectorStore
+                vector_store = VectorStore(self.db_manager)
+                
+                # Create fallback chat manager first
+                from modules.chat_manager import ChatManager
+                fallback_chat = ChatManager(self.llm_client, self.token_manager, self.db_manager)
+                
+                # Initialize the rewritten RAG system
+                self.chat_manager = AgenticRAGChatManager(
+                    self.llm_client, 
+                    self.db_manager,
+                    vector_store=vector_store
+                )
+                
+                # Try to initialize enhanced components
+                enhanced_field_ready = self._initialize_enhanced_field_analysis()
+                enhanced_flow_ready = self._initialize_enhanced_program_flow()
+                
+                # Set system type based on what's available
+                if enhanced_field_ready and enhanced_flow_ready:
+                    self.chat_system_type = "agentic_rag_super_enhanced"
+                    logger.info("✅ Super Enhanced RAG: Field + Program Flow Analysis")
+                elif enhanced_field_ready:
+                    self.chat_system_type = "agentic_rag_field_enhanced" 
+                    logger.info("✅ Field Enhanced RAG")
+                elif enhanced_flow_ready:
+                    self.chat_system_type = "agentic_rag_flow_enhanced"
+                    logger.info("✅ Program Flow Enhanced RAG")
+                else:
+                    self.chat_system_type = "agentic_rag_basic"
+                    logger.info("✅ Basic RAG System")
+                
             else:
+                logger.info("📝 RAG not available, using basic chat")
                 from modules.chat_manager import ChatManager
                 self.chat_manager = ChatManager(self.llm_client, self.token_manager, self.db_manager)
                 self.chat_system_type = "basic_chat"
-                logger.info("Initialized basic chat system")
+                
         except Exception as e:
-            logger.error(f"Failed to initialize chat system: {e}")
+            logger.error(f"❌ Chat system initialization failed: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
             # Ultimate fallback
-            self.chat_manager = ChatManager(self.llm_client, self.token_manager, self.db_manager)
-            self.chat_system_type = "fallback_chat"
+            try:
+                from modules.chat_manager import ChatManager
+                self.chat_manager = ChatManager(self.llm_client, self.token_manager, self.db_manager)
+                self.chat_system_type = "fallback_chat"
+                logger.info("🔄 Using fallback chat system")
+            except Exception as fallback_error:
+                logger.error(f"❌ Even fallback failed: {str(fallback_error)}")
+                raise Exception("Failed to initialize any chat system")
         
         # Initialize database
         self.db_manager.initialize_database()
         
-        # CHANGE 3: Update database for RAG if using Agentic system
-        if self.chat_system_type == "agentic_rag":
+        # Update database for RAG if using enhanced system
+        if "agentic_rag" in self.chat_system_type:
             try:
                 self._update_database_for_rag()
-                logger.info("Database updated for RAG system")
+                logger.info("📊 Database updated for RAG system")
             except Exception as e:
-                logger.warning(f"Could not update database for RAG: {e}")
+                logger.warning(f"⚠️  Could not update database for RAG: {e}")
     
+    def _initialize_enhanced_field_analysis(self) -> bool:
+        """Initialize enhanced field analysis components"""
+        try:
+            # Import enhanced field analyzer from the rewritten RAG system
+            from modules.agentic_rag_chat import EnhancedFieldAnalyzer
+            
+            # Create enhanced field analyzer
+            enhanced_field_analyzer = EnhancedFieldAnalyzer(
+                self.db_manager, 
+                getattr(self.chat_manager, 'vector_store', None)
+            )
+            
+            # Attach to chat manager
+            self.chat_manager.enhanced_field_analyzer = enhanced_field_analyzer
+            
+            logger.info("🔬 Enhanced field analysis initialized")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Enhanced field analysis failed: {str(e)}")
+            return False
+    
+    def _initialize_enhanced_program_flow(self) -> bool:
+        """Initialize enhanced program flow analysis components"""
+        try:
+            # Import enhanced program flow analyzer
+            from modules.agentic_rag_chat import EnhancedProgramFlowAnalyzer
+            
+            # Create enhanced program flow analyzer
+            enhanced_program_flow = EnhancedProgramFlowAnalyzer(
+                self.db_manager,
+                getattr(self.chat_manager, 'vector_store', None)
+            )
+            
+            # Attach to chat manager
+            self.chat_manager.enhanced_program_flow_analyzer = enhanced_program_flow
+            
+            logger.info("🔄 Enhanced program flow analysis initialized")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Enhanced program flow analysis failed: {str(e)}")
+            return False
+        
     def _update_database_for_rag(self):
         """Update database schema for RAG system"""
         try:
@@ -293,7 +373,7 @@ class MainframeAnalyzer:
         return session_id
     
     def upload_file(self, session_id: str, file_content: str, file_name: str, file_type: str) -> Dict:
-        """Upload and analyze mainframe file"""
+        """Upload and analyze mainframe file with enhanced RAG initialization"""
         logger.info(f"🚀 Starting analysis of {file_name} ({file_type}) - Session: {session_id[:8]}...")
         logger.info(f"📏 File size: {len(file_content)} characters, {len(file_content.split())} words")
         
@@ -329,34 +409,11 @@ class MainframeAnalyzer:
             storage_time = time.time() - storage_start
             logger.info(f"💾 Database storage completed in {storage_time:.2f}s")
             
-            # CHANGE 4: Initialize RAG system for this session after upload
-            if self.chat_system_type == "agentic_rag":
-                try:
-                    logger.info("🤖 Initializing RAG system for session...")
-                    rag_start = time.time()
-                    self.chat_manager.initialize_session(session_id)
-                    rag_time = time.time() - rag_start
-                    logger.info(f"🤖 RAG system initialized in {rag_time:.2f}s")
-                except Exception as e:
-                    logger.error(f"Error initializing RAG system: {e}")
+            # ENHANCED: Initialize RAG system for this session after upload
+            rag_features_status = self._initialize_session_rag_features(session_id)
             
             total_time = time.time() - start_time
             logger.info(f"🎉 Analysis of {file_name} completed successfully in {total_time:.2f}s")
-            if self.chat_system_type in ["agentic_rag_enhanced", "agentic_rag"]:
-                try:
-                    logger.info("Initializing enhanced RAG system for session...")
-                    rag_start = time.time()
-                    
-                    # Use enhanced initialization if available
-                    if hasattr(self.chat_manager, 'initialize_session_enhanced'):
-                        self.chat_manager.initialize_session(session_id)
-                    else:
-                        self.chat_manager.initialize_session(session_id)
-                    
-                    rag_time = time.time() - rag_start
-                    logger.info(f"Enhanced RAG system initialized in {rag_time:.2f}s")
-                except Exception as e:
-                    logger.error(f"Error initializing enhanced RAG system: {e}")
             
             return {
                 'success': True,
@@ -365,9 +422,11 @@ class MainframeAnalyzer:
                 'processing_time': total_time,
                 'component_breakdown': component_types,
                 'chat_system_ready': True,
-                'field_analysis_ready': "field" in self.chat_system_type or "super" in self.chat_system_type,
-                'program_flow_ready': "super" in self.chat_system_type,
-                'comprehensive_analysis': self.chat_system_type == "agentic_rag_super_enhanced"
+                'field_analysis_ready': rag_features_status['field_analysis_ready'],
+                'program_flow_ready': rag_features_status['program_flow_ready'], 
+                'comprehensive_analysis': rag_features_status['comprehensive_analysis'],
+                'rag_system_type': self.chat_system_type,
+                'rag_features_initialized': rag_features_status['features_initialized']
             }
             
         except Exception as e:
@@ -378,8 +437,68 @@ class MainframeAnalyzer:
                 'error': str(e),
                 'file_name': file_name
             }
-    
 
+    def _initialize_session_rag_features(self, session_id: str) -> Dict:
+        """Initialize RAG features after file upload"""
+        
+        features_status = {
+            'features_initialized': False,
+            'field_analysis_ready': False,
+            'program_flow_ready': False,
+            'comprehensive_analysis': False,
+            'initialization_time': 0
+        }
+        
+        try:
+            init_start = time.time()
+            
+            if "agentic_rag" in self.chat_system_type:
+                logger.info("🤖 Initializing enhanced RAG features for session...")
+                
+                # Initialize session in chat manager
+                if hasattr(self.chat_manager, 'initialize_session'):
+                    self.chat_manager.initialize_session(session_id)
+                    features_status['features_initialized'] = True
+                    logger.info("✅ RAG session initialized")
+                
+                # Check enhanced field analysis
+                if hasattr(self.chat_manager, 'enhanced_field_analyzer'):
+                    features_status['field_analysis_ready'] = True
+                    logger.info("✅ Enhanced field analysis ready")
+                
+                # Check enhanced program flow analysis  
+                if hasattr(self.chat_manager, 'enhanced_program_flow_analyzer'):
+                    features_status['program_flow_ready'] = True
+                    logger.info("✅ Enhanced program flow analysis ready")
+                
+                # Set comprehensive status
+                if features_status['field_analysis_ready'] and features_status['program_flow_ready']:
+                    features_status['comprehensive_analysis'] = True
+                    logger.info("✅ Comprehensive analysis capabilities active")
+                
+            else:
+                logger.info("📝 Basic chat system - no enhanced features to initialize")
+                features_status['features_initialized'] = True  # Basic system is ready
+            
+            features_status['initialization_time'] = time.time() - init_start
+            logger.info(f"🎯 RAG feature initialization completed in {features_status['initialization_time']:.2f}s")
+            
+        except Exception as e:
+            logger.error(f"❌ Error initializing RAG features: {str(e)}")
+            # Don't fail the whole upload for RAG issues
+            features_status['features_initialized'] = False
+        
+        return features_status
+    def initialize_session(self, session_id: str):
+        """Initialize RAG session - called after file upload"""
+        try:
+            if hasattr(self.chat_manager, '_initialize_session'):
+                self.chat_manager._initialize_session(session_id)
+                logger.info(f"🔄 RAG session {session_id[:8]} initialized")
+            else:
+                logger.info(f"📝 Basic chat - no session initialization needed")
+        except Exception as e:
+            logger.error(f"❌ Session initialization failed: {str(e)}")
     
     def analyze_field_mapping(self, session_id: str, target_file: str) -> Dict:
         """Analyze field mapping for target file"""
@@ -500,7 +619,7 @@ class MainframeAnalyzer:
     
     # CHANGE 6: Add method to get chat system health
     def get_chat_system_health(self) -> Dict:
-        """Enhanced chat system health with field analysis status"""
+        """Enhanced chat system health with proper status"""
         try:
             health = {
                 'system_type': self.chat_system_type,
@@ -508,50 +627,58 @@ class MainframeAnalyzer:
                 'features': []
             }
             
-            if self.chat_system_type == "agentic_rag_enhanced":
-                # Get enhanced RAG system health
-                if hasattr(self.chat_manager, 'get_system_health'):
-                    rag_health = self.chat_manager.get_system_health()
-                    health.update(rag_health)
-                
-                health['features'] = [
-                    'Vector Search',
-                    'Query Analysis', 
-                    'Context Retrieval',
-                    'Enhanced Field Analysis',  # NEW
-                    'Group Structure Analysis',  # NEW
-                    'Conditional Assignment Tracking',  # NEW
-                    'Transaction Flow Analysis',  # NEW
-                    'Cross-Program Usage Analysis',  # NEW
-                    'Adaptive Responses',
-                    'Performance Caching'
-                ]
-                
-                # Check field analysis component status
-                field_analysis_status = {
-                    'enhanced_field_analyzer': hasattr(self.chat_manager, 'enhanced_field_analyzer') and 
-                                             self.chat_manager.enhanced_field_analyzer is not None,
-                    'enhanced_field_query_analyzer': hasattr(self.chat_manager, 'enhanced_field_query_analyzer') and 
-                                                   self.chat_manager.enhanced_field_query_analyzer is not None
-                }
-                health['field_analysis_components'] = field_analysis_status
-                
-            elif self.chat_system_type == "agentic_rag":
+            if "agentic_rag" in self.chat_system_type:
                 # Get RAG system health
                 if hasattr(self.chat_manager, 'get_system_health'):
                     rag_health = self.chat_manager.get_system_health()
                     health.update(rag_health)
+                
+                # Enhanced features based on system type
+                if self.chat_system_type == "agentic_rag_super_enhanced":
                     health['features'] = [
                         'Vector Search',
-                        'Query Analysis',
+                        'Query Classification', 
                         'Context Retrieval',
-                        'Adaptive Responses',
-                        'Performance Caching'
+                        'Enhanced Field Analysis',
+                        'Program Flow Analysis', 
+                        'Dynamic Call Resolution',
+                        'Business Logic Extraction',
+                        'Cross-Program Analysis',
+                        'Specialized Handlers',
+                        'Performance Monitoring'
                     ]
-                   
-                else:
-                    health['features'] = ['Basic RAG']
-                    health['features'].append('Basic Field Analysis')
+                elif self.chat_system_type == "agentic_rag_field_enhanced":
+                    health['features'] = [
+                        'Vector Search',
+                        'Query Classification',
+                        'Enhanced Field Analysis',
+                        'Group Structure Analysis',
+                        'Conditional Assignment Tracking',
+                        'Business Logic Extraction'
+                    ]
+                elif self.chat_system_type == "agentic_rag_flow_enhanced":
+                    health['features'] = [
+                        'Vector Search',
+                        'Query Classification', 
+                        'Program Flow Analysis',
+                        'Dynamic Call Resolution',
+                        'Cross-Program Analysis'
+                    ]
+                else:  # basic RAG
+                    health['features'] = [
+                        'Vector Search',
+                        'Query Classification',
+                        'Context Retrieval',
+                        'Basic Analysis'
+                    ]
+                
+                # Component status
+                health['enhanced_components'] = {
+                    'field_analyzer': hasattr(self.chat_manager, 'enhanced_field_analyzer'),
+                    'program_flow_analyzer': hasattr(self.chat_manager, 'enhanced_program_flow_analyzer'),
+                    'vector_store': hasattr(self.chat_manager, 'vector_store') and self.chat_manager.vector_store is not None
+                }
+                
             else:
                 health['features'] = ['Basic Chat', 'Field Analysis', 'Source Code Context']
             

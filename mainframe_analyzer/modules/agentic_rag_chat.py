@@ -1510,7 +1510,7 @@ class ResponseGenerator:
             f"Try providing more specific field names, program names, or uploading additional COBOL files."
         )
 
-class RewrittenAgenticRAGChatManager:
+class AgenticRAGChatManager:
     """Complete rewritten Agentic RAG Chat Manager with clean architecture"""
     
     def __init__(self, llm_client, db_manager, vector_store=None):
