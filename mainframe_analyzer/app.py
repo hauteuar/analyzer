@@ -739,7 +739,7 @@ class MainframeAnalyzer:
                     if field_name.upper() in op.get('sql', '').upper():
                         return {
                             'mapped_to_db2': True,
-                            'table_operations': self._extract_table_names_from_sql(op['sql']),
+                            'table_operations': self.component_extractor._extract_table_names_from_sql(op['sql']),
                             'sql_context': op['sql'][:200]
                         }
         
