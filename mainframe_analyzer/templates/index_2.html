@@ -1507,6 +1507,8 @@
         border-radius: 5px;
         margin-bottom: 20px;
         min-height: 600px;
+        overflow-x: auto;
+        overflow-y: auto;
     }
     
     .flow-details {
@@ -2897,18 +2899,17 @@
     
     html += createProgramLayer('Core Programs', coreItems, 'core-program');
     
-    // Add arrows to called programs if any exist
+    // Add simple arrow to called programs if any exist
     if (categorized.calledPrograms && categorized.calledPrograms.length > 0) {
-        html += '<div style="position: relative; height: 80px; display: flex; justify-content: center; align-items: center;">';
-        html += createProgramCallArrows(categorized.calledPrograms);
-        html += '</div>';
+        html += '<div class="flow-arrow">↓</div>';
+        html += '<div style="text-align: center; margin: 10px 0; color: #667eea; font-size: 0.9rem;">Calls the following programs:</div>';
     } else {
         html += '<div class="flow-arrow">↓</div>';
     }
     
-    // Called Programs Level
+    // Called Programs Level - NO SEPARATE ARROWS
     if (categorized.calledPrograms && categorized.calledPrograms.length > 0) {
-        html += createProgramLayerWithArrows('Called Programs', categorized.calledPrograms, 'called-program');
+        html += createProgramLayer('Called Programs', categorized.calledPrograms, 'called-program');
         html += '<div class="flow-arrow">↓</div>';
     }
     
@@ -2964,6 +2965,7 @@
     html += '</div>';
     return html;
 }
+
 
 function createDB2Component(table, className) {
     const tableIcon = '🗃️';
@@ -3194,30 +3196,9 @@ function analyzeDB2TableFields(tableName) {
     return null;
 }
         function createProgramCallArrows(calledPrograms) {
-            let html = '<div class="program-call-arrows" style="display: flex; justify-content: center; align-items: center; gap: 1rem; height: 60px; margin: 1rem 0;">';
-            
-            calledPrograms.slice(0, 5).forEach((program, index) => {
-                const arrowIcon = getCallArrowIcon(program.callType);
-                html += `
-                    <div style="display: flex; flex-direction: column; align-items: center; margin: 0 1rem;">
-                        <div style="font-size: 1.8rem; color: #667eea; text-shadow: 0 2px 4px rgba(0,0,0,0.3); margin-bottom: 0.2rem;">${arrowIcon}</div>
-                        <div style="font-size: 0.7rem; color: #666; text-align: center; max-width: 60px;">${program.name.substring(0, 8)}</div>
-                    </div>
-                `;
-            });
-            
-            if (calledPrograms.length > 5) {
-                html += `
-                    <div style="display: flex; flex-direction: column; align-items: center; margin: 0 1rem;">
-                        <div style="font-size: 1.5rem; color: #999;">...</div>
-                        <div style="font-size: 0.7rem; color: #666;">+${calledPrograms.length - 5} more</div>
-                    </div>
-                `;
-            }
-            
-            html += '</div>';
-            return html;
-        }
+    // Don't show individual arrows here - they'll be drawn as proper connections
+    return '<div style="height: 20px; display: flex; justify-content: center; align-items: center; color: #667eea; font-weight: bold;">↓ Calls Programs Below ↓</div>';
+}
 
         function createProgramLayer(title, items, className) {
             let html = `
@@ -6090,7 +6071,7 @@ function drawEnhancedEdgeWithConnection(selection, edge) {
     const markerEnd = getMarkerEnd(edge);
     const strokeColor = getEdgeColor(edge);
     
-    // FIXED: Draw enhanced path with proper curves
+    // FIXED: Draw enhanced path with proper curves - DRAW PATH FIRST
     const path = selection.append('path')
         .attr('class', `flow-edge ${edgeClass}`)
         .attr('d', createEnhancedPath(sourcePoint, targetPoint, edge))
@@ -6104,20 +6085,20 @@ function drawEnhancedEdgeWithConnection(selection, edge) {
         path.attr('stroke-dasharray', '8,4');
     }
     
-    // FIXED: Add proper edge labels
+    // FIXED: Add proper edge labels AFTER the path
     if (edge.label || edge.variable_name) {
         const midPoint = getMidPoint(sourcePoint, targetPoint);
         
-        // Label background
+        // Label background - smaller and better positioned
         selection.append('rect')
-            .attr('x', midPoint.x - 30)
-            .attr('y', midPoint.y - 8)
-            .attr('width', 60)
-            .attr('height', 16)
+            .attr('x', midPoint.x - 25)
+            .attr('y', midPoint.y - 6)
+            .attr('width', 50)
+            .attr('height', 12)
             .attr('fill', 'white')
             .attr('stroke', strokeColor)
             .attr('stroke-width', 1)
-            .attr('rx', 3);
+            .attr('rx', 2);
         
         // Label text
         selection.append('text')
@@ -6125,10 +6106,10 @@ function drawEnhancedEdgeWithConnection(selection, edge) {
             .attr('y', midPoint.y)
             .attr('text-anchor', 'middle')
             .attr('dy', '0.35em')
-            .attr('font-size', '10px')
+            .attr('font-size', '9px')
             .attr('font-weight', 'bold')
             .attr('fill', strokeColor)
-            .text(edge.label || edge.variable_name || '');
+            .text((edge.label || edge.variable_name || '').substring(0, 8));
     }
 }
 
@@ -6388,17 +6369,47 @@ function addEnhancedInteractivity(nodes, edges) {
     });
     
     nodes.on('mouseover', function(event, d) {
+        // Use CSS transform instead of D3 style transform to avoid positioning issues
         d3.select(this)
-            .style('transform', 'scale(1.05)')
+            .transition()
+            .duration(200)
+            .attr('transform', function() {
+                const currentTransform = d3.select(this).attr('transform');
+                // Extract current translate values
+                const translateMatch = currentTransform.match(/translate\(([^,]+),([^)]+)\)/);
+                if (translateMatch) {
+                    const x = parseFloat(translateMatch[1]);
+                    const y = parseFloat(translateMatch[2]);
+                    return `translate(${x},${y}) scale(1.05)`;
+                }
+                return currentTransform + ' scale(1.05)';
+            })
             .style('cursor', 'pointer');
+        
         highlightConnectedPaths(d, edges);
     });
     
     nodes.on('mouseout', function(event, d) {
-        d3.select(this).style('transform', 'scale(1)');
+        // Reset to original transform
+        d3.select(this)
+            .transition()
+            .duration(200)
+            .attr('transform', function() {
+                const currentTransform = d3.select(this).attr('transform');
+                // Remove scale transformation, keep translate
+                const translateMatch = currentTransform.match(/translate\(([^,]+),([^)]+)\)/);
+                if (translateMatch) {
+                    const x = parseFloat(translateMatch[1]);
+                    const y = parseFloat(translateMatch[2]);
+                    return `translate(${x},${y})`;
+                }
+                return currentTransform.replace(/ scale\([^)]+\)/, '');
+            });
+        
         resetPathHighlights();
     });
 }
+
 
 function highlightConnectedPaths(node, edges) {
     // Dim all edges first
@@ -6972,16 +6983,44 @@ function addInteractivity(nodes, edges) {
     });
     
     nodes.on('mouseover', function(event, d) {
-        d3.select(this).style('transform', 'scale(1.1)');
+        // Fixed hover transform
+        d3.select(this)
+            .transition()
+            .duration(200)
+            .attr('transform', function() {
+                const currentTransform = d3.select(this).attr('transform');
+                const translateMatch = currentTransform.match(/translate\(([^,]+),([^)]+)\)/);
+                if (translateMatch) {
+                    const x = parseFloat(translateMatch[1]);
+                    const y = parseFloat(translateMatch[2]);
+                    return `translate(${x},${y}) scale(1.1)`;
+                }
+                return currentTransform + ' scale(1.1)';
+            })
+            .style('cursor', 'pointer');
+        
         highlightConnectedComponents(d);
     });
     
     nodes.on('mouseout', function(event, d) {
-        d3.select(this).style('transform', 'scale(1)');
+        // Reset transform properly
+        d3.select(this)
+            .transition()
+            .duration(200)
+            .attr('transform', function() {
+                const currentTransform = d3.select(this).attr('transform');
+                const translateMatch = currentTransform.match(/translate\(([^,]+),([^)]+)\)/);
+                if (translateMatch) {
+                    const x = parseFloat(translateMatch[1]);
+                    const y = parseFloat(translateMatch[2]);
+                    return `translate(${x},${y})`;
+                }
+                return currentTransform.replace(/ scale\([^)]+\)/, '');
+            });
+        
         resetHighlights();
     });
 }
-
 function highlightConnectedComponents(node) {
     // Check if edges data is available
     const edges = window.currentFlowEdges;
