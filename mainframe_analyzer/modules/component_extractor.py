@@ -3077,11 +3077,30 @@ File Content ({filename}):
             logger.error(f"Error getting file-layout association for {file_name}: {str(e)}")
             return None
     
+    def _debug_group_variable_resolution(self, dynamic_call: Dict):
+        """Debug helper to understand group variable resolution issues"""
+        variable_name = dynamic_call.get('variable_name', 'UNKNOWN')
+        resolved_programs = dynamic_call.get('resolved_programs', [])
+        
+        logger.info(f"=== DEBUG: Group Variable {variable_name} ===")
+        logger.info(f"Resolved programs type: {type(resolved_programs)}")
+        logger.info(f"Resolved programs length: {len(resolved_programs) if resolved_programs else 0}")
+        logger.info(f"Resolved programs content: {resolved_programs}")
+        
+        if resolved_programs:
+            for i, prog in enumerate(resolved_programs):
+                logger.info(f"  Program {i+1}: {prog} (type: {type(prog)})")
+                if isinstance(prog, dict):
+                    logger.info(f"    Keys: {list(prog.keys())}")
+                    logger.info(f"    program_name: {prog.get('program_name')}")
+        
+        logger.info("=== END DEBUG ===")
 
     def _create_dynamic_call_dependencies(self, session_id: str, program_name: str, 
-                                          dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
-        """FIXED: Create dependencies for dynamic calls with proper missing program handling"""
+                                      dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
+        """FIXED: Create dependencies for dynamic calls with proper group variable handling"""
         dependencies = []
+        self._debug_group_variable_resolution(dynamic_call)
         variable_name = dynamic_call.get('variable_name', 'UNKNOWN')
         operation = dynamic_call.get('operation', 'DYNAMIC_CALL')
         line_number = dynamic_call.get('line_number', 0)
@@ -3090,12 +3109,12 @@ File Content ({filename}):
         
         logger.info(f"Processing dynamic call: {variable_name} with {len(resolved_programs)} resolved programs")
         
-        if not resolved_programs:
-            # FIXED: Create fallback dependency for unresolved with proper program name
+        # FIXED: Handle empty resolved programs
+        if not resolved_programs or len(resolved_programs) == 0:
             unresolved_program_name = f"UNRESOLVED_{variable_name}"
             dependencies.append({
                 'source_component': program_name,
-                'target_component': unresolved_program_name,  # FIXED: Proper string name
+                'target_component': unresolved_program_name,
                 'relationship_type': 'DYNAMIC_PROGRAM_CALL',
                 'interface_type': 'COBOL',
                 'confidence_score': 0.1,
@@ -3111,68 +3130,76 @@ File Content ({filename}):
                 }),
                 'source_code_evidence': f"Line {line_number}: {operation} PROGRAM({variable_name}) - unresolved"
             })
+            logger.warning(f"No resolved programs for {variable_name}, created unresolved entry")
             return dependencies
         
-        # FIXED: Create individual dependencies for EACH resolved program with proper names
+        # FIXED: Process each resolved program individually
         for i, resolved_program in enumerate(resolved_programs):
-            # FIXED: Ensure target_prog is always a string, not an object
-            if isinstance(resolved_program, dict):
-                target_prog = resolved_program.get('program_name')
-            elif isinstance(resolved_program, str):
-                target_prog = resolved_program
-            else:
-                target_prog = str(resolved_program)
-            
-            # FIXED: Validate target_prog is a valid string
-            if not target_prog or target_prog in ['', 'None', 'undefined']:
-                logger.warning(f"Invalid target program resolved: {resolved_program}")
-                continue
+            try:
+                # FIXED: Handle both dict and string formats
+                if isinstance(resolved_program, dict):
+                    target_prog = resolved_program.get('program_name')
+                    confidence = resolved_program.get('confidence', 0.5)
+                    resolution_method = resolved_program.get('resolution', 'unknown')
+                    source_info = resolved_program.get('source', '')
+                elif isinstance(resolved_program, str):
+                    target_prog = resolved_program
+                    confidence = 0.5
+                    resolution_method = 'string_format'
+                    source_info = ''
+                else:
+                    logger.warning(f"Invalid resolved program format: {resolved_program}")
+                    target_prog = str(resolved_program)
+                    confidence = 0.3
+                    resolution_method = 'fallback_conversion'
+                    source_info = ''
                 
-            if self._is_valid_dependency_target(target_prog, program_name):
-                
+                # FIXED: Validate target program name
+                if not target_prog or target_prog in ['', 'None', 'undefined', None]:
+                    logger.warning(f"Invalid target program resolved: {resolved_program}")
+                    continue
+                    
+                if not self._is_valid_dependency_target(target_prog, program_name):
+                    logger.warning(f"Invalid dependency target: {target_prog}")
+                    continue
+                    
                 # FIXED: Check if target program is uploaded (proper string comparison)
                 dependency_status = 'present' if str(target_prog).upper() in uploaded_programs else 'missing'
                 
-                # FIXED: Build comprehensive analysis details with proper serialization
-                analysis_details = {
-                    'call_type': 'dynamic',
-                    'variable_name': variable_name,
-                    'operation': operation,
-                    'resolution_method': resolved_program.get('resolution', 'unknown') if isinstance(resolved_program, dict) else 'unknown',
-                    'source_info': resolved_program.get('source', '') if isinstance(resolved_program, dict) else '',
-                    'line_number': line_number,
-                    'confidence': resolved_program.get('confidence', 0.5) if isinstance(resolved_program, dict) else 0.5,
-                    'resolution_index': i + 1,
-                    'total_resolutions': len(resolved_programs),
-                    'business_context': f"Dynamic call via {variable_name} -> {target_prog}",
-                    
-                    # FIXED: Ensure all values are JSON-serializable
-                    'is_group_variable': True,
-                    'group_variable_name': str(variable_name),
-                    'all_resolved_programs': [
-                        p.get('program_name') if isinstance(p, dict) else str(p) 
-                        for p in resolved_programs
-                    ],
-                    'construction_details': resolved_program.get('construction_details', {}) if isinstance(resolved_program, dict) else {},
-                    'group_structure_used': bool(dynamic_call.get('group_structure_used', False)),
-                }
-                
-                # FIXED: Create dependency with proper string target
+                # FIXED: Create individual dependency for each resolved program
                 dependency = {
                     'source_component': str(program_name),
-                    'target_component': str(target_prog),  # FIXED: Ensure it's a string
+                    'target_component': str(target_prog),  # INDIVIDUAL program name
                     'relationship_type': 'DYNAMIC_PROGRAM_CALL',
                     'interface_type': 'COBOL',
-                    'confidence_score': float(analysis_details['confidence']),  # FIXED: Ensure float
-                    'dependency_status': str(dependency_status),  # FIXED: Ensure string
-                    'analysis_details_json': json.dumps(analysis_details),  # FIXED: Proper JSON serialization
-                    'source_code_evidence': f"Line {line_number}: {operation} PROGRAM({variable_name}) -> {target_prog} via {analysis_details['resolution_method']}"
+                    'confidence_score': float(confidence),
+                    'dependency_status': str(dependency_status),
+                    'analysis_details_json': json.dumps({
+                        'call_type': 'dynamic',
+                        'variable_name': variable_name,
+                        'operation': operation,
+                        'resolution_method': resolution_method,
+                        'source_info': source_info,
+                        'line_number': line_number,
+                        'confidence': confidence,
+                        'resolution_index': i + 1,
+                        'total_resolutions': len(resolved_programs),
+                        'business_context': f"Dynamic call via {variable_name} -> {target_prog}",
+                        'is_group_variable': True,  # MARK as group variable resolution
+                        'group_variable_name': str(variable_name),
+                        'resolved_from_group': True
+                    }),
+                    'source_code_evidence': f"Line {line_number}: {operation} PROGRAM({variable_name}) -> {target_prog} via {resolution_method}"
                 }
                 
                 dependencies.append(dependency)
-                logger.info(f"Created FIXED dynamic dependency: {program_name} -> {target_prog} (via {variable_name})")
+                logger.info(f"Created dependency: {program_name} -> {target_prog} (via {variable_name}, {dependency_status})")
+                
+            except Exception as e:
+                logger.error(f"Error processing resolved program {resolved_program}: {str(e)}")
+                continue
         
-        logger.info(f"Total FIXED dynamic dependencies created for {variable_name}: {len(dependencies)}")
+        logger.info(f"Created {len(dependencies)} dependencies for {variable_name} group variable")
         return dependencies
 
     def _create_program_call_dependency(self, program_name: str, call: Dict, uploaded_programs: set) -> Optional[Dict]:
