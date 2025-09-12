@@ -2212,7 +2212,7 @@ File Content ({filename}):
                 logger.info(f"Dependency breakdown: {dep_breakdown}")
                 
                 # Store using enhanced method
-                self.db_manager._store_enhanced_dependencies_with_status(session_id, unique_dependencies)
+                self._store_enhanced_dependencies_with_status(session_id, unique_dependencies)
                 
                 # Verify storage
                 stored_deps = self.db_manager.get_enhanced_dependencies(session_id)
@@ -3265,11 +3265,7 @@ File Content ({filename}):
             with self.db_manager.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Add dependency_status column if it doesn't exist
-                cursor.execute('''
-                    ALTER TABLE dependency_relationships 
-                    ADD COLUMN dependency_status TEXT DEFAULT 'unknown'
-                ''')
+                
                 
                 for dep in dependencies:
                     try:
