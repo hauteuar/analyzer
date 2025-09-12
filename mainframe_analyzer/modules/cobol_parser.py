@@ -284,19 +284,17 @@ class COBOLParser:
                 enhanced_dynamic_calls = self.extract_dynamic_program_calls(content, filename)
                 
                 # Convert to program call format
+                # FIXED - Keep dynamic calls as single entries with resolved_programs intact
                 for dynamic_call in enhanced_dynamic_calls:
-                    for resolved_program in dynamic_call['resolved_programs']:
-                        program_calls.append({
-                            'operation': dynamic_call['operation'],
-                            'program_name': resolved_program['program_name'],
-                            'line_number': dynamic_call['line_number'],
-                            'call_type': 'dynamic',
-                            'variable_name': dynamic_call['variable_name'],
-                            'resolution_method': resolved_program['resolution'],
-                            'confidence_score': resolved_program['confidence'],
-                            'source_info': resolved_program.get('source', ''),
-                            'business_context': f"Dynamic call via {dynamic_call['variable_name']} variable"
-                        })
+                    program_calls.append({
+                        'operation': dynamic_call['operation'],
+                        'variable_name': dynamic_call['variable_name'],
+                        'line_number': dynamic_call['line_number'],
+                        'call_type': 'dynamic',
+                        'resolved_programs': dynamic_call['resolved_programs'],  # Keep the array intact
+                        'confidence_score': dynamic_call.get('confidence', 0.8),
+                        'business_context': f"Dynamic call via {dynamic_call['variable_name']} variable resolves to {len(dynamic_call['resolved_programs'])} programs"
+                    })
                 
                 logger.info(f"Found {len(enhanced_dynamic_calls)} enhanced dynamic calls")
                 
