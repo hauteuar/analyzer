@@ -3078,7 +3078,7 @@ File Content ({filename}):
             return None
     
 
-    def _create_dynamic_call_dependencies_fixed(self, session_id: str, program_name: str, 
+    def _create_dynamic_call_dependencies(self, session_id: str, program_name: str, 
                                           dynamic_call: Dict, uploaded_programs: set) -> List[Dict]:
         """FIXED: Create dependencies for dynamic calls with proper missing program handling"""
         dependencies = []

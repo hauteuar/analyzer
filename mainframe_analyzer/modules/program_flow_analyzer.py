@@ -59,6 +59,7 @@ class ProgramFlowAnalyzer:
             # Store in database
             self._store_program_flow_analysis(session_id, flow_analysis)
             
+            
             logger.info(f"Program flow analysis completed: {len(program_chain)} programs, {len(missing_programs)} missing")
             return flow_analysis
             
@@ -117,58 +118,94 @@ class ProgramFlowAnalyzer:
             logger.error(f"Error refreshing dependency status: {str(e)}")
     
     def _build_program_call_chain_fixed(self, session_id: str, starting_program: str) -> List[Dict]:
-        """Build the complete program call chain with proper group variable expansion - FIXED VERSION"""
-        chain = []
+        """FIXED: Build program call chain with proper dynamic call resolution"""
+        program_chain = []
+        programs_to_process = [starting_program]
         processed_programs = set()
+        sequence_counter = 1
         
-        def build_chain_recursive(current_program: str, level: int = 0):
-            if current_program in processed_programs or level > 10:
-                return
+        while programs_to_process and len(processed_programs) < 20:  # Safety limit
+            current_program = programs_to_process.pop(0)
             
+            if current_program in processed_programs:
+                continue
+                
             processed_programs.add(current_program)
+            logger.debug(f"Processing program: {current_program}")
             
-            # Get FRESH dependencies for current program
-            dependencies = self.db_manager.get_enhanced_dependencies(session_id)
+            # Get program calls for current program
+            program_calls = self._get_program_calls_from_analysis(session_id, current_program)
             
-            # Filter for program calls from current program
-            program_calls = [d for d in dependencies 
-                        if d['source_component'].upper() == current_program.upper() 
-                        and d['relationship_type'] in ['PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL']]
-            
-            logger.info(f"Found {len(program_calls)} program calls from {current_program}")
-            
-            # FIXED: Group dynamic calls by variable name to handle group variables properly
-            grouped_calls = self._group_dynamic_calls_by_variable(program_calls)
-            
-            for call_group in grouped_calls:
-                if call_group['is_group_variable']:
-                    # FIXED: Handle group variables - create separate chain steps for each resolved program
-                    self._process_group_variable_calls(call_group, chain, current_program, level, session_id)
+            # FIXED: Process each program call with dynamic resolution
+            for call in program_calls:
+                call_type = call.get('call_type', 'static')
+                
+                if call_type == 'dynamic':
+                    # FIXED: Handle dynamic calls - resolve to actual programs
+                    variable_name = call.get('variable_name', '')
+                    logger.info(f"Resolving dynamic call: {current_program} -> {variable_name}")
                     
-                    # Continue chain for all present programs from this group variable
-                    for resolved_prog in call_group['resolved_programs']:
-                        if not resolved_prog.get('is_missing'):
-                            build_chain_recursive(resolved_prog['program_name'], level + 1)
+                    # Resolve to actual programs using database
+                    resolved_programs = self._resolve_dynamic_call_programs(
+                        session_id, current_program, variable_name
+                    )
+                    
+                    logger.info(f"Resolved {variable_name} to {len(resolved_programs)} programs: {[p['program_name'] for p in resolved_programs]}")
+                    
+                    # FIXED: Add each resolved program as separate flow step
+                    for resolved_prog in resolved_programs:
+                        target_program = resolved_prog['program_name']
+                        is_missing = resolved_prog['status'] == 'missing'
+                        
+                        flow_step = {
+                            'source_program': current_program,
+                            'target_program': target_program,  # ACTUAL program name
+                            'call_type': f"DYNAMIC({variable_name})",
+                            'variable_name': variable_name,
+                            'is_dynamic_resolution': True,
+                            'sequence': sequence_counter,
+                            'is_missing': is_missing,
+                            'confidence': call.get('confidence_score', 0.8),
+                            'business_context': f"Dynamic call via {variable_name} to {target_program}",
+                            'resolution_method': resolved_prog.get('resolution_method', 'database_lookup'),
+                            'line_number': call.get('line_number', 0)
+                        }
+                        
+                        program_chain.append(flow_step)
+                        sequence_counter += 1
+                        
+                        # FIXED: Continue flow analysis with resolved program if available
+                        if not is_missing and target_program not in processed_programs:
+                            programs_to_process.append(target_program)
+                            logger.debug(f"Added resolved program to processing queue: {target_program}")
+                            
                 else:
-                    # Handle regular calls
-                    for call in call_group['calls']:
-                        target_program = call['target_component']
-                        analysis_details = call.get('analysis_details', {})
-                        dependency_status = call.get('dependency_status', 'unknown')
-                        is_missing = dependency_status == 'missing'
+                    # FIXED: Handle static calls as before
+                    target_program = call.get('program_name', '')
+                    if target_program:
+                        # Check if target program is missing
+                        is_missing = self._is_program_missing(session_id, target_program)
                         
-                        chain_step = self._create_chain_step(
-                            current_program, target_program, call, analysis_details, 
-                            level + 1, is_missing, session_id
-                        )
-                        chain.append(chain_step)
+                        flow_step = {
+                            'source_program': current_program,
+                            'target_program': target_program,
+                            'call_type': call.get('call_type', 'CALL'),
+                            'sequence': sequence_counter,
+                            'is_missing': is_missing,
+                            'confidence': call.get('confidence_score', 0.95),
+                            'business_context': call.get('business_context', f"Static {call.get('call_type', 'CALL')} to {target_program}"),
+                            'line_number': call.get('line_number', 0)
+                        }
                         
-                        # Continue chain if target program is available
-                        if not is_missing:
-                            build_chain_recursive(target_program, level + 1)
+                        program_chain.append(flow_step)
+                        sequence_counter += 1
+                        
+                        # Continue with static call target if available
+                        if not is_missing and target_program not in processed_programs:
+                            programs_to_process.append(target_program)
         
-        build_chain_recursive(starting_program)
-        return chain
+        logger.info(f"Built program call chain with {len(program_chain)} steps, {len([s for s in program_chain if s.get('is_dynamic_resolution')])} dynamic resolutions")
+        return program_chain
 
     def _group_dynamic_calls_by_variable(self, program_calls: List[Dict]) -> List[Dict]:
         """Group dynamic calls by variable name to handle group variables properly"""
@@ -783,7 +820,62 @@ class ProgramFlowAnalyzer:
         
         return correlations
     
-    # Keep existing methods for business summary, storage, etc.
+    def _resolve_dynamic_call_programs(self, session_id: str, source_program: str, variable_name: str) -> List[Dict]:
+        """Resolve dynamic call variable to actual program names from database"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get all dynamic call dependencies for this variable
+                cursor.execute('''
+                    SELECT target_component, analysis_details_json, dependency_status
+                    FROM dependency_relationships
+                    WHERE session_id = ? AND source_component = ? 
+                    AND relationship_type = 'DYNAMIC_PROGRAM_CALL'
+                    AND analysis_details_json LIKE ?
+                ''', (session_id, source_program, f'%{variable_name}%'))
+                
+                resolved_programs = []
+                for row in cursor.fetchall():
+                    target_component = row[0]
+                    dependency_status = row[2]
+                    
+                    try:
+                        analysis_details = json.loads(row[1]) if row[1] else {}
+                    except:
+                        analysis_details = {}
+                    
+                    # Skip generic variable names, only get actual program names
+                    if (target_component and 
+                        not target_component.startswith('DYNAMIC_CALL_') and 
+                        not target_component.startswith('UNRESOLVED_') and
+                        target_component != variable_name):
+                        
+                        resolved_programs.append({
+                            'program_name': target_component,
+                            'status': dependency_status or 'unknown',
+                            'variable_source': variable_name,
+                            'resolution_method': analysis_details.get('resolution_method', 'database_lookup'),
+                            'confidence': analysis_details.get('confidence', 0.8)
+                        })
+                
+                return resolved_programs
+                
+        except Exception as e:
+            logger.error(f"Error resolving dynamic call programs for {variable_name}: {str(e)}")
+            return []
+
+    def _is_program_missing(self, session_id: str, program_name: str) -> bool:
+        """Check if a program is missing from the session"""
+        try:
+            components = self.db_manager.get_session_components(session_id)
+            uploaded_programs = set(comp['component_name'].upper() for comp in components)
+            return program_name.upper() not in uploaded_programs
+        except Exception as e:
+            logger.error(f"Error checking if program is missing: {str(e)}")
+            return True  # Assume missing on error
+        
+        # Keep existing methods for business summary, storage, etc.
     def _generate_business_flow_summary(self, session_id: str, flow_analysis: Dict) -> str:
         """Generate business summary with proper group variable handling"""
         try:
