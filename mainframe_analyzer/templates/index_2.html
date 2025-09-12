@@ -5719,7 +5719,9 @@ function createProgramFlowView(sessionId) {
     }
     
     console.log(`Rendering VERTICAL TREE: ${layoutNodes.length} nodes, ${layoutEdges.length} edges`);
-    
+    const legend = d3.select(container)
+    .append('div')
+    .attr('class', 'flow-legend');
     // Create SVG with proper vertical tree dimensions
     const svg = d3.select(container)
         .append('svg')
