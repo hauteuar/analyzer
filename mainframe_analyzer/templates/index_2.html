@@ -5813,28 +5813,31 @@ function createHierarchicalLayout(vizData) {
     const nodeSpacing = 180;  // Horizontal spacing between nodes at same level
     
     // Position program nodes in vertical hierarchy levels (top to bottom)
-    Object.keys(hierarchy).forEach((level, levelIndex) => {
-        const nodesInLevel = hierarchy[level];
-        const levelY = 60 + (levelIndex * levelHeight);
+    // In createHierarchicalLayout, make sure this part is correct:
+Object.keys(hierarchy).forEach((level, levelIndex) => {
+    const nodesInLevel = hierarchy[level];
+    const levelY = 80 + (levelIndex * 150);  // DIFFERENT Y for each level
+    
+    console.log(`Level ${level} (${levelIndex}): Y=${levelY}, nodes=${nodesInLevel.map(n => n.id)}`);
+    
+    // Position nodes horizontally within this level
+    const nodeSpacing = 200;
+    const totalWidth = nodesInLevel.length * nodeSpacing;
+    const startX = (1400 - totalWidth) / 2;
+    
+    nodesInLevel.forEach((node, nodeIndex) => {
+        const nodeX = startX + (nodeIndex * nodeSpacing);
         
-        // Center nodes horizontally at each level
-        const totalWidth = Math.max(nodesInLevel.length * nodeSpacing, 400);
-        const startX = (svgWidth - totalWidth) / 2;
-        
-        nodesInLevel.forEach((node, nodeIndex) => {
-            const nodeX = startX + (totalWidth / (nodesInLevel.length + 1)) * (nodeIndex + 1);
-            
-            const enhancedNode = {
-                ...node,
-                x: nodeX,
-                y: levelY,
-                level: parseInt(level),
-                width: getNodeWidth(node),
-                height: getNodeHeight(node)
-            };
-            layoutNodes.push(enhancedNode);
+        layoutNodes.push({
+            ...node,
+            x: nodeX,
+            y: levelY,  // Different Y for each level = vertical layout
+            level: parseInt(level),
+            width: getNodeWidth(node),
+            height: getNodeHeight(node)
         });
     });
+});
     
     // Build program position lookup for files/DB2 placement
     const programPositions = {};
