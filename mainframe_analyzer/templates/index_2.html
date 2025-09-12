@@ -7074,8 +7074,51 @@ function showNodeDetailsModal(node, content) {
     showNodeDetails(node, { visualization_data: { enhanced_content: content }});
 }
 
+function getSampleFlowData() {
+            return {
+                nodes: [
+                    // Program nodes with hierarchy
+                    { id: 'TMSTMPM4', type: 'program', label: 'TMSTMPM4', is_starting_program: true, status: 'present' },
+                    { id: 'TRECHECM', type: 'program', label: 'TRECHECM', status: 'missing' },
+                    { id: 'TMSAUTH', type: 'program', label: 'TMSAUTH', status: 'present' },
+                    { id: 'TMSTIP19', type: 'program', label: 'TMSTIP19', status: 'present' },
+                    { id: 'CKS910', type: 'program', label: 'CKS910', status: 'present' },
+                    { id: 'TMSTMND', type: 'program', label: 'TMSTMND', status: 'present' },
+                    { id: 'TMSDYTAG', type: 'program', label: 'TMSDYTAG', status: 'present' },
+                    { id: 'TMSDMPM4', type: 'program', label: 'TMSDMPM4', status: 'present' },
+                    // File nodes
+                    { id: 'TMSS0CKO', type: 'file', label: 'TMSS0CKO', interface: 'CICS', connected_to_program: 'TMSDMPM4' },
+                    { id: 'TMSS6ACO', type: 'file', label: 'TMSS6ACO', interface: 'CICS', connected_to_program: 'TMSDMPM4' },
+                    // DB2 nodes
+                    { id: 'CUSTOMER_TABLE', type: 'db2_table', label: 'CUSTOMER_TABLE', connected_to_program: 'TMSTMPM4' },
+                    { id: 'TRANSACTION_LOG', type: 'db2_table', label: 'TRANSACTION_LOG', connected_to_program: 'TMSDMPM4' }
+                ],
+                edges: [
+                    // Program calls
+                    { from: 'TMSTMPM4', to: 'TRECHECM', type: 'program_call', call_type: 'CALL' },
+                    { from: 'TMSTMPM4', to: 'TMSAUTH', type: 'program_call', call_type: 'CALL' },
+                    { from: 'TMSTMPM4', to: 'TMSTIP19', type: 'program_call', call_type: 'XCTL' },
+                    { from: 'TMSTIP19', to: 'CKS910', type: 'program_call', call_type: 'CALL' },
+                    { from: 'CKS910', to: 'TMSTMND', type: 'program_call', call_type: 'CALL' },
+                    { from: 'TMSTMND', to: 'TMSDYTAG', type: 'program_call', call_type: 'CALL' },
+                    { from: 'TMSDYTAG', to: 'TMSDMPM4', type: 'program_call', call_type: 'XCTL' },
+                    // File operations
+                    { from: 'TMSDMPM4', to: 'TMSS0CKO', type: 'file_operation', io_direction: 'READ' },
+                    { from: 'TMSDMPM4', to: 'TMSS6ACO', type: 'file_operation', io_direction: 'write' },
+                    // DB2 operations
+                    { from: 'TMSTMPM4', to: 'CUSTOMER_TABLE', type: 'db2_operation', io_direction: 'read' },
+                    { from: 'TMSDMPM4', to: 'TRANSACTION_LOG', type: 'db2_operation', io_direction: 'write' }
+                ]
+            };
+        }
 
-       
+        function renderSampleFlow() {
+            const vizData = getSampleFlowData();
+            renderFlowVisualization(vizData);
+        }
+        window.onload = function() {
+            renderSampleFlow();
+        };
     function renderFlowDetails(flowAnalysis, vizData) {
         const detailsContainer = document.getElementById('flowDetails');
         
