@@ -1503,23 +1503,22 @@
     
     
     .flow-visualization {
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            height: 700px;
-            overflow-x: auto;
-            overflow-y: auto;
-            width: 100%;
-            max-width: 100%;
-            background: #f9f9f9;
-        }
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    margin-bottom: 20px;
+    height: 700px;
+    overflow-x: auto;
+    overflow-y: auto;
+    width: 100%;
+    max-width: 100%;
+    background: #f9f9f9;
+}
 
-        .flow-visualization svg {
-            width: 1400px;
-            height: 1000px;
-            display: block;
-        }
-
+.flow-visualization svg {
+    width: 1400px;
+    height: 1000px;
+    display: block;
+}
     .flow-details {
         background: #f9f9f9;
         padding: 20px;
@@ -5723,11 +5722,12 @@ function createProgramFlowView(sessionId) {
     .append('div')
     .attr('class', 'flow-legend');
     // Create SVG with proper vertical tree dimensions
-    const svg = d3.select(container)
+     const svg = d3.select(container)
         .append('svg')
         .attr('width', '1400px')
         .attr('height', '1000px')
         .attr('viewBox', '0 0 1400 1000');
+}
     
     // Verify SVG was created
     if (svg.empty()) {
@@ -5783,154 +5783,154 @@ function createProgramFlowView(sessionId) {
     
 
 function createHierarchicalLayout(vizData) {
-            const nodes = vizData.nodes || [];
-            const edges = vizData.edges || [];
+    const nodes = vizData.nodes || [];
+    const edges = vizData.edges || [];
+    
+    if (!nodes.length) {
+        throw new Error('No nodes provided for layout');
+    }
+    
+    // Organize nodes by type
+    const programNodes = nodes.filter(n => n.type === 'program');
+    const fileNodes = nodes.filter(n => n.type === 'file');
+    const db2Nodes = nodes.filter(n => n.type === 'db2_table');
+    
+    // Calculate proper hierarchy levels for vertical tree layout
+    const hierarchy = calculateProgramHierarchy(programNodes, edges);
+    
+    // Vertical tree layout with centered positioning
+    const layoutNodes = [];
+    const levelHeight = 140;  // Vertical spacing between levels
+    const svgWidth = 1400;
+    const nodeSpacing = 180;  // Horizontal spacing between nodes at same level
+    
+    // Position program nodes in vertical hierarchy levels (top to bottom)
+    Object.keys(hierarchy).forEach((level, levelIndex) => {
+        const nodesInLevel = hierarchy[level];
+        const levelY = 60 + (levelIndex * levelHeight);
+        
+        // Center nodes horizontally at each level
+        const totalWidth = Math.max(nodesInLevel.length * nodeSpacing, 400);
+        const startX = (svgWidth - totalWidth) / 2;
+        
+        nodesInLevel.forEach((node, nodeIndex) => {
+            const nodeX = startX + (totalWidth / (nodesInLevel.length + 1)) * (nodeIndex + 1);
             
-            if (!nodes.length) {
-                throw new Error('No nodes provided for layout');
-            }
-            
-            // Organize nodes by type
-            const programNodes = nodes.filter(n => n.type === 'program');
-            const fileNodes = nodes.filter(n => n.type === 'file');
-            const db2Nodes = nodes.filter(n => n.type === 'db2_table');
-            
-            // Calculate proper hierarchy levels for vertical tree layout
-            const hierarchy = calculateProgramHierarchy(programNodes, edges);
-            
-            // Vertical tree layout with centered positioning
-            const layoutNodes = [];
-            const levelHeight = 140;  // Vertical spacing between levels
-            const svgWidth = 1400;
-            const nodeSpacing = 180;  // Horizontal spacing between nodes at same level
-            
-            // Position program nodes in vertical hierarchy levels (top to bottom)
-            Object.keys(hierarchy).forEach((level, levelIndex) => {
-                const nodesInLevel = hierarchy[level];
-                const levelY = 60 + (levelIndex * levelHeight);
-                
-                // Center nodes horizontally at each level
-                const totalWidth = Math.max(nodesInLevel.length * nodeSpacing, 400);
-                const startX = (svgWidth - totalWidth) / 2;
-                
-                nodesInLevel.forEach((node, nodeIndex) => {
-                    const nodeX = startX + (totalWidth / (nodesInLevel.length + 1)) * (nodeIndex + 1);
-                    
-                    const enhancedNode = {
-                        ...node,
-                        x: nodeX,
-                        y: levelY,
-                        level: parseInt(level),
-                        width: getNodeWidth(node),
-                        height: getNodeHeight(node)
-                    };
-                    layoutNodes.push(enhancedNode);
-                });
-            });
-            
-            // Build program position lookup for files/DB2 placement
-            const programPositions = {};
-            layoutNodes.forEach(node => {
-                if (node.type === 'program') {
-                    programPositions[node.id] = { x: node.x, y: node.y, level: node.level };
-                }
-            });
-            
-            // Position file nodes below their connected programs in vertical tree
-            const maxProgramLevel = Math.max(...layoutNodes.filter(n => n.type === 'program').map(n => n.level));
-            const filesStartY = 60 + ((maxProgramLevel + 1) * levelHeight) + 40;
-            
-            fileNodes.forEach((fileNode, index) => {
-                const connectedProgram = fileNode.connected_to_program;
-                const programPos = programPositions[connectedProgram];
-                
-                if (programPos) {
-                    // Group files under their parent program vertically
-                    const filesForThisProgram = fileNodes.filter(f => f.connected_to_program === connectedProgram);
-                    const fileIndex = filesForThisProgram.indexOf(fileNode);
-                    
-                    layoutNodes.push({
-                        ...fileNode,
-                        x: programPos.x + ((fileIndex - (filesForThisProgram.length - 1) / 2) * 140),
-                        y: filesStartY,
-                        level: maxProgramLevel + 2,
-                        width: getNodeWidth(fileNode),
-                        height: getNodeHeight(fileNode),
-                        parentProgram: connectedProgram
-                    });
-                } else {
-                    // Fallback: arrange orphaned files horizontally at bottom
-                    const filesPerRow = Math.floor(svgWidth / 150);
-                    const row = Math.floor(index / filesPerRow);
-                    const col = index % filesPerRow;
-                    
-                    layoutNodes.push({
-                        ...fileNode,
-                        x: 100 + (col * 150),
-                        y: filesStartY + (row * 70),
-                        level: 999,
-                        width: getNodeWidth(fileNode),
-                        height: getNodeHeight(fileNode)
-                    });
-                }
-            });
-            
-            // Position DB2 nodes below files in vertical hierarchy
-            const db2StartY = filesStartY + 100;
-            db2Nodes.forEach((db2Node, index) => {
-                const connectedProgram = db2Node.connected_to_program;
-                const programPos = programPositions[connectedProgram];
-                
-                if (programPos) {
-                    const db2ForThisProgram = db2Nodes.filter(d => d.connected_to_program === connectedProgram);
-                    const db2Index = db2ForThisProgram.indexOf(db2Node);
-                    
-                    layoutNodes.push({
-                        ...db2Node,
-                        x: programPos.x + ((db2Index - (db2ForThisProgram.length - 1) / 2) * 150),
-                        y: db2StartY,
-                        level: maxProgramLevel + 3,
-                        width: getNodeWidth(db2Node),
-                        height: getNodeHeight(db2Node),
-                        parentProgram: connectedProgram
-                    });
-                } else {
-                    // Fallback: arrange orphaned DB2 nodes horizontally
-                    const db2PerRow = Math.floor(svgWidth / 160);
-                    const row = Math.floor(index / db2PerRow);
-                    const col = index % db2PerRow;
-                    
-                    layoutNodes.push({
-                        ...db2Node,
-                        x: 100 + (col * 160),
-                        y: db2StartY + (row * 70),
-                        level: 998,
-                        width: getNodeWidth(db2Node),
-                        height: getNodeHeight(db2Node)
-                    });
-                }
-            });
-            
-            // Calculate enhanced edge positions with proper connections
-            const layoutEdges = edges.map(edge => {
-                const sourceNode = layoutNodes.find(n => n.id === edge.from);
-                const targetNode = layoutNodes.find(n => n.id === edge.to);
-                
-                if (!sourceNode || !targetNode) {
-                    console.warn(`Missing nodes for edge: ${edge.from} -> ${edge.to}`);
-                    return null;
-                }
-                
-                return {
-                    ...edge,
-                    source: sourceNode,
-                    target: targetNode,
-                    path: calculateEnhancedEdgePath(sourceNode, targetNode, edge)
-                };
-            }).filter(e => e !== null);
-            
-            return { layoutNodes, layoutEdges };
+            const enhancedNode = {
+                ...node,
+                x: nodeX,
+                y: levelY,
+                level: parseInt(level),
+                width: getNodeWidth(node),
+                height: getNodeHeight(node)
+            };
+            layoutNodes.push(enhancedNode);
+        });
+    });
+    
+    // Build program position lookup for files/DB2 placement
+    const programPositions = {};
+    layoutNodes.forEach(node => {
+        if (node.type === 'program') {
+            programPositions[node.id] = { x: node.x, y: node.y, level: node.level };
         }
+    });
+    
+    // Position file nodes below their connected programs in vertical tree
+    const maxProgramLevel = Math.max(...layoutNodes.filter(n => n.type === 'program').map(n => n.level));
+    const filesStartY = 60 + ((maxProgramLevel + 1) * levelHeight) + 40;
+    
+    fileNodes.forEach((fileNode, index) => {
+        const connectedProgram = fileNode.connected_to_program;
+        const programPos = programPositions[connectedProgram];
+        
+        if (programPos) {
+            // Group files under their parent program vertically
+            const filesForThisProgram = fileNodes.filter(f => f.connected_to_program === connectedProgram);
+            const fileIndex = filesForThisProgram.indexOf(fileNode);
+            
+            layoutNodes.push({
+                ...fileNode,
+                x: programPos.x + ((fileIndex - (filesForThisProgram.length - 1) / 2) * 140),
+                y: filesStartY,
+                level: maxProgramLevel + 2,
+                width: getNodeWidth(fileNode),
+                height: getNodeHeight(fileNode),
+                parentProgram: connectedProgram
+            });
+        } else {
+            // Fallback: arrange orphaned files horizontally at bottom
+            const filesPerRow = Math.floor(svgWidth / 150);
+            const row = Math.floor(index / filesPerRow);
+            const col = index % filesPerRow;
+            
+            layoutNodes.push({
+                ...fileNode,
+                x: 100 + (col * 150),
+                y: filesStartY + (row * 70),
+                level: 999,
+                width: getNodeWidth(fileNode),
+                height: getNodeHeight(fileNode)
+            });
+        }
+    });
+    
+    // Position DB2 nodes below files in vertical hierarchy
+    const db2StartY = filesStartY + 100;
+    db2Nodes.forEach((db2Node, index) => {
+        const connectedProgram = db2Node.connected_to_program;
+        const programPos = programPositions[connectedProgram];
+        
+        if (programPos) {
+            const db2ForThisProgram = db2Nodes.filter(d => d.connected_to_program === connectedProgram);
+            const db2Index = db2ForThisProgram.indexOf(db2Node);
+            
+            layoutNodes.push({
+                ...db2Node,
+                x: programPos.x + ((db2Index - (db2ForThisProgram.length - 1) / 2) * 150),
+                y: db2StartY,
+                level: maxProgramLevel + 3,
+                width: getNodeWidth(db2Node),
+                height: getNodeHeight(db2Node),
+                parentProgram: connectedProgram
+            });
+        } else {
+            // Fallback: arrange orphaned DB2 nodes horizontally
+            const db2PerRow = Math.floor(svgWidth / 160);
+            const row = Math.floor(index / db2PerRow);
+            const col = index % db2PerRow;
+            
+            layoutNodes.push({
+                ...db2Node,
+                x: 100 + (col * 160),
+                y: db2StartY + (row * 70),
+                level: 998,
+                width: getNodeWidth(db2Node),
+                height: getNodeHeight(db2Node)
+            });
+        }
+    });
+    
+    // Calculate enhanced edge positions with proper connections
+    const layoutEdges = edges.map(edge => {
+        const sourceNode = layoutNodes.find(n => n.id === edge.from);
+        const targetNode = layoutNodes.find(n => n.id === edge.to);
+        
+        if (!sourceNode || !targetNode) {
+            console.warn(`Missing nodes for edge: ${edge.from} -> ${edge.to}`);
+            return null;
+        }
+        
+        return {
+            ...edge,
+            source: sourceNode,
+            target: targetNode,
+            path: calculateEnhancedEdgePath(sourceNode, targetNode, edge)
+        };
+    }).filter(e => e !== null);
+    
+    return { layoutNodes, layoutEdges };
+}
 
 function calculateEnhancedEdgePath(sourceNode, targetNode, edge) {
             // Simple straight line for now - can be enhanced with curves
