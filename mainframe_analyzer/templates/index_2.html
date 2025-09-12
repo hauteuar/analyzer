@@ -5905,6 +5905,131 @@ function createHierarchicalLayout(vizData) {
     return { layoutNodes, layoutEdges };
 }
 
+function calculateEnhancedEdgePath(sourceNode, targetNode, edge) {
+    const dx = targetNode.x - sourceNode.x;
+    const dy = targetNode.y - sourceNode.y;
+    const sourceWidth = sourceNode.width || 100;
+    const sourceHeight = sourceNode.height || 50;
+    const targetWidth = targetNode.width || 100;
+    const targetHeight = targetNode.height || 50;
+    
+    // Calculate proper connection points based on node positions
+    let sourcePoint, targetPoint;
+    
+    // Determine which side to connect based on relative positions
+    if (Math.abs(dx) > Math.abs(dy)) {
+        // Horizontal connection (left/right sides)
+        if (dx > 0) {
+            // Source connects from right side, target from left side
+            sourcePoint = { x: sourceNode.x + sourceWidth/2, y: sourceNode.y };
+            targetPoint = { x: targetNode.x - targetWidth/2, y: targetNode.y };
+        } else {
+            // Source connects from left side, target from right side
+            sourcePoint = { x: sourceNode.x - sourceWidth/2, y: sourceNode.y };
+            targetPoint = { x: targetNode.x + targetWidth/2, y: targetNode.y };
+        }
+    } else {
+        // Vertical connection (top/bottom sides)
+        if (dy > 0) {
+            // Source connects from bottom, target from top
+            sourcePoint = { x: sourceNode.x, y: sourceNode.y + sourceHeight/2 };
+            targetPoint = { x: targetNode.x, y: targetNode.y - targetHeight/2 };
+        } else {
+            // Source connects from top, target from bottom
+            sourcePoint = { x: sourceNode.x, y: sourceNode.y - sourceHeight/2 };
+            targetPoint = { x: targetNode.x, y: targetNode.y + targetHeight/2 };
+        }
+    }
+    
+    // Create different path types based on edge type and layout
+    const pathType = getPathType(edge, sourceNode, targetNode);
+    
+    switch (pathType) {
+        case 'straight':
+            return createStraightPath(sourcePoint, targetPoint);
+            
+        case 'curved':
+            return createCurvedPath(sourcePoint, targetPoint, edge);
+            
+        case 'stepped':
+            return createSteppedPath(sourcePoint, targetPoint, edge);
+            
+        case 'arc':
+            return createArcPath(sourcePoint, targetPoint, edge);
+            
+        default:
+            return createStraightPath(sourcePoint, targetPoint);
+    }
+}
+
+function getPathType(edge, sourceNode, targetNode) {
+    // Determine path type based on edge type and node layout
+    const edgeType = edge.type;
+    const levelDiff = Math.abs((sourceNode.level || 0) - (targetNode.level || 0));
+    const distance = Math.abs(targetNode.x - sourceNode.x) + Math.abs(targetNode.y - sourceNode.y);
+    
+    if (edgeType === 'file_operation' || edgeType === 'db2_operation') {
+        return 'curved';
+    } else if (edgeType === 'dynamic_call') {
+        return 'arc';
+    } else if (levelDiff <= 1 && distance < 200) {
+        return 'straight';
+    } else {
+        return 'stepped';
+    }
+}
+
+function createStraightPath(source, target) {
+    return `M${source.x},${source.y} L${target.x},${target.y}`;
+}
+
+function createCurvedPath(source, target, edge) {
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    
+    // Create a smooth curve with control points
+    const controlX1 = source.x + dx * 0.3;
+    const controlY1 = source.y;
+    const controlX2 = target.x - dx * 0.3;
+    const controlY2 = target.y;
+    
+    return `M${source.x},${source.y} C${controlX1},${controlY1} ${controlX2},${controlY2} ${target.x},${target.y}`;
+}
+
+function createSteppedPath(source, target, edge) {
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    
+    // Create a stepped path (L-shaped)
+    if (Math.abs(dx) > Math.abs(dy)) {
+        // Horizontal first, then vertical
+        const midX = source.x + dx * 0.7;
+        return `M${source.x},${source.y} L${midX},${source.y} L${midX},${target.y} L${target.x},${target.y}`;
+    } else {
+        // Vertical first, then horizontal
+        const midY = source.y + dy * 0.7;
+        return `M${source.x},${source.y} L${source.x},${midY} L${target.x},${midY} L${target.x},${target.y}`;
+    }
+}
+
+function createArcPath(source, target, edge) {
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    // Create an arc path for dynamic calls to show uncertainty
+    const midX = source.x + dx * 0.5;
+    const midY = source.y + dy * 0.5;
+    
+    // Add some curvature perpendicular to the direct line
+    const perpX = -dy / distance * 30; // 30 pixels of curvature
+    const perpY = dx / distance * 30;
+    
+    const controlX = midX + perpX;
+    const controlY = midY + perpY;
+    
+    return `M${source.x},${source.y} Q${controlX},${controlY} ${target.x},${target.y}`;
+}
 function calculateProgramHierarchy(programNodes, edges) {
     const hierarchy = {};
     const visited = new Set();
