@@ -1506,7 +1506,7 @@
     border: 1px solid #ddd;
     border-radius: 5px;
     margin-bottom: 20px;
-    height: 700px;
+    height: 800px;
     overflow-x: auto;
     overflow-y: auto;
     width: 100%;
@@ -1516,9 +1516,11 @@
 
 .flow-visualization svg {
     width: 1400px;
-    height: 1000px;
+    height: 1200px;  /* Increased from 1000px */
     display: block;
 }
+
+
     .flow-details {
         background: #f9f9f9;
         padding: 20px;
@@ -5731,8 +5733,8 @@ function createProgramFlowView(sessionId) {
      const svg = d3.select(container)
         .append('svg')
         .attr('width', '1400px')
-        .attr('height', '1000px')
-        .attr('viewBox', '0 0 1400 1000');
+        .attr('height', '1200px')
+        .attr('viewBox', '0 0 1400 1200');
 
     
     // Verify SVG was created
@@ -5754,7 +5756,7 @@ function createProgramFlowView(sessionId) {
             
             edges.each(function(d, i) {
                 try {
-                    drawEnhancedEdge(d3.select(this), d);
+                    drawEnhancedEdgeWithConnection(d3.select(this), d);
                 } catch (error) {
                     console.error(`Error drawing edge ${i}:`, error, d);
                 }
@@ -5778,10 +5780,10 @@ function createProgramFlowView(sessionId) {
             });
             
             // Add interactivity
-            addInteractivity(nodes, layoutEdges);
+            addEnhancedInteractivity(nodes, layoutEdges);
             
             // Create legend
-            createVisualizationLegend(legend);
+            createEnhancedVisualizationLegend(legend);
         }
     
     
@@ -6020,7 +6022,9 @@ function calculateProgramHierarchy(programNodes, edges) {
     const startNode = programNodes.find(n => n.is_starting_program) || programNodes[0];
     if (!startNode) return { 0: programNodes };
     
-    // CRITICAL: Level 0 at top
+    console.log('Starting node:', startNode.id);
+    
+    // Level 0 = top level (starting program)
     hierarchy[0] = [startNode];
     visited.add(startNode.id);
     
@@ -6028,16 +6032,21 @@ function calculateProgramHierarchy(programNodes, edges) {
     
     while (queue.length > 0) {
         const { node: currentNode, level } = queue.shift();
+        console.log(`Processing ${currentNode.id} at level ${level}`);
         
-        // Find program calls from this node
+        // Find ALL outgoing program calls from this node
         const outgoingEdges = edges.filter(e => 
-            e.from === currentNode.id && e.type === 'program_call'
+            e.from === currentNode.id && 
+            (e.type === 'program_call' || e.call_type === 'CALL' || e.call_type === 'XCTL')
         );
+        
+        console.log(`Found ${outgoingEdges.length} outgoing calls from ${currentNode.id}`);
         
         outgoingEdges.forEach(edge => {
             const targetNode = programNodes.find(n => n.id === edge.to);
             if (targetNode && !visited.has(targetNode.id)) {
-                const nextLevel = level + 1; // INCREMENT LEVEL DOWNWARD
+                const nextLevel = level + 1;
+                console.log(`Adding ${targetNode.id} to level ${nextLevel}`);
                 
                 if (!hierarchy[nextLevel]) {
                     hierarchy[nextLevel] = [];
@@ -6050,6 +6059,16 @@ function calculateProgramHierarchy(programNodes, edges) {
         });
     }
     
+    // Add orphaned programs to last level
+    programNodes.forEach(node => {
+        if (!visited.has(node.id)) {
+            const lastLevel = Math.max(...Object.keys(hierarchy).map(Number)) + 1;
+            if (!hierarchy[lastLevel]) hierarchy[lastLevel] = [];
+            hierarchy[lastLevel].push(node);
+        }
+    });
+    
+    console.log('Hierarchy created:', hierarchy);
     return hierarchy;
 }
 
