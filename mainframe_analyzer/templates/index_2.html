@@ -5719,16 +5719,18 @@ function createProgramFlowView(sessionId) {
                 .attr('class', 'flow-legend');
             
             // Create hierarchical layout
-            let layoutResult;
+            
+            let layoutNodes, layoutEdges;
             try {
-                layoutResult = createHierarchicalLayout(vizData);
+                const layoutResult = createHierarchicalLayout(vizData);
+                layoutNodes = layoutResult.layoutNodes;
+                layoutEdges = layoutResult.layoutEdges;
             } catch (error) {
                 console.error('Error creating layout:', error);
                 container.innerHTML = '<p style="color: red;">Error creating program flow layout. Please check the data.</p>';
                 return;
             }
             
-            const { layoutNodes, layoutEdges } = layoutResult;
             
             console.log(`Rendering VERTICAL TREE: ${layoutNodes.length} nodes, ${layoutEdges.length} edges`);
             
@@ -5979,7 +5981,6 @@ function createHierarchicalLayout(vizData) {
             
             return { layoutNodes, layoutEdges };
         }
-
 
 function calculateEnhancedEdgePath(sourceNode, targetNode, edge) {
             // Simple straight line for now - can be enhanced with curves
