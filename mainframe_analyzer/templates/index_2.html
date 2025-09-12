@@ -5769,25 +5769,16 @@ function createProgramFlowView(sessionId) {
                 }
             });
             
+            // Add interactivity
+            addInteractivity(nodes, layoutEdges);
             
+            // Create legend
+            createVisualizationLegend(legend);
+        }
     
     
         
-    // FIXED: Add enhanced interactivity
-    try {
-        addEnhancedInteractivity(nodes, layoutEdges);
-    } catch (error) {
-        console.error('Error adding interactivity:', error);
-    }
     
-    // Create enhanced legend
-    try {
-        createEnhancedVisualizationLegend(legend);
-    } catch (error) {
-        console.error('Error creating legend:', error);
-    }
-}
-
 
 function createHierarchicalLayout(vizData) {
             const nodes = vizData.nodes || [];
