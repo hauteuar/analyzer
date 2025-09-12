@@ -1514,7 +1514,7 @@
 }
 
 .flow-visualization svg {
-    min-width: 1600px; /* Force minimum width for scrolling */
+    min-width: 1400px; /* Force minimum width for scrolling */
     height: 800px;
 }
     .flow-details {
@@ -5703,15 +5703,19 @@ function createProgramFlowView(sessionId) {
     // Clear previous content
     container.innerHTML = '';
     
-    // FIXED: Create SVG with proper dimensions for scrolling
+    // Create enhanced SVG with proper dimensions
     const svg = d3.select(container)
         .append('svg')
-        .attr('width', '1400px') // Fixed width
-        .attr('height', '800px')  // Fixed height
-        .attr('viewBox', '0 0 1400 800')
-        .style('min-width', '1400px'); // Ensure minimum width for scrolling
+        .attr('width', '100%')
+        .attr('height', '800px')
+        .attr('viewBox', '0 0 1400 800');
     
-    // Create enhanced SVG with proper dimensions
+    // Add legend
+    const legend = d3.select(container)
+        .append('div')
+        .attr('class', 'flow-legend');
+    
+    // FIXED: Create proper hierarchical layout with aligned positioning
     let layoutResult;
     try {
         layoutResult = createHierarchicalLayout(vizData);
@@ -5729,7 +5733,7 @@ function createProgramFlowView(sessionId) {
     const defs = svg.append('defs');
     createEnhancedArrowMarkers(defs);
     
-    // Draw edges first with proper connections
+    // FIXED: Draw edges first with proper connections
     const edges = svg.selectAll('.flow-edge')
         .data(layoutEdges)
         .enter()
@@ -5744,7 +5748,7 @@ function createProgramFlowView(sessionId) {
         }
     });
     
-    // Draw nodes with proper alignment and spacing
+    // FIXED: Draw nodes with proper alignment and spacing
     const nodes = svg.selectAll('.flow-node')
         .data(layoutNodes)
         .enter()
@@ -5761,7 +5765,7 @@ function createProgramFlowView(sessionId) {
         }
     });
     
-    // Add enhanced interactivity
+    // FIXED: Add enhanced interactivity
     try {
         addEnhancedInteractivity(nodes, layoutEdges);
     } catch (error) {
@@ -5769,10 +5773,6 @@ function createProgramFlowView(sessionId) {
     }
     
     // Create enhanced legend
-    const legend = d3.select(container)
-        .append('div')
-        .attr('class', 'flow-legend');
-        
     try {
         createEnhancedVisualizationLegend(legend);
     } catch (error) {
@@ -5788,34 +5788,31 @@ function createHierarchicalLayout(vizData) {
         throw new Error('No nodes provided for layout');
     }
     
-    // Organize nodes by type and level with improved spacing
+    // FIXED: Organize nodes by type and level with proper alignment
     const programNodes = nodes.filter(n => n.type === 'program');
     const fileNodes = nodes.filter(n => n.type === 'file');
     const db2Nodes = nodes.filter(n => n.type === 'db2_table');
     
-    // Calculate program hierarchy with better vertical distribution
+    // FIXED: Calculate proper hierarchy levels with alignment
     const hierarchy = calculateProgramHierarchy(programNodes, edges);
     
-    // IMPROVED: Better positioning with staggered layout
+    // Enhanced positioning with proper gaps and alignment
     const layoutNodes = [];
-    const layerHeight = 140; // Increased spacing between levels
+    const layerHeight = 120;
     const layerWidth = 1400;
-    const minNodeSpacing = 220; // Increased horizontal spacing
+    const minNodeSpacing = 200;
     
-    // Position program nodes in hierarchical levels with vertical staggering
+    // Position program nodes in hierarchical levels
     Object.keys(hierarchy).forEach((level, levelIndex) => {
         const nodesInLevel = hierarchy[level];
         const totalWidth = nodesInLevel.length * minNodeSpacing;
         const startX = Math.max(100, (layerWidth - totalWidth) / 2);
         
         nodesInLevel.forEach((node, nodeIndex) => {
-            // FIXED: Add vertical offset to prevent arrow overlap
-            const verticalOffset = (nodeIndex % 2) * 30; // Stagger every other node by 30px
-            
             const enhancedNode = {
                 ...node,
                 x: startX + (nodeIndex * minNodeSpacing),
-                y: 80 + (levelIndex * layerHeight) + verticalOffset, // Add staggering
+                y: 80 + (levelIndex * layerHeight),
                 level: parseInt(level),
                 width: getNodeWidth(node),
                 height: getNodeHeight(node)
@@ -5824,7 +5821,7 @@ function createHierarchicalLayout(vizData) {
         });
     });
     
-    // Position file and DB2 nodes with better spacing
+    // FIXED: Position file and DB2 nodes connected to their parent programs
     const programPositions = {};
     layoutNodes.forEach(node => {
         if (node.type === 'program') {
@@ -5832,34 +5829,31 @@ function createHierarchicalLayout(vizData) {
         }
     });
     
-    // IMPROVED: Better file positioning with staggering
+    // Position file nodes below their connected programs
     fileNodes.forEach((fileNode, index) => {
         const connectedProgram = fileNode.connected_to_program;
         const programPos = programPositions[connectedProgram];
         
         if (programPos) {
+            // Position files below their parent program
             const filesForThisProgram = fileNodes.filter(f => f.connected_to_program === connectedProgram);
             const fileIndex = filesForThisProgram.indexOf(fileNode);
             
-            // Add horizontal staggering for files
-            const horizontalOffset = (fileIndex % 2) * 60 - 30; // -30 to +30 offset
-            
             layoutNodes.push({
                 ...fileNode,
-                x: programPos.x + horizontalOffset,
-                y: programPos.y + 180 + (programPos.level * 15), // Increased spacing
-                level: programPos.level + 10,
+                x: programPos.x - 50 + (fileIndex * 120),
+                y: programPos.y + 150 + (programPos.level * 20), // Stagger by level
+                level: programPos.level + 10, // Below program level
                 width: getNodeWidth(fileNode),
                 height: getNodeHeight(fileNode),
                 parentProgram: connectedProgram
             });
         } else {
-            // Stagger orphaned files too
-            const staggerOffset = (index % 3) * 40 - 40; // -40, 0, +40 pattern
+            // Fallback positioning for orphaned files
             layoutNodes.push({
                 ...fileNode,
-                x: 100 + (index * 130) + staggerOffset,
-                y: 650,
+                x: 100 + (index * 130),
+                y: 600,
                 level: 999,
                 width: getNodeWidth(fileNode),
                 height: getNodeHeight(fileNode)
@@ -5867,7 +5861,7 @@ function createHierarchicalLayout(vizData) {
         }
     });
     
-    // IMPROVED: Better DB2 positioning with staggering
+    // Position DB2 nodes below files
     db2Nodes.forEach((db2Node, index) => {
         const connectedProgram = db2Node.connected_to_program;
         const programPos = programPositions[connectedProgram];
@@ -5876,26 +5870,21 @@ function createHierarchicalLayout(vizData) {
             const db2ForThisProgram = db2Nodes.filter(d => d.connected_to_program === connectedProgram);
             const db2Index = db2ForThisProgram.indexOf(db2Node);
             
-            // Add diagonal staggering for DB2 nodes
-            const horizontalOffset = (db2Index % 2) * 80 - 40;
-            const verticalOffset = (db2Index % 2) * 20;
-            
             layoutNodes.push({
                 ...db2Node,
-                x: programPos.x + horizontalOffset,
-                y: programPos.y + 260 + (programPos.level * 20) + verticalOffset,
+                x: programPos.x - 50 + (db2Index * 130),
+                y: programPos.y + 220 + (programPos.level * 20), // Below files
                 level: programPos.level + 20,
                 width: getNodeWidth(db2Node),
                 height: getNodeHeight(db2Node),
                 parentProgram: connectedProgram
             });
         } else {
-            // Stagger orphaned DB2 nodes
-            const staggerOffset = (index % 3) * 50 - 50;
+            // Fallback positioning for orphaned DB2 nodes
             layoutNodes.push({
                 ...db2Node,
-                x: 100 + (index * 140) + staggerOffset,
-                y: 750,
+                x: 100 + (index * 140),
+                y: 700,
                 level: 998,
                 width: getNodeWidth(db2Node),
                 height: getNodeHeight(db2Node)
@@ -5903,7 +5892,7 @@ function createHierarchicalLayout(vizData) {
         }
     });
     
-    // Calculate enhanced edge positions with smarter routing
+    // FIXED: Calculate enhanced edge positions with proper connections
     const layoutEdges = edges.map(edge => {
         const sourceNode = layoutNodes.find(n => n.id === edge.from);
         const targetNode = layoutNodes.find(n => n.id === edge.to);
@@ -6181,22 +6170,21 @@ function createEnhancedPath(source, target, edge) {
     const dx = target.x - source.x;
     const dy = target.y - source.y;
     
-    // IMPROVED: Better path routing to avoid overlaps
+    // FIXED: Create smooth curves based on connection type
     if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
-        // Curved path for data connections with better curve control
-        const midY = source.y + dy * 0.7;
-        const controlOffset = Math.abs(dx) > 200 ? 50 : 20;
-        return `M${source.x},${source.y} Q${source.x + dx * 0.4 + controlOffset},${midY} ${target.x},${target.y}`;
-    } else if (Math.abs(dy) < 50) {
-        // Direct line for close connections
+        // Curved path for data connections
+        const midY = source.y + dy * 0.6;
+        return `M${source.x},${source.y} Q${source.x + dx * 0.3},${midY} ${target.x},${target.y}`;
+    } else if (Math.abs(dy) < 30) {
+        // Horizontal line for same-level connections
         return `M${source.x},${source.y} L${target.x},${target.y}`;
     } else {
-        // IMPROVED: Stepped path with better routing to avoid congestion
-        const midX = source.x + dx * 0.6;
-        const midY = source.y + dy * 0.3;
-        return `M${source.x},${source.y} L${midX},${source.y} Q${midX},${midY} L${midX},${target.y - 20} L${target.x},${target.y}`;
+        // Stepped path for program calls
+        const midX = source.x + dx * 0.5;
+        return `M${source.x},${source.y} L${midX},${source.y} L${midX},${target.y} L${target.x},${target.y}`;
     }
 }
+
 function getEdgeColor(edge) {
     const colorMap = {
         'program_call': '#2196f3',
