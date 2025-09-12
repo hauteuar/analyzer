@@ -5718,6 +5718,12 @@ function createProgramFlowView(sessionId) {
     }
     
     console.log(`Rendering VERTICAL TREE: ${layoutNodes.length} nodes, ${layoutEdges.length} edges`);
+    
+    console.log('=== DEBUGGING NODE POSITIONS ===');
+    layoutNodes.forEach(node => {
+        console.log(`${node.id}: x=${node.x}, y=${node.y}, level=${node.level}`);
+    });
+    console.log('=== END DEBUG ===');
     const legend = d3.select(container)
     .append('div')
     .attr('class', 'flow-legend');
@@ -5727,7 +5733,7 @@ function createProgramFlowView(sessionId) {
         .attr('width', '1400px')
         .attr('height', '1000px')
         .attr('viewBox', '0 0 1400 1000');
-}
+
     
     // Verify SVG was created
     if (svg.empty()) {
@@ -6007,52 +6013,45 @@ function createArcPath(source, target, edge) {
     return `M${source.x},${source.y} Q${controlX},${controlY} ${target.x},${target.y}`;
 }
 function calculateProgramHierarchy(programNodes, edges) {
-            const hierarchy = {};
-            const visited = new Set();
-            
-            // Find starting program
-            const startNode = programNodes.find(n => n.is_starting_program) || programNodes[0];
-            if (!startNode) return { 0: programNodes };
-            
-            hierarchy[0] = [startNode];
-            visited.add(startNode.id);
-            
-            const queue = [{ node: startNode, level: 0 }];
-            
-            while (queue.length > 0) {
-                const { node: currentNode, level } = queue.shift();
+    const hierarchy = {};
+    const visited = new Set();
+    
+    // Find starting program
+    const startNode = programNodes.find(n => n.is_starting_program) || programNodes[0];
+    if (!startNode) return { 0: programNodes };
+    
+    // CRITICAL: Level 0 at top
+    hierarchy[0] = [startNode];
+    visited.add(startNode.id);
+    
+    const queue = [{ node: startNode, level: 0 }];
+    
+    while (queue.length > 0) {
+        const { node: currentNode, level } = queue.shift();
+        
+        // Find program calls from this node
+        const outgoingEdges = edges.filter(e => 
+            e.from === currentNode.id && e.type === 'program_call'
+        );
+        
+        outgoingEdges.forEach(edge => {
+            const targetNode = programNodes.find(n => n.id === edge.to);
+            if (targetNode && !visited.has(targetNode.id)) {
+                const nextLevel = level + 1; // INCREMENT LEVEL DOWNWARD
                 
-                // Find program calls from this node
-                const outgoingEdges = edges.filter(e => 
-                    e.from === currentNode.id && e.type === 'program_call'
-                );
-                
-                outgoingEdges.forEach(edge => {
-                    const targetNode = programNodes.find(n => n.id === edge.to);
-                    if (targetNode && !visited.has(targetNode.id)) {
-                        const nextLevel = level + 1;
-                        
-                        if (!hierarchy[nextLevel]) {
-                            hierarchy[nextLevel] = [];
-                        }
-                        
-                        hierarchy[nextLevel].push(targetNode);
-                        visited.add(targetNode.id);
-                        queue.push({ node: targetNode, level: nextLevel });
-                    }
-                });
-            }
-            
-            // Add any orphaned programs to level 999
-            programNodes.forEach(node => {
-                if (!visited.has(node.id)) {
-                    if (!hierarchy[999]) hierarchy[999] = [];
-                    hierarchy[999].push(node);
+                if (!hierarchy[nextLevel]) {
+                    hierarchy[nextLevel] = [];
                 }
-            });
-            
-            return hierarchy;
-        }
+                
+                hierarchy[nextLevel].push(targetNode);
+                visited.add(targetNode.id);
+                queue.push({ node: targetNode, level: nextLevel });
+            }
+        });
+    }
+    
+    return hierarchy;
+}
 
 function drawEnhancedEdgeWithConnection(selection, edge) {
     const source = edge.source;
