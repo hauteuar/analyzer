@@ -5701,39 +5701,38 @@ function createProgramFlowView(sessionId) {
             chatInput.focus();
         }
         function renderFlowVisualization(vizData) {
-            const container = document.getElementById('flowVisualization');
-            
-            // Clear previous content
-            container.innerHTML = '';
-            
-            // Create SVG with proper vertical tree dimensions
-            const svg = d3.select(container)
-                .append('svg')
-                .attr('width', '1400px')
-                .attr('height', '1000px')
-                .attr('viewBox', '0 0 1400 1000');
-            
-            // Add legend
-            const legend = d3.select(container)
-                .append('div')
-                .attr('class', 'flow-legend');
-            
-            // Create hierarchical layout
-            
-            let layoutNodes, layoutEdges;
-            try {
-                const layoutResult = createHierarchicalLayout(vizData);
-                layoutNodes = layoutResult.layoutNodes;
-                layoutEdges = layoutResult.layoutEdges;
-            } catch (error) {
-                console.error('Error creating layout:', error);
-                container.innerHTML = '<p style="color: red;">Error creating program flow layout. Please check the data.</p>';
-                return;
-            }
-            
-            
-            console.log(`Rendering VERTICAL TREE: ${layoutNodes.length} nodes, ${layoutEdges.length} edges`);
-            
+    const container = document.getElementById('flowVisualization');
+    
+    // Clear previous content
+    container.innerHTML = '';
+    
+    // Create hierarchical layout first
+    let layoutNodes, layoutEdges;
+    try {
+        const layoutResult = createHierarchicalLayout(vizData);
+        layoutNodes = layoutResult.layoutNodes;
+        layoutEdges = layoutResult.layoutEdges;
+    } catch (error) {
+        console.error('Error creating layout:', error);
+        container.innerHTML = '<p style="color: red;">Error creating program flow layout. Please check the data.</p>';
+        return;
+    }
+    
+    console.log(`Rendering VERTICAL TREE: ${layoutNodes.length} nodes, ${layoutEdges.length} edges`);
+    
+    // Create SVG with proper vertical tree dimensions
+    const svg = d3.select(container)
+        .append('svg')
+        .attr('width', '1400px')
+        .attr('height', '1000px')
+        .attr('viewBox', '0 0 1400 1000');
+    
+    // Verify SVG was created
+    if (svg.empty()) {
+        console.error('Failed to create SVG element');
+        container.innerHTML = '<p style="color: red;">Failed to create SVG visualization.</p>';
+        return;
+    }
             // Add arrow markers
             const defs = svg.append('defs');
             createArrowMarkers(defs);
@@ -5777,9 +5776,6 @@ function createProgramFlowView(sessionId) {
             createVisualizationLegend(legend);
         }
     
-    const { layoutNodes, layoutEdges } = layoutResult;
-    
-    console.log(`Rendering ENHANCED: ${layoutNodes.length} nodes, ${layoutEdges.length} edges`);
     
     // Add arrow markers
     const defs = svg.append('defs');
