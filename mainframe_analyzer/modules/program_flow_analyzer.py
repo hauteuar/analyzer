@@ -1042,6 +1042,16 @@ class ProgramFlowAnalyzer:
             logger.error(f"Error generating business flow summary: {str(e)}")
             return "Business flow summary generation failed"
     
+    def _map_call_mechanism(self, mechanism):
+        """Map internal call mechanism to database values"""
+        mapping = {
+            'PROGRAM_CALL': 'STATIC_CALL',
+            'DYNAMIC_PROGRAM_CALL': 'DYNAMIC_CALL',
+            'CICS_LINK': 'CICS_LINK',
+            'CICS_XCTL': 'CICS_XCTL'
+        }
+        return mapping.get(mechanism, 'STATIC_CALL') 
+
     def _store_program_flow_analysis(self, session_id: str, flow_analysis: Dict):
         """Store program flow analysis in database"""
         try:
@@ -1060,7 +1070,8 @@ class ProgramFlowAnalyzer:
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         session_id, flow_id, step['source_program'], step['target_program'],
-                        step['sequence'], step['call_mechanism'], step.get('variable_name', ''),
+                        step['sequence'], self._map_call_mechanism(step.get('call_mechanism', 'PROGRAM_CALL')),
+                        step.get('variable_name', ''),  ''),
                         step.get('resolution_method', ''), 
                         json.dumps({
                             'passed_fields': step.get('data_passed', []), 
