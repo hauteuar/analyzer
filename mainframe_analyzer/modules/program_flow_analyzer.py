@@ -1081,7 +1081,7 @@ class ProgramFlowAnalyzer:
                         }),
                         step.get('business_context', f"Call from {step['source_program']} to {step['target_program']}"), 
                         step.get('line_number', 0), step.get('confidence', 0.8)
-                    ))
+                    )
                 
                 # Store field data flows
                 for field_flow in flow_analysis.get('field_flows', []):
