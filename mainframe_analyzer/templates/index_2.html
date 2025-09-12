@@ -613,9 +613,10 @@
         .node-program-main { fill: #1a73e8; stroke: #0d47a1; }
         .node-program-called { fill: #64b5f6; stroke: #1976d2; }
         .node-program-missing { fill: #ffcdd2; stroke: #d32f2f; stroke-dasharray: 5,5; }
-
         .node-file { fill: #4caf50; stroke: #2e7d32; }
         .node-db2 { fill: #ff9800; stroke: #f57c00; }
+
+        
         .node-cics { fill: #9c27b0; stroke: #6a1b9a; }
 
         .edge-call { stroke: #2196f3; }
@@ -626,9 +627,9 @@
         .edge-file-write { stroke: #ff9800; }
         .edge-file-update { stroke: #2196f3; }
 
-        .flow-legend {
+         .flow-legend {
             position: absolute;
-            top: 25%;
+            top: 10px;
             right: 10px;
             background: white;
             padding: 15px;
@@ -636,8 +637,8 @@
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             font-size: 12px;
             max-width: 200px;
+            z-index: 100;
         }
-
         .legend-item {
             display: flex;
             align-items: center;
@@ -1480,43 +1481,45 @@
     }
     
     .flow-controls {
-        margin-bottom: 20px;
-        padding: 15px;
-        background: #f5f5f5;
-        border-radius: 5px;
-    }
+            margin: 20px 0;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 5px;
+        }
+
+        .flow-controls input, .flow-controls button {
+            padding: 8px 16px;
+            margin-right: 10px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+
+        .flow-controls button {
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
     
-    .flow-controls input {
-        padding: 8px;
-        margin-right: 10px;
-        border: 1px solid #ddd;
-        border-radius: 3px;
-    }
     
-    .flow-controls button {
-        padding: 8px 16px;
-        background: #007bff;
-        color: white;
-        border: none;
-        border-radius: 3px;
-        cursor: pointer;
-    }
     
     .flow-visualization {
-    border: 1px solid #ddd;
-    border-radius: 5px;
-    margin-bottom: 20px;
-    min-height: 600px;
-    overflow-x: auto;
-    overflow-y: auto;
-    width: 100%;
-    max-width: 100%;
-}
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            height: 700px;
+            overflow-x: auto;
+            overflow-y: auto;
+            width: 100%;
+            max-width: 100%;
+            background: #f9f9f9;
+        }
 
-.flow-visualization svg {
-    min-width: 1400px; /* Force minimum width for scrolling */
-    height: 800px;
-}
+        .flow-visualization svg {
+            width: 1400px;
+            height: 1000px;
+            display: block;
+        }
+
     .flow-details {
         background: #f9f9f9;
         padding: 20px;
@@ -2154,8 +2157,8 @@
                 <div id="program-flow" class="tab-pane" >
                     <div class="program-flow-container">
                         <div class="flow-controls">
-                            <input type="text" id="startingProgram" placeholder="Enter program name (e.g., TMSTM6)">
-                            <button onclick="analyzeFlow()">Analyze Program Flow</button>
+                            <input type="text" id="startingProgram" placeholder="Enter program name (e.g., TMSTMPM4)" value="TMSTMPM4">
+                            <button onclick="renderSampleFlow()">Analyze Program Flow</button>
                         </div>
                         
                         <div id="flowVisualization" class="flow-visualization">
@@ -5698,32 +5701,79 @@ function createProgramFlowView(sessionId) {
             chatInput.focus();
         }
         function renderFlowVisualization(vizData) {
-    const container = document.getElementById('flowVisualization');
-    
-    // Clear previous content
-    container.innerHTML = '';
-    
-    // Create enhanced SVG with proper dimensions
-    const svg = d3.select(container)
-        .append('svg')
-        .attr('width', '100%')
-        .attr('height', '800px')
-        .attr('viewBox', '0 0 1400 800');
-    
-    // Add legend
-    const legend = d3.select(container)
-        .append('div')
-        .attr('class', 'flow-legend');
-    
-    // FIXED: Create proper hierarchical layout with aligned positioning
-    let layoutResult;
-    try {
-        layoutResult = createHierarchicalLayout(vizData);
-    } catch (error) {
-        console.error('Error creating layout:', error);
-        container.innerHTML = '<p style="color: red;">Error creating program flow layout. Please check the data.</p>';
-        return;
-    }
+            const container = document.getElementById('flowVisualization');
+            
+            // Clear previous content
+            container.innerHTML = '';
+            
+            // Create SVG with proper vertical tree dimensions
+            const svg = d3.select(container)
+                .append('svg')
+                .attr('width', '1400px')
+                .attr('height', '1000px')
+                .attr('viewBox', '0 0 1400 1000');
+            
+            // Add legend
+            const legend = d3.select(container)
+                .append('div')
+                .attr('class', 'flow-legend');
+            
+            // Create hierarchical layout
+            let layoutResult;
+            try {
+                layoutResult = createHierarchicalLayout(vizData);
+            } catch (error) {
+                console.error('Error creating layout:', error);
+                container.innerHTML = '<p style="color: red;">Error creating program flow layout. Please check the data.</p>';
+                return;
+            }
+            
+            const { layoutNodes, layoutEdges } = layoutResult;
+            
+            console.log(`Rendering VERTICAL TREE: ${layoutNodes.length} nodes, ${layoutEdges.length} edges`);
+            
+            // Add arrow markers
+            const defs = svg.append('defs');
+            createArrowMarkers(defs);
+            
+            // Draw edges first
+            const edges = svg.selectAll('.flow-edge')
+                .data(layoutEdges)
+                .enter()
+                .append('g')
+                .attr('class', 'flow-edge');
+            
+            edges.each(function(d, i) {
+                try {
+                    drawEnhancedEdge(d3.select(this), d);
+                } catch (error) {
+                    console.error(`Error drawing edge ${i}:`, error, d);
+                }
+            });
+            
+            // Draw nodes
+            const nodes = svg.selectAll('.flow-node')
+                .data(layoutNodes)
+                .enter()
+                .append('g')
+                .attr('class', 'flow-node')
+                .attr('transform', d => `translate(${d.x},${d.y})`);
+            
+            // Draw shapes for each node type
+            nodes.each(function(d, i) {
+                try {
+                    drawCustomShape(d3.select(this), d);
+                } catch (error) {
+                    console.error(`Error drawing node ${i}:`, error, d);
+                }
+            });
+            
+            // Add interactivity
+            addInteractivity(nodes, layoutEdges);
+            
+            // Create legend
+            createVisualizationLegend(legend);
+        }
     
     const { layoutNodes, layoutEdges } = layoutResult;
     
@@ -5778,197 +5828,164 @@ function createProgramFlowView(sessionId) {
     } catch (error) {
         console.error('Error creating legend:', error);
     }
-}
+
 
 function createHierarchicalLayout(vizData) {
-    const nodes = vizData.nodes || [];
-    const edges = vizData.edges || [];
-    
-    if (!nodes.length) {
-        throw new Error('No nodes provided for layout');
-    }
-    
-    // FIXED: Organize nodes by type and level with proper alignment
-    const programNodes = nodes.filter(n => n.type === 'program');
-    const fileNodes = nodes.filter(n => n.type === 'file');
-    const db2Nodes = nodes.filter(n => n.type === 'db2_table');
-    
-    // FIXED: Calculate proper hierarchy levels with alignment
-    const hierarchy = calculateProgramHierarchy(programNodes, edges);
-    
-    // Enhanced positioning with proper gaps and alignment
-    const layoutNodes = [];
-    const layerHeight = 120;
-    const layerWidth = 1400;
-    const minNodeSpacing = 200;
-    
-    // Position program nodes in hierarchical levels
-    Object.keys(hierarchy).forEach((level, levelIndex) => {
-        const nodesInLevel = hierarchy[level];
-        const totalWidth = nodesInLevel.length * minNodeSpacing;
-        const startX = Math.max(100, (layerWidth - totalWidth) / 2);
-        
-        nodesInLevel.forEach((node, nodeIndex) => {
-            const enhancedNode = {
-                ...node,
-                x: startX + (nodeIndex * minNodeSpacing),
-                y: 80 + (levelIndex * layerHeight),
-                level: parseInt(level),
-                width: getNodeWidth(node),
-                height: getNodeHeight(node)
-            };
-            layoutNodes.push(enhancedNode);
-        });
-    });
-    
-    // FIXED: Position file and DB2 nodes connected to their parent programs
-    const programPositions = {};
-    layoutNodes.forEach(node => {
-        if (node.type === 'program') {
-            programPositions[node.id] = { x: node.x, y: node.y, level: node.level };
-        }
-    });
-    
-    // Position file nodes below their connected programs
-    fileNodes.forEach((fileNode, index) => {
-        const connectedProgram = fileNode.connected_to_program;
-        const programPos = programPositions[connectedProgram];
-        
-        if (programPos) {
-            // Position files below their parent program
-            const filesForThisProgram = fileNodes.filter(f => f.connected_to_program === connectedProgram);
-            const fileIndex = filesForThisProgram.indexOf(fileNode);
+            const nodes = vizData.nodes || [];
+            const edges = vizData.edges || [];
             
-            layoutNodes.push({
-                ...fileNode,
-                x: programPos.x - 50 + (fileIndex * 120),
-                y: programPos.y + 150 + (programPos.level * 20), // Stagger by level
-                level: programPos.level + 10, // Below program level
-                width: getNodeWidth(fileNode),
-                height: getNodeHeight(fileNode),
-                parentProgram: connectedProgram
-            });
-        } else {
-            // Fallback positioning for orphaned files
-            layoutNodes.push({
-                ...fileNode,
-                x: 100 + (index * 130),
-                y: 600,
-                level: 999,
-                width: getNodeWidth(fileNode),
-                height: getNodeHeight(fileNode)
-            });
-        }
-    });
-    
-    // Position DB2 nodes below files
-    db2Nodes.forEach((db2Node, index) => {
-        const connectedProgram = db2Node.connected_to_program;
-        const programPos = programPositions[connectedProgram];
-        
-        if (programPos) {
-            const db2ForThisProgram = db2Nodes.filter(d => d.connected_to_program === connectedProgram);
-            const db2Index = db2ForThisProgram.indexOf(db2Node);
+            if (!nodes.length) {
+                throw new Error('No nodes provided for layout');
+            }
             
-            layoutNodes.push({
-                ...db2Node,
-                x: programPos.x - 50 + (db2Index * 130),
-                y: programPos.y + 220 + (programPos.level * 20), // Below files
-                level: programPos.level + 20,
-                width: getNodeWidth(db2Node),
-                height: getNodeHeight(db2Node),
-                parentProgram: connectedProgram
+            // Organize nodes by type
+            const programNodes = nodes.filter(n => n.type === 'program');
+            const fileNodes = nodes.filter(n => n.type === 'file');
+            const db2Nodes = nodes.filter(n => n.type === 'db2_table');
+            
+            // Calculate proper hierarchy levels for vertical tree layout
+            const hierarchy = calculateProgramHierarchy(programNodes, edges);
+            
+            // Vertical tree layout with centered positioning
+            const layoutNodes = [];
+            const levelHeight = 140;  // Vertical spacing between levels
+            const svgWidth = 1400;
+            const nodeSpacing = 180;  // Horizontal spacing between nodes at same level
+            
+            // Position program nodes in vertical hierarchy levels (top to bottom)
+            Object.keys(hierarchy).forEach((level, levelIndex) => {
+                const nodesInLevel = hierarchy[level];
+                const levelY = 60 + (levelIndex * levelHeight);
+                
+                // Center nodes horizontally at each level
+                const totalWidth = Math.max(nodesInLevel.length * nodeSpacing, 400);
+                const startX = (svgWidth - totalWidth) / 2;
+                
+                nodesInLevel.forEach((node, nodeIndex) => {
+                    const nodeX = startX + (totalWidth / (nodesInLevel.length + 1)) * (nodeIndex + 1);
+                    
+                    const enhancedNode = {
+                        ...node,
+                        x: nodeX,
+                        y: levelY,
+                        level: parseInt(level),
+                        width: getNodeWidth(node),
+                        height: getNodeHeight(node)
+                    };
+                    layoutNodes.push(enhancedNode);
+                });
             });
-        } else {
-            // Fallback positioning for orphaned DB2 nodes
-            layoutNodes.push({
-                ...db2Node,
-                x: 100 + (index * 140),
-                y: 700,
-                level: 998,
-                width: getNodeWidth(db2Node),
-                height: getNodeHeight(db2Node)
+            
+            // Build program position lookup for files/DB2 placement
+            const programPositions = {};
+            layoutNodes.forEach(node => {
+                if (node.type === 'program') {
+                    programPositions[node.id] = { x: node.x, y: node.y, level: node.level };
+                }
             });
+            
+            // Position file nodes below their connected programs in vertical tree
+            const maxProgramLevel = Math.max(...layoutNodes.filter(n => n.type === 'program').map(n => n.level));
+            const filesStartY = 60 + ((maxProgramLevel + 1) * levelHeight) + 40;
+            
+            fileNodes.forEach((fileNode, index) => {
+                const connectedProgram = fileNode.connected_to_program;
+                const programPos = programPositions[connectedProgram];
+                
+                if (programPos) {
+                    // Group files under their parent program vertically
+                    const filesForThisProgram = fileNodes.filter(f => f.connected_to_program === connectedProgram);
+                    const fileIndex = filesForThisProgram.indexOf(fileNode);
+                    
+                    layoutNodes.push({
+                        ...fileNode,
+                        x: programPos.x + ((fileIndex - (filesForThisProgram.length - 1) / 2) * 140),
+                        y: filesStartY,
+                        level: maxProgramLevel + 2,
+                        width: getNodeWidth(fileNode),
+                        height: getNodeHeight(fileNode),
+                        parentProgram: connectedProgram
+                    });
+                } else {
+                    // Fallback: arrange orphaned files horizontally at bottom
+                    const filesPerRow = Math.floor(svgWidth / 150);
+                    const row = Math.floor(index / filesPerRow);
+                    const col = index % filesPerRow;
+                    
+                    layoutNodes.push({
+                        ...fileNode,
+                        x: 100 + (col * 150),
+                        y: filesStartY + (row * 70),
+                        level: 999,
+                        width: getNodeWidth(fileNode),
+                        height: getNodeHeight(fileNode)
+                    });
+                }
+            });
+            
+            // Position DB2 nodes below files in vertical hierarchy
+            const db2StartY = filesStartY + 100;
+            db2Nodes.forEach((db2Node, index) => {
+                const connectedProgram = db2Node.connected_to_program;
+                const programPos = programPositions[connectedProgram];
+                
+                if (programPos) {
+                    const db2ForThisProgram = db2Nodes.filter(d => d.connected_to_program === connectedProgram);
+                    const db2Index = db2ForThisProgram.indexOf(db2Node);
+                    
+                    layoutNodes.push({
+                        ...db2Node,
+                        x: programPos.x + ((db2Index - (db2ForThisProgram.length - 1) / 2) * 150),
+                        y: db2StartY,
+                        level: maxProgramLevel + 3,
+                        width: getNodeWidth(db2Node),
+                        height: getNodeHeight(db2Node),
+                        parentProgram: connectedProgram
+                    });
+                } else {
+                    // Fallback: arrange orphaned DB2 nodes horizontally
+                    const db2PerRow = Math.floor(svgWidth / 160);
+                    const row = Math.floor(index / db2PerRow);
+                    const col = index % db2PerRow;
+                    
+                    layoutNodes.push({
+                        ...db2Node,
+                        x: 100 + (col * 160),
+                        y: db2StartY + (row * 70),
+                        level: 998,
+                        width: getNodeWidth(db2Node),
+                        height: getNodeHeight(db2Node)
+                    });
+                }
+            });
+            
+            // Calculate enhanced edge positions with proper connections
+            const layoutEdges = edges.map(edge => {
+                const sourceNode = layoutNodes.find(n => n.id === edge.from);
+                const targetNode = layoutNodes.find(n => n.id === edge.to);
+                
+                if (!sourceNode || !targetNode) {
+                    console.warn(`Missing nodes for edge: ${edge.from} -> ${edge.to}`);
+                    return null;
+                }
+                
+                return {
+                    ...edge,
+                    source: sourceNode,
+                    target: targetNode,
+                    path: calculateEnhancedEdgePath(sourceNode, targetNode, edge)
+                };
+            }).filter(e => e !== null);
+            
+            return { layoutNodes, layoutEdges };
         }
-    });
-    
-    // FIXED: Calculate enhanced edge positions with proper connections
-    const layoutEdges = edges.map(edge => {
-        const sourceNode = layoutNodes.find(n => n.id === edge.from);
-        const targetNode = layoutNodes.find(n => n.id === edge.to);
-        
-        if (!sourceNode || !targetNode) {
-            console.warn(`Missing nodes for edge: ${edge.from} -> ${edge.to}`);
-            return null;
-        }
-        
-        return {
-            ...edge,
-            source: sourceNode,
-            target: targetNode,
-            path: calculateEnhancedEdgePath(sourceNode, targetNode, edge)
-        };
-    }).filter(e => e !== null);
-    
-    return { layoutNodes, layoutEdges };
-}
+
 
 function calculateEnhancedEdgePath(sourceNode, targetNode, edge) {
-    const dx = targetNode.x - sourceNode.x;
-    const dy = targetNode.y - sourceNode.y;
-    const sourceWidth = sourceNode.width || 100;
-    const sourceHeight = sourceNode.height || 50;
-    const targetWidth = targetNode.width || 100;
-    const targetHeight = targetNode.height || 50;
-    
-    // Calculate proper connection points based on node positions
-    let sourcePoint, targetPoint;
-    
-    // Determine which side to connect based on relative positions
-    if (Math.abs(dx) > Math.abs(dy)) {
-        // Horizontal connection (left/right sides)
-        if (dx > 0) {
-            // Source connects from right side, target from left side
-            sourcePoint = { x: sourceNode.x + sourceWidth/2, y: sourceNode.y };
-            targetPoint = { x: targetNode.x - targetWidth/2, y: targetNode.y };
-        } else {
-            // Source connects from left side, target from right side
-            sourcePoint = { x: sourceNode.x - sourceWidth/2, y: sourceNode.y };
-            targetPoint = { x: targetNode.x + targetWidth/2, y: targetNode.y };
+            // Simple straight line for now - can be enhanced with curves
+            return `M${sourceNode.x},${sourceNode.y} L${targetNode.x},${targetNode.y}`;
         }
-    } else {
-        // Vertical connection (top/bottom sides)
-        if (dy > 0) {
-            // Source connects from bottom, target from top
-            sourcePoint = { x: sourceNode.x, y: sourceNode.y + sourceHeight/2 };
-            targetPoint = { x: targetNode.x, y: targetNode.y - targetHeight/2 };
-        } else {
-            // Source connects from top, target from bottom
-            sourcePoint = { x: sourceNode.x, y: sourceNode.y - sourceHeight/2 };
-            targetPoint = { x: targetNode.x, y: targetNode.y + targetHeight/2 };
-        }
-    }
-    
-    // Create different path types based on edge type and layout
-    const pathType = getPathType(edge, sourceNode, targetNode);
-    
-    switch (pathType) {
-        case 'straight':
-            return createStraightPath(sourcePoint, targetPoint);
-            
-        case 'curved':
-            return createCurvedPath(sourcePoint, targetPoint, edge);
-            
-        case 'stepped':
-            return createSteppedPath(sourcePoint, targetPoint, edge);
-            
-        case 'arc':
-            return createArcPath(sourcePoint, targetPoint, edge);
-            
-        default:
-            return createStraightPath(sourcePoint, targetPoint);
-    }
-}
+
 
 function getPathType(edge, sourceNode, targetNode) {
     // Determine path type based on edge type and node layout
@@ -6039,52 +6056,53 @@ function createArcPath(source, target, edge) {
     return `M${source.x},${source.y} Q${controlX},${controlY} ${target.x},${target.y}`;
 }
 function calculateProgramHierarchy(programNodes, edges) {
-    const hierarchy = {};
-    const visited = new Set();
-    
-    // Find starting program (marked as is_starting_program)
-    const startNode = programNodes.find(n => n.is_starting_program) || programNodes[0];
-    if (!startNode) return { 0: programNodes };
-    
-    hierarchy[0] = [startNode];
-    visited.add(startNode.id);
-    
-    const queue = [{ node: startNode, level: 0 }];
-    
-    while (queue.length > 0) {
-        const { node: currentNode, level } = queue.shift();
-        
-        // Find program calls from this node
-        const outgoingEdges = edges.filter(e => 
-            e.from === currentNode.id && e.type === 'program_call'
-        );
-        
-        outgoingEdges.forEach(edge => {
-            const targetNode = programNodes.find(n => n.id === edge.to);
-            if (targetNode && !visited.has(targetNode.id)) {
-                const nextLevel = level + 1;
+            const hierarchy = {};
+            const visited = new Set();
+            
+            // Find starting program
+            const startNode = programNodes.find(n => n.is_starting_program) || programNodes[0];
+            if (!startNode) return { 0: programNodes };
+            
+            hierarchy[0] = [startNode];
+            visited.add(startNode.id);
+            
+            const queue = [{ node: startNode, level: 0 }];
+            
+            while (queue.length > 0) {
+                const { node: currentNode, level } = queue.shift();
                 
-                if (!hierarchy[nextLevel]) {
-                    hierarchy[nextLevel] = [];
-                }
+                // Find program calls from this node
+                const outgoingEdges = edges.filter(e => 
+                    e.from === currentNode.id && e.type === 'program_call'
+                );
                 
-                hierarchy[nextLevel].push(targetNode);
-                visited.add(targetNode.id);
-                queue.push({ node: targetNode, level: nextLevel });
+                outgoingEdges.forEach(edge => {
+                    const targetNode = programNodes.find(n => n.id === edge.to);
+                    if (targetNode && !visited.has(targetNode.id)) {
+                        const nextLevel = level + 1;
+                        
+                        if (!hierarchy[nextLevel]) {
+                            hierarchy[nextLevel] = [];
+                        }
+                        
+                        hierarchy[nextLevel].push(targetNode);
+                        visited.add(targetNode.id);
+                        queue.push({ node: targetNode, level: nextLevel });
+                    }
+                });
             }
-        });
-    }
-    
-    // Add any orphaned programs to level 999
-    programNodes.forEach(node => {
-        if (!visited.has(node.id)) {
-            if (!hierarchy[999]) hierarchy[999] = [];
-            hierarchy[999].push(node);
+            
+            // Add any orphaned programs to level 999
+            programNodes.forEach(node => {
+                if (!visited.has(node.id)) {
+                    if (!hierarchy[999]) hierarchy[999] = [];
+                    hierarchy[999].push(node);
+                }
+            });
+            
+            return hierarchy;
         }
-    });
-    
-    return hierarchy;
-}
+
 function drawEnhancedEdgeWithConnection(selection, edge) {
     const source = edge.source;
     const target = edge.target;
@@ -6186,19 +6204,16 @@ function createEnhancedPath(source, target, edge) {
 }
 
 function getEdgeColor(edge) {
-    const colorMap = {
-        'program_call': '#2196f3',
-        'file_operation': '#4caf50',
-        'db2_operation': '#ff9800',
-        'dynamic_call': '#9c27b0'
-    };
-    
-    if (edge.status === 'missing') {
-        return '#dc3545';
-    }
-    
-    return colorMap[edge.type] || '#666';
-}
+            const colorMap = {
+                'program_call': '#2196f3',
+                'file_operation': '#4caf50',
+                'db2_operation': '#ff9800'
+            };
+            
+            if (edge.call_type === 'XCTL') return '#ff5722';
+            return colorMap[edge.type] || '#666';
+        }
+
 
 function drawEnhancedCustomShape(selection, node) {
     const g = selection;
@@ -6539,24 +6554,23 @@ function createEnhancedVisualizationLegend(legendContainer) {
     });
 }
 
-// Helper functions
-function getNodeWidth(node) {
-    const widthMap = {
-        'program': 120,
-        'file': 100,
-        'db2_table': 110
-    };
-    return widthMap[node.type] || 100;
-}
+ function getNodeWidth(node) {
+            const widthMap = {
+                'program': 120,
+                'file': 100,
+                'db2_table': 110
+            };
+            return widthMap[node.type] || 100;
+        }
 
-function getNodeHeight(node) {
-    const heightMap = {
-        'program': 60,
-        'file': 50,
-        'db2_table': 50
-    };
-    return heightMap[node.type] || 50;
-}
+        function getNodeHeight(node) {
+            const heightMap = {
+                'program': 60,
+                'file': 50,
+                'db2_table': 50
+            };
+            return heightMap[node.type] || 50;
+        }
 
 function getMidPoint(source, target) {
     return {
@@ -6613,235 +6627,169 @@ function getNodeHeight(node) {
 }
 
 function createArrowMarkers(defs) {
-    // Call arrow
-    defs.append('marker')
-        .attr('id', 'arrow-call')
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 10)
-        .attr('refY', 0)
-        .attr('markerWidth', 6)
-        .attr('markerHeight', 6)
-        .attr('orient', 'auto')
-        .append('path')
-        .attr('d', 'M0,-5L10,0L0,5')
-        .attr('fill', '#2196f3');
-    
-    // XCTL arrow (thicker)
-    defs.append('marker')
-        .attr('id', 'arrow-xctl')
-        .attr('viewBox', '0 -8 15 16')
-        .attr('refX', 15)
-        .attr('refY', 0)
-        .attr('markerWidth', 8)
-        .attr('markerHeight', 8)
-        .attr('orient', 'auto')
-        .append('path')
-        .attr('d', 'M0,-8L15,0L0,8')
-        .attr('fill', '#ff5722');
-    
-    // Dynamic arrow (dashed)
-    defs.append('marker')
-        .attr('id', 'arrow-dynamic')
-        .attr('viewBox', '0 -5 10 10')
-        .attr('refX', 10)
-        .attr('refY', 0)
-        .attr('markerWidth', 6)
-        .attr('markerHeight', 6)
-        .attr('orient', 'auto')
-        .append('path')
-        .attr('d', 'M0,-5L10,0L0,5')
-        .attr('fill', '#9c27b0');
-    
-    // File operation arrows
-    ['read', 'write', 'update'].forEach(op => {
-        const colors = { read: '#4caf50', write: '#ff9800', update: '#2196f3' };
-        defs.append('marker')
-            .attr('id', `arrow-file-${op}`)
-            .attr('viewBox', '0 -5 10 10')
-            .attr('refX', 10)
-            .attr('refY', 0)
-            .attr('markerWidth', 6)
-            .attr('markerHeight', 6)
-            .attr('orient', 'auto')
-            .append('path')
-            .attr('d', 'M0,-5L10,0L0,5')
-            .attr('fill', colors[op]);
-    });
-}
+            // Call arrow
+            defs.append('marker')
+                .attr('id', 'arrow-call')
+                .attr('viewBox', '0 -5 10 10')
+                .attr('refX', 10)
+                .attr('refY', 0)
+                .attr('markerWidth', 6)
+                .attr('markerHeight', 6)
+                .attr('orient', 'auto')
+                .append('path')
+                .attr('d', 'M0,-5L10,0L0,5')
+                .attr('fill', '#2196f3');
+            
+            // XCTL arrow
+            defs.append('marker')
+                .attr('id', 'arrow-xctl')
+                .attr('viewBox', '0 -8 15 16')
+                .attr('refX', 15)
+                .attr('refY', 0)
+                .attr('markerWidth', 8)
+                .attr('markerHeight', 8)
+                .attr('orient', 'auto')
+                .append('path')
+                .attr('d', 'M0,-8L15,0L0,8')
+                .attr('fill', '#ff5722');
+            
+            // File operation arrows
+            ['read', 'write'].forEach(op => {
+                const colors = { read: '#4caf50', write: '#ff9800' };
+                defs.append('marker')
+                    .attr('id', `arrow-file-${op}`)
+                    .attr('viewBox', '0 -5 10 10')
+                    .attr('refX', 10)
+                    .attr('refY', 0)
+                    .attr('markerWidth', 6)
+                    .attr('markerHeight', 6)
+                    .attr('orient', 'auto')
+                    .append('path')
+                    .attr('d', 'M0,-5L10,0L0,5')
+                    .attr('fill', colors[op]);
+            });
+        }
+
 
 function drawCustomShape(selection, node) {
-    const g = selection;
-    
-    // Add drop shadow filter
-    g.style('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.2))');
-    
-    switch (node.type) {
-        case 'program':
-            drawProgramShape(g, node);
-            break;
-        case 'file':
-            drawFileShape(g, node);
-            break;
-        case 'db2_table':
-            drawDB2Shape(g, node);
-            break;
-        default:
-            drawDefaultShape(g, node);
-    }
-    
-    // Enhanced node label with better positioning
-    g.append('text')
-        .attr('class', 'node-label')
-        .attr('text-anchor', 'middle')
-        .attr('dy', '0.35em')
-        .style('font-size', '10px') // Slightly smaller for better fit
-        .style('font-weight', 'bold')
-        .style('fill', node.status === 'missing' ? '#d32f2f' : 'white')
-        .style('pointer-events', 'none')
-        .each(function(d) {
-            // Multi-line text for long labels
-            const text = d3.select(this);
-            const words = node.label.split(/\s+/);
-            if (words.length > 1 && node.label.length > 10) {
-                text.text('');
-                text.append('tspan').attr('x', 0).attr('dy', '-0.3em').text(words[0]);
-                text.append('tspan').attr('x', 0).attr('dy', '1.2em').text(words.slice(1).join(' '));
-            } else {
-                text.text(node.label.length > 12 ? node.label.substring(0, 12) + '...' : node.label);
+            const g = selection;
+            
+            // Add drop shadow
+            g.style('filter', 'drop-shadow(2px 2px 4px rgba(0,0,0,0.2))');
+            
+            switch (node.type) {
+                case 'program':
+                    drawProgramShape(g, node);
+                    break;
+                case 'file':
+                    drawFileShape(g, node);
+                    break;
+                case 'db2_table':
+                    drawDB2Shape(g, node);
+                    break;
             }
-        });
-}
+            
+            // Node label
+            g.append('text')
+                .attr('class', 'node-label')
+                .attr('text-anchor', 'middle')
+                .attr('dy', '0.35em')
+                .style('font-size', '10px')
+                .style('font-weight', 'bold')
+                .style('fill', node.status === 'missing' ? '#d32f2f' : 'white')
+                .style('pointer-events', 'none')
+                .text(node.label.length > 12 ? node.label.substring(0, 12) + '...' : node.label);
+        }
+
 
 function drawProgramShape(g, node) {
-    const width = node.width;
-    const height = node.height;
-    
-    let className = 'node-program';
-    if (node.is_starting_program) className = 'node-program-main';
-    else if (node.status === 'missing') className = 'node-program-missing';
-    else className = 'node-program-called';
-    
-    if (node.status === 'missing') {
-        // Diamond shape for missing programs
-        g.append('polygon')
-            .attr('class', className)
-            .attr('points', `0,${-height/2} ${width/2},0 0,${height/2} ${-width/2},0`)
-            .attr('stroke-width', 2);
-    } else {
-        // Rounded rectangle for available programs
-        g.append('rect')
-            .attr('class', className)
-            .attr('x', -width/2)
-            .attr('y', -height/2)
-            .attr('width', width)
-            .attr('height', height)
-            .attr('rx', 8)
-            .attr('ry', 8)
-            .attr('stroke-width', 2);
-    }
-    
-    // Add program type indicator
-    if (node.is_starting_program) {
-        g.append('circle')
-            .attr('cx', width/2 - 8)
-            .attr('cy', -height/2 + 8)
-            .attr('r', 4)
-            .attr('fill', '#fff')
-            .attr('stroke', '#1a73e8')
-            .attr('stroke-width', 2);
-    }
-}
+            const width = node.width;
+            const height = node.height;
+            
+            let className = 'node-program';
+            if (node.is_starting_program) className = 'node-program-main';
+            else if (node.status === 'missing') className = 'node-program-missing';
+            else className = 'node-program-called';
+            
+            if (node.status === 'missing') {
+                // Diamond shape for missing programs
+                g.append('polygon')
+                    .attr('class', className)
+                    .attr('points', `0,${-height/2} ${width/2},0 0,${height/2} ${-width/2},0`)
+                    .attr('stroke-width', 2);
+            } else {
+                // Rounded rectangle for available programs
+                g.append('rect')
+                    .attr('class', className)
+                    .attr('x', -width/2)
+                    .attr('y', -height/2)
+                    .attr('width', width)
+                    .attr('height', height)
+                    .attr('rx', 8)
+                    .attr('ry', 8)
+                    .attr('stroke-width', 2);
+            }
+        }
 
 function drawFileShape(g, node) {
-    const width = node.width;
-    const height = node.height;
-    
-    // Cylinder shape for files
-    const ellipseHeight = height * 0.2;
-    
-    // Main cylinder body
-    g.append('rect')
-        .attr('class', 'node-file')
-        .attr('x', -width/2)
-        .attr('y', -height/2 + ellipseHeight/2)
-        .attr('width', width)
-        .attr('height', height - ellipseHeight)
-        .attr('stroke-width', 2);
-    
-    // Top ellipse
-    g.append('ellipse')
-        .attr('class', 'node-file')
-        .attr('cx', 0)
-        .attr('cy', -height/2 + ellipseHeight/2)
-        .attr('rx', width/2)
-        .attr('ry', ellipseHeight/2)
-        .attr('stroke-width', 2);
-    
-    // Bottom ellipse
-    g.append('ellipse')
-        .attr('class', 'node-file')
-        .attr('cx', 0)
-        .attr('cy', height/2 - ellipseHeight/2)
-        .attr('rx', width/2)
-        .attr('ry', ellipseHeight/2)
-        .attr('stroke-width', 2);
-    
-    // Add interface indicator
-    if (node.interface === 'CICS') {
-        g.append('rect')
-            .attr('x', -width/2 + 2)
-            .attr('y', -height/2 + 2)
-            .attr('width', 20)
-            .attr('height', 10)
-            .attr('fill', '#9c27b0')
-            .attr('rx', 2);
-        
-        g.append('text')
-            .attr('x', -width/2 + 12)
-            .attr('y', -height/2 + 8)
-            .attr('text-anchor', 'middle')
-            .attr('font-size', '6px')
-            .attr('fill', 'white')
-            .text('CICS');
-    }
-}
+            const width = node.width;
+            const height = node.height;
+            const ellipseHeight = height * 0.2;
+            
+            // Cylinder body
+            g.append('rect')
+                .attr('class', 'node-file')
+                .attr('x', -width/2)
+                .attr('y', -height/2 + ellipseHeight/2)
+                .attr('width', width)
+                .attr('height', height - ellipseHeight)
+                .attr('stroke-width', 2);
+            
+            // Top and bottom ellipses
+            g.append('ellipse')
+                .attr('class', 'node-file')
+                .attr('cx', 0)
+                .attr('cy', -height/2 + ellipseHeight/2)
+                .attr('rx', width/2)
+                .attr('ry', ellipseHeight/2)
+                .attr('stroke-width', 2);
+                
+            g.append('ellipse')
+                .attr('class', 'node-file')
+                .attr('cx', 0)
+                .attr('cy', height/2 - ellipseHeight/2)
+                .attr('rx', width/2)
+                .attr('ry', ellipseHeight/2)
+                .attr('stroke-width', 2);
+        }
+
 
 function drawDB2Shape(g, node) {
-    const width = node.width;
-    const height = node.height;
-    
-    // Database table shape
-    g.append('rect')
-        .attr('class', 'node-db2')
-        .attr('x', -width/2)
-        .attr('y', -height/2)
-        .attr('width', width)
-        .attr('height', height)
-        .attr('rx', 4)
-        .attr('ry', 4)
-        .attr('stroke-width', 2);
-    
-    // Add DB2 indicator lines
-    for (let i = 1; i <= 3; i++) {
-        g.append('line')
-            .attr('x1', -width/2 + 5)
-            .attr('y1', -height/2 + (i * height/4))
-            .attr('x2', width/2 - 5)
-            .attr('y2', -height/2 + (i * height/4))
-            .attr('stroke', '#f57c00')
-            .attr('stroke-width', 1)
-            .attr('opacity', 0.6);
-    }
-    
-    // DB2 icon
-    g.append('circle')
-        .attr('cx', width/2 - 8)
-        .attr('cy', -height/2 + 8)
-        .attr('r', 4)
-        .attr('fill', '#fff')
-        .attr('stroke', '#f57c00')
-        .attr('stroke-width', 1);
-}
+            const width = node.width;
+            const height = node.height;
+            
+            g.append('rect')
+                .attr('class', 'node-db2')
+                .attr('x', -width/2)
+                .attr('y', -height/2)
+                .attr('width', width)
+                .attr('height', height)
+                .attr('rx', 4)
+                .attr('ry', 4)
+                .attr('stroke-width', 2);
+            
+            // Add table lines
+            for (let i = 1; i <= 3; i++) {
+                g.append('line')
+                    .attr('x1', -width/2 + 5)
+                    .attr('y1', -height/2 + (i * height/4))
+                    .attr('x2', width/2 - 5)
+                    .attr('y2', -height/2 + (i * height/4))
+                    .attr('stroke', '#f57c00')
+                    .attr('stroke-width', 1)
+                    .attr('opacity', 0.6);
+            }
+        }
 
 function drawDefaultShape(g, node) {
     g.append('circle')
@@ -6852,61 +6800,23 @@ function drawDefaultShape(g, node) {
 }
 
 function drawEnhancedEdge(selection, edge) {
-    const source = edge.source;
-    const target = edge.target;
-    
-    // Calculate connection points
-    const sourcePoint = getConnectionPoint(source, target, 'source');
-    const targetPoint = getConnectionPoint(target, source, 'target');
-    
-    // Determine edge style
-    const edgeClass = getEdgeClass(edge);
-    const markerEnd = getMarkerEnd(edge);
-    
-    // Draw path
-    const path = selection.append('path')
-        .attr('class', `flow-edge ${edgeClass}`)
-        .attr('d', createPath(sourcePoint, targetPoint, edge))
-        .attr('fill', 'none')
-        .attr('stroke-width', getStrokeWidth(edge))
-        .attr('marker-end', `url(#${markerEnd})`);
-    
-    // Add stroke-dasharray for dynamic calls
-    if (edge.type === 'dynamic_call' || edge.is_dynamic) {
-        path.attr('stroke-dasharray', '8,4');
-    }
-    
-    // Add sequence label for program calls
-    if (edge.type === 'program_call' && edge.sequence) {
-        const midPoint = getMidPoint(sourcePoint, targetPoint);
-        selection.append('circle')
-            .attr('cx', midPoint.x)
-            .attr('cy', midPoint.y)
-            .attr('r', 12)
-            .attr('fill', '#2196f3')
-            .attr('stroke', 'white')
-            .attr('stroke-width', 2);
-        
-        selection.append('text')
-            .attr('class', 'sequence-label')
-            .attr('x', midPoint.x)
-            .attr('y', midPoint.y)
-            .text(edge.sequence);
-    }
-    
-    // Add edge label for dynamic calls
-    if (edge.variable_name) {
-        const midPoint = getMidPoint(sourcePoint, targetPoint);
-        selection.append('text')
-            .attr('x', midPoint.x)
-            .attr('y', midPoint.y - 15)
-            .attr('text-anchor', 'middle')
-            .attr('font-size', '10px')
-            .attr('fill', '#9c27b0')
-            .attr('font-weight', 'bold')
-            .text(edge.variable_name);
-    }
-}
+            const source = edge.source;
+            const target = edge.target;
+            
+            // Determine edge style
+            const edgeClass = getEdgeClass(edge);
+            const markerEnd = getMarkerEnd(edge);
+            const strokeColor = getEdgeColor(edge);
+            
+            // Draw path
+            const path = selection.append('path')
+                .attr('class', `flow-edge ${edgeClass}`)
+                .attr('d', edge.path || `M${source.x},${source.y} L${target.x},${target.y}`)
+                .attr('fill', 'none')
+                .attr('stroke', strokeColor)
+                .attr('stroke-width', getStrokeWidth(edge))
+                .attr('marker-end', `url(#${markerEnd})`);
+        }
 
 function getConnectionPoint(node, otherNode, role) {
     const x = node.x;
@@ -6933,46 +6843,30 @@ function getConnectionPoint(node, otherNode, role) {
     }
 }
 
-function getEdgeClass(edge) {
-    if (edge.type === 'file_operation') {
-        const op = edge.io_direction?.toLowerCase() || 'read';
-        return `edge-file-${op}`;
-    }
-    
-    switch (edge.call_type || edge.type) {
-        case 'XCTL': return 'edge-xctl';
-        case 'LINK': return 'edge-link';
-        case 'dynamic_call':
-        case 'DYNAMIC': return 'edge-dynamic';
-        default: return 'edge-call';
-    }
-}
+ function getEdgeClass(edge) {
+            switch (edge.call_type || edge.type) {
+                case 'XCTL': return 'edge-xctl';
+                case 'file_operation': return 'edge-file';
+                default: return 'edge-call';
+            }
+        }
 
-function getMarkerEnd(edge) {
-    if (edge.type === 'file_operation') {
-        const op = edge.io_direction?.toLowerCase() || 'read';
-        return `arrow-file-${op}`;
-    }
-    
-    switch (edge.call_type || edge.type) {
-        case 'XCTL': return 'arrow-xctl';
-        case 'dynamic_call':
-        case 'DYNAMIC': return 'arrow-dynamic';
-        default: return 'arrow-call';
-    }
-}
+ function getMarkerEnd(edge) {
+            if (edge.type === 'file_operation') {
+                return `arrow-file-${edge.io_direction}`;
+            }
+            switch (edge.call_type) {
+                case 'XCTL': return 'arrow-xctl';
+                default: return 'arrow-call';
+            }
+        }
 
 function getStrokeWidth(edge) {
-    if (!edge) return 2;
-    
-    switch (edge.call_type || edge.type) {
-        case 'XCTL': return 3;
-        case 'LINK': return 2;
-        case 'file_operation': return 2;
-        case 'db2_operation': return 2;
-        default: return 2;
-    }
-}
+            switch (edge.call_type || edge.type) {
+                case 'XCTL': return 3;
+                default: return 2;
+            }
+        }
 
 function createPath(source, target, edge) {
     // Create curved path for better visual flow
@@ -7002,52 +6896,30 @@ function calculateEdgePath(sourceNode, targetNode, edge) {
 }
 
 function addInteractivity(nodes, edges) {
-    // Store edges data globally for later use
-    window.currentFlowEdges = edges;
-    
-    nodes.on('click', function(event, d) {
-        showEnhancedNodeDetails(d);
-    });
-    
-    nodes.on('mouseover', function(event, d) {
-        // Fixed hover transform
-        d3.select(this)
-            .transition()
-            .duration(200)
-            .attr('transform', function() {
-                const currentTransform = d3.select(this).attr('transform');
-                const translateMatch = currentTransform.match(/translate\(([^,]+),([^)]+)\)/);
-                if (translateMatch) {
-                    const x = parseFloat(translateMatch[1]);
-                    const y = parseFloat(translateMatch[2]);
-                    return `translate(${x},${y}) scale(1.1)`;
-                }
-                return currentTransform + ' scale(1.1)';
-            })
-            .style('cursor', 'pointer');
-        
-        highlightConnectedComponents(d);
-    });
-    
-    nodes.on('mouseout', function(event, d) {
-        // Reset transform properly
-        d3.select(this)
-            .transition()
-            .duration(200)
-            .attr('transform', function() {
-                const currentTransform = d3.select(this).attr('transform');
-                const translateMatch = currentTransform.match(/translate\(([^,]+),([^)]+)\)/);
-                if (translateMatch) {
-                    const x = parseFloat(translateMatch[1]);
-                    const y = parseFloat(translateMatch[2]);
-                    return `translate(${x},${y})`;
-                }
-                return currentTransform.replace(/ scale\([^)]+\)/, '');
+            nodes.on('click', function(event, d) {
+                console.log('Clicked node:', d);
             });
-        
-        resetHighlights();
-    });
-}
+            
+            nodes.on('mouseover', function(event, d) {
+                d3.select(this)
+                    .transition()
+                    .duration(200)
+                    .attr('transform', function() {
+                        const currentTransform = d3.select(this).attr('transform');
+                        return currentTransform + ' scale(1.1)';
+                    })
+                    .style('cursor', 'pointer');
+            });
+            
+            nodes.on('mouseout', function(event, d) {
+                d3.select(this)
+                    .transition()
+                    .duration(200)
+                    .attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+        }
+
+
 function highlightConnectedComponents(node) {
     // Check if edges data is available
     const edges = window.currentFlowEdges;
@@ -7111,39 +6983,37 @@ function resetHighlights() {
 }
 
 function createVisualizationLegend(legendContainer) {
-    const legendData = [
-        { type: 'program-main', label: 'Starting Program', color: '#1a73e8' },
-        { type: 'program-called', label: 'Called Program', color: '#64b5f6' },
-        { type: 'program-missing', label: 'Missing Program', color: '#ffcdd2' },
-        { type: 'file', label: 'File/Dataset', color: '#4caf50' },
-        { type: 'db2', label: 'DB2 Table', color: '#ff9800' },
-        { type: 'call', label: 'CALL', color: '#2196f3', isEdge: true },
-        { type: 'xctl', label: 'XCTL', color: '#ff5722', isEdge: true },
-        { type: 'dynamic', label: 'Dynamic Call', color: '#9c27b0', isEdge: true, dashed: true }
-    ];
-    
-    legendContainer.append('h4')
-        .style('margin', '0 0 10px 0')
-        .style('font-size', '14px')
-        .text('Legend');
-    
-    const legendItems = legendContainer.selectAll('.legend-item')
-        .data(legendData)
-        .enter()
-        .append('div')
-        .attr('class', 'legend-item');
-    
-    legendItems.append('div')
-        .attr('class', 'legend-symbol')
-        .style('background-color', d => d.color)
-        .style('border', d => d.type.includes('missing') ? '2px dashed #d32f2f' : 'none')
-        .style('height', d => d.isEdge ? '2px' : '12px')
-        .style('border-style', d => d.dashed ? 'dashed' : 'solid');
-    
-    legendItems.append('span')
-        .text(d => d.label);
-}
-
+            const legendData = [
+                { type: 'program-main', label: 'Starting Program', color: '#1a73e8' },
+                { type: 'program-called', label: 'Called Program', color: '#64b5f6' },
+                { type: 'program-missing', label: 'Missing Program', color: '#ffcdd2' },
+                { type: 'file', label: 'File/Dataset', color: '#4caf50' },
+                { type: 'db2', label: 'DB2 Table', color: '#ff9800' }
+            ];
+            
+            const container = legendContainer.node();
+            container.innerHTML = '<h4 style="margin: 0 0 10px 0; font-size: 14px;">Legend</h4>';
+            
+            legendData.forEach(item => {
+                const legendItem = document.createElement('div');
+                legendItem.className = 'legend-item';
+                
+                const symbol = document.createElement('div');
+                symbol.className = 'legend-symbol';
+                symbol.style.backgroundColor = item.color;
+                if (item.type.includes('missing')) {
+                    symbol.style.border = '2px dashed #d32f2f';
+                    symbol.style.background = 'none';
+                }
+                
+                const label = document.createElement('span');
+                label.textContent = item.label;
+                
+                legendItem.appendChild(symbol);
+                legendItem.appendChild(label);
+                container.appendChild(legendItem);
+            });
+        }
 function showEnhancedNodeDetails(node) {
     // Enhanced version of your existing showNodeDetails function
     const modalContent = {
