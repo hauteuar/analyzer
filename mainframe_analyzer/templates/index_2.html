@@ -628,7 +628,7 @@
 
         .flow-legend {
             position: absolute;
-            top: 10px;
+            top: 25%;
             right: 10px;
             background: white;
             padding: 15px;
@@ -811,6 +811,136 @@
             color: #667eea;
             filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
         }
+
+        .program-chain-section {
+        margin: 20px 0;
+        padding: 20px;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    
+    .program-chain-item {
+        display: flex;
+        align-items: center;
+        padding: 10px;
+        margin: 5px 0;
+        border-radius: 6px;
+        border: 1px solid #e9ecef;
+    }
+    
+    .program-chain-item.missing-program {
+        background: #fff3cd;
+        border-color: #ffeaa7;
+    }
+    
+    .program-chain-item.available-program {
+        background: #d4edda;
+        border-color: #c3e6cb;
+    }
+    
+    .chain-sequence {
+        background: #667eea;
+        color: white;
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        margin-right: 15px;
+    }
+    
+    .chain-flow {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .source-program, .target-program {
+        background: #f8f9fa;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-weight: 500;
+    }
+    
+    .call-arrow {
+        color: #667eea;
+        font-weight: bold;
+    }
+    
+    .missing-indicator {
+        background: #dc3545;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 0.8rem;
+    }
+    
+    .dynamic-info {
+        font-size: 0.85rem;
+        color: #9c27b0;
+        font-style: italic;
+        margin-top: 4px;
+    }
+    
+    .business-context {
+        font-size: 0.85rem;
+        color: #666;
+        margin-top: 4px;
+    }
+    
+    .file-operation-item .connected-program {
+        background: #e8ecff;
+        color: #667eea;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 0.8rem;
+        margin-left: 10px;
+    }
+    
+    .layout-info {
+        font-size: 0.75rem;
+        color: #28a745;
+        margin-left: 4px;
+    }
+    
+    .flow-business-summary {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 6px;
+        border-left: 4px solid #667eea;
+        margin-bottom: 15px;
+    }
+    
+    .flow-statistics {
+        display: flex;
+        gap: 20px;
+        margin-top: 15px;
+    }
+    
+    .stat-item {
+        text-align: center;
+        padding: 10px;
+        background: white;
+        border-radius: 6px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .stat-value {
+        display: block;
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #667eea;
+    }
+    
+    .stat-label {
+        font-size: 0.8rem;
+        color: #6c757d;
+        margin-top: 4px;
+    }
 
         @keyframes pulse {
             0%, 100% { opacity: 1; }
@@ -5562,9 +5692,11 @@ function createProgramFlowView(sessionId) {
         function renderFlowVisualization(vizData) {
     const container = document.getElementById('flowVisualization');
     
-    // Enhanced SVG with better dimensions
+    // Clear previous content
+    container.innerHTML = '';
+    
+    // Create enhanced SVG with proper dimensions
     const svg = d3.select(container)
-        .html('')
         .append('svg')
         .attr('width', '100%')
         .attr('height', '800px')
@@ -5575,7 +5707,7 @@ function createProgramFlowView(sessionId) {
         .append('div')
         .attr('class', 'flow-legend');
     
-    // Create hierarchical layout with error handling
+    // FIXED: Create proper hierarchical layout with aligned positioning
     let layoutResult;
     try {
         layoutResult = createHierarchicalLayout(vizData);
@@ -5587,36 +5719,28 @@ function createProgramFlowView(sessionId) {
     
     const { layoutNodes, layoutEdges } = layoutResult;
     
-    console.log(`Rendering: ${layoutNodes.length} nodes, ${layoutEdges.length} edges`);
-    
-    // Validate data
-    if (!Array.isArray(layoutNodes) || !Array.isArray(layoutEdges)) {
-        console.error('Invalid layout data:', { layoutNodes, layoutEdges });
-        container.innerHTML = '<p style="color: red;">Invalid layout data structure.</p>';
-        return;
-    }
+    console.log(`Rendering ENHANCED: ${layoutNodes.length} nodes, ${layoutEdges.length} edges`);
     
     // Add arrow markers
     const defs = svg.append('defs');
-    createArrowMarkers(defs);
+    createEnhancedArrowMarkers(defs);
     
-    // Draw edges first (so they appear behind nodes)
+    // FIXED: Draw edges first with proper connections
     const edges = svg.selectAll('.flow-edge')
         .data(layoutEdges)
         .enter()
         .append('g')
         .attr('class', 'flow-edge');
     
-    // Draw edge paths with enhanced styling
     edges.each(function(d, i) {
         try {
-            drawEnhancedEdge(d3.select(this), d);
+            drawEnhancedEdgeWithConnection(d3.select(this), d);
         } catch (error) {
             console.error(`Error drawing edge ${i}:`, error, d);
         }
     });
     
-    // Draw nodes with custom shapes
+    // FIXED: Draw nodes with proper alignment and spacing
     const nodes = svg.selectAll('.flow-node')
         .data(layoutNodes)
         .enter()
@@ -5624,59 +5748,63 @@ function createProgramFlowView(sessionId) {
         .attr('class', 'flow-node')
         .attr('transform', d => `translate(${d.x},${d.y})`);
     
-    // Draw custom shapes for each node type
+    // Draw enhanced shapes for each node type
     nodes.each(function(d, i) {
         try {
-            drawCustomShape(d3.select(this), d);
+            drawEnhancedCustomShape(d3.select(this), d);
         } catch (error) {
             console.error(`Error drawing node ${i}:`, error, d);
         }
     });
     
-    // Add interactivity with proper error handling
+    // FIXED: Add enhanced interactivity
     try {
-        addInteractivity(nodes, layoutEdges);
+        addEnhancedInteractivity(nodes, layoutEdges);
     } catch (error) {
         console.error('Error adding interactivity:', error);
     }
     
-    // Create legend
+    // Create enhanced legend
     try {
-        createVisualizationLegend(legend);
+        createEnhancedVisualizationLegend(legend);
     } catch (error) {
         console.error('Error creating legend:', error);
     }
 }
 
 function createHierarchicalLayout(vizData) {
-    const nodes = vizData.nodes;
-    const edges = vizData.edges;
+    const nodes = vizData.nodes || [];
+    const edges = vizData.edges || [];
     
-    // Organize nodes by type and hierarchy
-    const startingNodes = nodes.filter(n => n.is_starting_program);
-    const programNodes = nodes.filter(n => n.type === 'program' && !n.is_starting_program);
+    if (!nodes.length) {
+        throw new Error('No nodes provided for layout');
+    }
+    
+    // FIXED: Organize nodes by type and level with proper alignment
+    const programNodes = nodes.filter(n => n.type === 'program');
     const fileNodes = nodes.filter(n => n.type === 'file');
-    const dbNodes = nodes.filter(n => n.type === 'db2_table');
+    const db2Nodes = nodes.filter(n => n.type === 'db2_table');
     
-    // Calculate hierarchy levels with better spacing
-    const hierarchy = calculateHierarchy(nodes, edges, startingNodes[0]);
+    // FIXED: Calculate proper hierarchy levels with alignment
+    const hierarchy = calculateProgramHierarchy(programNodes, edges);
     
-    // Enhanced positioning with proper gaps
+    // Enhanced positioning with proper gaps and alignment
     const layoutNodes = [];
-    const layerHeight = 150; // Increased from 120
-    const layerWidth = 1400; // Increased from 1200
-    const minNodeSpacing = 180; // Minimum space between nodes
+    const layerHeight = 120;
+    const layerWidth = 1400;
+    const minNodeSpacing = 200;
     
+    // Position program nodes in hierarchical levels
     Object.keys(hierarchy).forEach((level, levelIndex) => {
         const nodesInLevel = hierarchy[level];
-        const totalNodesWidth = nodesInLevel.length * minNodeSpacing;
-        const startX = (layerWidth - totalNodesWidth) / 2;
+        const totalWidth = nodesInLevel.length * minNodeSpacing;
+        const startX = Math.max(100, (layerWidth - totalWidth) / 2);
         
         nodesInLevel.forEach((node, nodeIndex) => {
             const enhancedNode = {
                 ...node,
-                x: startX + (nodeIndex * minNodeSpacing) + (minNodeSpacing / 2),
-                y: 100 + (levelIndex * layerHeight), // Increased top margin
+                x: startX + (nodeIndex * minNodeSpacing),
+                y: 80 + (levelIndex * layerHeight),
                 level: parseInt(level),
                 width: getNodeWidth(node),
                 height: getNodeHeight(node)
@@ -5685,44 +5813,591 @@ function createHierarchicalLayout(vizData) {
         });
     });
     
-    // Position data nodes (files and DB2) with better spacing
-    const dataNodesY = 100 + (Object.keys(hierarchy).length * layerHeight) + 80; // Extra gap
-    const allDataNodes = [...fileNodes, ...dbNodes];
+    // FIXED: Position file and DB2 nodes connected to their parent programs
+    const programPositions = {};
+    layoutNodes.forEach(node => {
+        if (node.type === 'program') {
+            programPositions[node.id] = { x: node.x, y: node.y, level: node.level };
+        }
+    });
     
-    if (allDataNodes.length > 0) {
-        const dataNodeSpacing = Math.max(minNodeSpacing, layerWidth / (allDataNodes.length + 1));
-        const dataStartX = (layerWidth - (allDataNodes.length * dataNodeSpacing)) / 2;
+    // Position file nodes below their connected programs
+    fileNodes.forEach((fileNode, index) => {
+        const connectedProgram = fileNode.connected_to_program;
+        const programPos = programPositions[connectedProgram];
         
-        allDataNodes.forEach((node, index) => {
+        if (programPos) {
+            // Position files below their parent program
+            const filesForThisProgram = fileNodes.filter(f => f.connected_to_program === connectedProgram);
+            const fileIndex = filesForThisProgram.indexOf(fileNode);
+            
             layoutNodes.push({
-                ...node,
-                x: dataStartX + (index * dataNodeSpacing) + (dataNodeSpacing / 2),
-                y: dataNodesY,
-                level: 999,
-                width: getNodeWidth(node),
-                height: getNodeHeight(node)
+                ...fileNode,
+                x: programPos.x - 50 + (fileIndex * 120),
+                y: programPos.y + 150 + (programPos.level * 20), // Stagger by level
+                level: programPos.level + 10, // Below program level
+                width: getNodeWidth(fileNode),
+                height: getNodeHeight(fileNode),
+                parentProgram: connectedProgram
             });
-        });
-    }
+        } else {
+            // Fallback positioning for orphaned files
+            layoutNodes.push({
+                ...fileNode,
+                x: 100 + (index * 130),
+                y: 600,
+                level: 999,
+                width: getNodeWidth(fileNode),
+                height: getNodeHeight(fileNode)
+            });
+        }
+    });
     
-    // Calculate edge positions with better curves
+    // Position DB2 nodes below files
+    db2Nodes.forEach((db2Node, index) => {
+        const connectedProgram = db2Node.connected_to_program;
+        const programPos = programPositions[connectedProgram];
+        
+        if (programPos) {
+            const db2ForThisProgram = db2Nodes.filter(d => d.connected_to_program === connectedProgram);
+            const db2Index = db2ForThisProgram.indexOf(db2Node);
+            
+            layoutNodes.push({
+                ...db2Node,
+                x: programPos.x - 50 + (db2Index * 130),
+                y: programPos.y + 220 + (programPos.level * 20), // Below files
+                level: programPos.level + 20,
+                width: getNodeWidth(db2Node),
+                height: getNodeHeight(db2Node),
+                parentProgram: connectedProgram
+            });
+        } else {
+            // Fallback positioning for orphaned DB2 nodes
+            layoutNodes.push({
+                ...db2Node,
+                x: 100 + (index * 140),
+                y: 700,
+                level: 998,
+                width: getNodeWidth(db2Node),
+                height: getNodeHeight(db2Node)
+            });
+        }
+    });
+    
+    // FIXED: Calculate enhanced edge positions with proper connections
     const layoutEdges = edges.map(edge => {
         const sourceNode = layoutNodes.find(n => n.id === edge.from);
         const targetNode = layoutNodes.find(n => n.id === edge.to);
         
-        if (!sourceNode || !targetNode) return null;
+        if (!sourceNode || !targetNode) {
+            console.warn(`Missing nodes for edge: ${edge.from} -> ${edge.to}`);
+            return null;
+        }
         
         return {
             ...edge,
             source: sourceNode,
             target: targetNode,
-            path: calculateEdgePath(sourceNode, targetNode, edge)
+            path: calculateEnhancedEdgePath(sourceNode, targetNode, edge)
         };
     }).filter(e => e !== null);
     
     return { layoutNodes, layoutEdges };
 }
 
+function calculateProgramHierarchy(programNodes, edges) {
+    const hierarchy = {};
+    const visited = new Set();
+    
+    // Find starting program (marked as is_starting_program)
+    const startNode = programNodes.find(n => n.is_starting_program) || programNodes[0];
+    if (!startNode) return { 0: programNodes };
+    
+    hierarchy[0] = [startNode];
+    visited.add(startNode.id);
+    
+    const queue = [{ node: startNode, level: 0 }];
+    
+    while (queue.length > 0) {
+        const { node: currentNode, level } = queue.shift();
+        
+        // Find program calls from this node
+        const outgoingEdges = edges.filter(e => 
+            e.from === currentNode.id && e.type === 'program_call'
+        );
+        
+        outgoingEdges.forEach(edge => {
+            const targetNode = programNodes.find(n => n.id === edge.to);
+            if (targetNode && !visited.has(targetNode.id)) {
+                const nextLevel = level + 1;
+                
+                if (!hierarchy[nextLevel]) {
+                    hierarchy[nextLevel] = [];
+                }
+                
+                hierarchy[nextLevel].push(targetNode);
+                visited.add(targetNode.id);
+                queue.push({ node: targetNode, level: nextLevel });
+            }
+        });
+    }
+    
+    // Add any orphaned programs to level 999
+    programNodes.forEach(node => {
+        if (!visited.has(node.id)) {
+            if (!hierarchy[999]) hierarchy[999] = [];
+            hierarchy[999].push(node);
+        }
+    });
+    
+    return hierarchy;
+}
+function drawEnhancedEdgeWithConnection(selection, edge) {
+    const source = edge.source;
+    const target = edge.target;
+    
+    // FIXED: Calculate proper connection points
+    const sourcePoint = getEnhancedConnectionPoint(source, target, 'source');
+    const targetPoint = getEnhancedConnectionPoint(target, source, 'target');
+    
+    // Determine edge style and color
+    const edgeClass = getEdgeClass(edge);
+    const markerEnd = getMarkerEnd(edge);
+    const strokeColor = getEdgeColor(edge);
+    
+    // FIXED: Draw enhanced path with proper curves
+    const path = selection.append('path')
+        .attr('class', `flow-edge ${edgeClass}`)
+        .attr('d', createEnhancedPath(sourcePoint, targetPoint, edge))
+        .attr('fill', 'none')
+        .attr('stroke', strokeColor)
+        .attr('stroke-width', getStrokeWidth(edge))
+        .attr('marker-end', `url(#${markerEnd})`);
+    
+    // Add stroke-dasharray for dynamic calls
+    if (edge.type === 'dynamic_call' || edge.is_dynamic) {
+        path.attr('stroke-dasharray', '8,4');
+    }
+    
+    // FIXED: Add proper edge labels
+    if (edge.label || edge.variable_name) {
+        const midPoint = getMidPoint(sourcePoint, targetPoint);
+        
+        // Label background
+        selection.append('rect')
+            .attr('x', midPoint.x - 30)
+            .attr('y', midPoint.y - 8)
+            .attr('width', 60)
+            .attr('height', 16)
+            .attr('fill', 'white')
+            .attr('stroke', strokeColor)
+            .attr('stroke-width', 1)
+            .attr('rx', 3);
+        
+        // Label text
+        selection.append('text')
+            .attr('x', midPoint.x)
+            .attr('y', midPoint.y)
+            .attr('text-anchor', 'middle')
+            .attr('dy', '0.35em')
+            .attr('font-size', '10px')
+            .attr('font-weight', 'bold')
+            .attr('fill', strokeColor)
+            .text(edge.label || edge.variable_name || '');
+    }
+}
+
+function getEnhancedConnectionPoint(node, otherNode, role) {
+    const x = node.x || 0;
+    const y = node.y || 0;
+    const width = node.width || 100;
+    const height = node.height || 50;
+    
+    // Calculate direction to other node
+    const dx = (otherNode.x || 0) - x;
+    const dy = (otherNode.y || 0) - y;
+    
+    // FIXED: Better connection point calculation
+    if (Math.abs(dx) > Math.abs(dy)) {
+        // Connect horizontally
+        return {
+            x: x + (dx > 0 ? width/2 : -width/2),
+            y: y
+        };
+    } else {
+        // Connect vertically
+        return {
+            x: x,
+            y: y + (dy > 0 ? height/2 : -height/2)
+        };
+    }
+}
+
+function createEnhancedPath(source, target, edge) {
+    const dx = target.x - source.x;
+    const dy = target.y - source.y;
+    
+    // FIXED: Create smooth curves based on connection type
+    if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
+        // Curved path for data connections
+        const midY = source.y + dy * 0.6;
+        return `M${source.x},${source.y} Q${source.x + dx * 0.3},${midY} ${target.x},${target.y}`;
+    } else if (Math.abs(dy) < 30) {
+        // Horizontal line for same-level connections
+        return `M${source.x},${source.y} L${target.x},${target.y}`;
+    } else {
+        // Stepped path for program calls
+        const midX = source.x + dx * 0.5;
+        return `M${source.x},${source.y} L${midX},${source.y} L${midX},${target.y} L${target.x},${target.y}`;
+    }
+}
+
+function getEdgeColor(edge) {
+    const colorMap = {
+        'program_call': '#2196f3',
+        'file_operation': '#4caf50',
+        'db2_operation': '#ff9800',
+        'dynamic_call': '#9c27b0'
+    };
+    
+    if (edge.status === 'missing') {
+        return '#dc3545';
+    }
+    
+    return colorMap[edge.type] || '#666';
+}
+
+function drawEnhancedCustomShape(selection, node) {
+    const g = selection;
+    
+    // Add enhanced drop shadow
+    g.style('filter', 'drop-shadow(3px 3px 6px rgba(0,0,0,0.3))');
+    
+    // FIXED: Draw shapes based on node type with better styling
+    switch (node.type) {
+        case 'program':
+            drawEnhancedProgramShape(g, node);
+            break;
+        case 'file':
+            drawEnhancedFileShape(g, node);
+            break;
+        case 'db2_table':
+            drawEnhancedDB2Shape(g, node);
+            break;
+        default:
+            drawEnhancedDefaultShape(g, node);
+    }
+    
+    // FIXED: Enhanced node labels with better formatting
+    const labelText = node.label || node.id || 'Unknown';
+    const maxLabelLength = 12;
+    const displayText = labelText.length > maxLabelLength ? 
+                       labelText.substring(0, maxLabelLength) + '...' : labelText;
+    
+    g.append('text')
+        .attr('class', 'node-label')
+        .attr('text-anchor', 'middle')
+        .attr('dy', '0.35em')
+        .style('font-size', '11px')
+        .style('font-weight', 'bold')
+        .style('fill', node.status === 'missing' ? '#d32f2f' : 'white')
+        .style('pointer-events', 'none')
+        .text(displayText)
+        .append('title')
+        .text(labelText); // Full text on hover
+}
+
+function drawEnhancedProgramShape(g, node) {
+    const width = node.width || 120;
+    const height = node.height || 60;
+    
+    let fillColor = '#4a90e2';
+    let strokeColor = '#2c5aa0';
+    
+    if (node.is_starting_program) {
+        fillColor = '#1a73e8';
+        strokeColor = '#0d47a1';
+    } else if (node.status === 'missing') {
+        fillColor = '#ffcdd2';
+        strokeColor = '#d32f2f';
+    }
+    
+    if (node.status === 'missing') {
+        // Diamond shape for missing programs
+        g.append('polygon')
+            .attr('points', `0,${-height/2} ${width/2},0 0,${height/2} ${-width/2},0`)
+            .attr('fill', fillColor)
+            .attr('stroke', strokeColor)
+            .attr('stroke-width', 2)
+            .attr('stroke-dasharray', '5,5');
+    } else {
+        // Enhanced rounded rectangle
+        g.append('rect')
+            .attr('x', -width/2)
+            .attr('y', -height/2)
+            .attr('width', width)
+            .attr('height', height)
+            .attr('rx', 10)
+            .attr('ry', 10)
+            .attr('fill', fillColor)
+            .attr('stroke', strokeColor)
+            .attr('stroke-width', 2);
+        
+        // Add gradient effect
+        g.append('rect')
+            .attr('x', -width/2)
+            .attr('y', -height/2)
+            .attr('width', width)
+            .attr('height', height/3)
+            .attr('rx', 10)
+            .attr('ry', 10)
+            .attr('fill', 'rgba(255,255,255,0.3)');
+    }
+    
+    // Program type indicator
+    if (node.is_starting_program) {
+        g.append('circle')
+            .attr('cx', width/2 - 10)
+            .attr('cy', -height/2 + 10)
+            .attr('r', 5)
+            .attr('fill', '#fff')
+            .attr('stroke', strokeColor)
+            .attr('stroke-width', 2);
+    }
+}
+
+function drawEnhancedFileShape(g, node) {
+    const width = node.width || 100;
+    const height = node.height || 50;
+    
+    // Enhanced cylinder shape
+    const ellipseHeight = height * 0.25;
+    const fillColor = '#4caf50';
+    const strokeColor = '#2e7d32';
+    
+    // Cylinder body with gradient
+    g.append('rect')
+        .attr('x', -width/2)
+        .attr('y', -height/2 + ellipseHeight/2)
+        .attr('width', width)
+        .attr('height', height - ellipseHeight)
+        .attr('fill', fillColor)
+        .attr('stroke', strokeColor)
+        .attr('stroke-width', 2);
+    
+    // Top and bottom ellipses
+    ['top', 'bottom'].forEach((pos, i) => {
+        g.append('ellipse')
+            .attr('cx', 0)
+            .attr('cy', pos === 'top' ? -height/2 + ellipseHeight/2 : height/2 - ellipseHeight/2)
+            .attr('rx', width/2)
+            .attr('ry', ellipseHeight/2)
+            .attr('fill', i === 0 ? fillColor : '#66bb6a')
+            .attr('stroke', strokeColor)
+            .attr('stroke-width', 2);
+    });
+    
+    // Interface type indicator
+    if (node.interface === 'CICS') {
+        g.append('rect')
+            .attr('x', -width/2 + 3)
+            .attr('y', -height/2 + 3)
+            .attr('width', 25)
+            .attr('height', 12)
+            .attr('fill', '#9c27b0')
+            .attr('rx', 2);
+        
+        g.append('text')
+            .attr('x', -width/2 + 15)
+            .attr('y', -height/2 + 9)
+            .attr('text-anchor', 'middle')
+            .attr('font-size', '7px')
+            .attr('fill', 'white')
+            .text('CICS');
+    }
+}
+
+function drawEnhancedDB2Shape(g, node) {
+    const width = node.width || 110;
+    const height = node.height || 50;
+    
+    // Database table with enhanced styling
+    g.append('rect')
+        .attr('x', -width/2)
+        .attr('y', -height/2)
+        .attr('width', width)
+        .attr('height', height)
+        .attr('rx', 5)
+        .attr('ry', 5)
+        .attr('fill', '#ff9800')
+        .attr('stroke', '#f57c00')
+        .attr('stroke-width', 2);
+    
+    // Table row indicators
+    for (let i = 1; i <= 3; i++) {
+        g.append('line')
+            .attr('x1', -width/2 + 8)
+            .attr('y1', -height/2 + (i * height/4))
+            .attr('x2', width/2 - 8)
+            .attr('y2', -height/2 + (i * height/4))
+            .attr('stroke', '#f57c00')
+            .attr('stroke-width', 1)
+            .attr('opacity', 0.7);
+    }
+    
+    // DB2 indicator
+    g.append('text')
+        .attr('x', width/2 - 8)
+        .attr('y', -height/2 + 8)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', '8px')
+        .attr('font-weight', 'bold')
+        .attr('fill', '#fff')
+        .text('DB2');
+}
+
+function addEnhancedInteractivity(nodes, edges) {
+    // Enhanced click handlers
+    nodes.on('click', function(event, d) {
+        showEnhancedNodeDetails(d);
+    });
+    
+    nodes.on('mouseover', function(event, d) {
+        d3.select(this)
+            .style('transform', 'scale(1.05)')
+            .style('cursor', 'pointer');
+        highlightConnectedPaths(d, edges);
+    });
+    
+    nodes.on('mouseout', function(event, d) {
+        d3.select(this).style('transform', 'scale(1)');
+        resetPathHighlights();
+    });
+}
+
+function highlightConnectedPaths(node, edges) {
+    // Dim all edges first
+    d3.selectAll('.flow-edge path').style('opacity', 0.3);
+    
+    // Highlight connected edges
+    edges.forEach((edge, index) => {
+        if (edge.source && edge.target && 
+            (edge.source.id === node.id || edge.target.id === node.id)) {
+            
+            d3.selectAll('.flow-edge path').filter(function(d, i) {
+                return i === index;
+            })
+            .style('opacity', 1)
+            .style('stroke-width', function() {
+                const currentWidth = parseInt(d3.select(this).style('stroke-width')) || 2;
+                return currentWidth + 1;
+            });
+        }
+    });
+}
+
+function resetPathHighlights() {
+    d3.selectAll('.flow-edge path')
+        .style('opacity', 1)
+        .style('stroke-width', function(d) {
+            return getStrokeWidth(d) || 2;
+        });
+}
+
+function createEnhancedArrowMarkers(defs) {
+    const markers = [
+        { id: 'arrow-call', color: '#2196f3', size: 6 },
+        { id: 'arrow-xctl', color: '#ff5722', size: 8 },
+        { id: 'arrow-dynamic', color: '#9c27b0', size: 6 },
+        { id: 'arrow-file-read', color: '#4caf50', size: 6 },
+        { id: 'arrow-file-write', color: '#ff9800', size: 6 },
+        { id: 'arrow-db2', color: '#ff9800', size: 6 }
+    ];
+    
+    markers.forEach(marker => {
+        defs.append('marker')
+            .attr('id', marker.id)
+            .attr('viewBox', '0 -5 10 10')
+            .attr('refX', 10)
+            .attr('refY', 0)
+            .attr('markerWidth', marker.size)
+            .attr('markerHeight', marker.size)
+            .attr('orient', 'auto')
+            .append('path')
+            .attr('d', 'M0,-5L10,0L0,5')
+            .attr('fill', marker.color);
+    });
+}
+
+function createEnhancedVisualizationLegend(legendContainer) {
+    const legendData = [
+        { type: 'program-main', label: 'Starting Program', color: '#1a73e8' },
+        { type: 'program-called', label: 'Called Program', color: '#64b5f6' },
+        { type: 'program-missing', label: 'Missing Program', color: '#ffcdd2', dashed: true },
+        { type: 'file', label: 'File/Dataset', color: '#4caf50' },
+        { type: 'db2', label: 'DB2 Table', color: '#ff9800' },
+        { type: 'call', label: 'Program Call', color: '#2196f3', isEdge: true },
+        { type: 'file-op', label: 'File Operation', color: '#4caf50', isEdge: true },
+        { type: 'dynamic', label: 'Dynamic Call', color: '#9c27b0', isEdge: true, dashed: true }
+    ];
+    
+    legendContainer.innerHTML = '<h4 style="margin: 0 0 10px 0; font-size: 14px;">Flow Legend</h4>';
+    
+    legendData.forEach(item => {
+        const legendItem = document.createElement('div');
+        legendItem.className = 'legend-item';
+        legendItem.style.cssText = `
+            display: flex; 
+            align-items: center; 
+            margin-bottom: 5px; 
+            font-size: 12px;
+        `;
+        
+        const symbol = document.createElement('div');
+        symbol.className = 'legend-symbol';
+        symbol.style.cssText = `
+            width: 20px; 
+            height: ${item.isEdge ? '2px' : '12px'}; 
+            background-color: ${item.color}; 
+            margin-right: 8px;
+            border-radius: ${item.isEdge ? '0' : '2px'};
+            ${item.dashed ? 'border: 2px dashed ' + item.color + '; background: none;' : ''}
+        `;
+        
+        const label = document.createElement('span');
+        label.textContent = item.label;
+        
+        legendItem.appendChild(symbol);
+        legendItem.appendChild(label);
+        legendContainer.appendChild(legendItem);
+    });
+}
+
+// Helper functions
+function getNodeWidth(node) {
+    const widthMap = {
+        'program': 120,
+        'file': 100,
+        'db2_table': 110
+    };
+    return widthMap[node.type] || 100;
+}
+
+function getNodeHeight(node) {
+    const heightMap = {
+        'program': 60,
+        'file': 50,
+        'db2_table': 50
+    };
+    return heightMap[node.type] || 50;
+}
+
+function getMidPoint(source, target) {
+    return {
+        x: (source.x + target.x) / 2,
+        y: (source.y + target.y) / 2
+    };
+}
 function calculateHierarchy(nodes, edges, startNode) {
     const hierarchy = { 0: [startNode] };
     const visited = new Set([startNode.id]);
@@ -6336,105 +7011,166 @@ function showNodeDetailsModal(node, content) {
 }
 
 
-        function renderFlowDetails(flowAnalysis, vizData) {
-            const detailsContainer = document.getElementById('flowDetails');
-            
-            let html = `
-                <div class="flow-summary-section">
-                    <h3>Flow Summary</h3>
-                    <pre>${flowAnalysis.business_flow_summary}</pre>
+       
+    function renderFlowDetails(flowAnalysis, vizData) {
+        const detailsContainer = document.getElementById('flowDetails');
+        
+        let html = `
+            <div class="flow-summary-section">
+                <h3>Flow Summary</h3>
+                <div class="flow-business-summary">
+                    ${flowAnalysis.business_flow_summary || 'Program flow analysis completed'}
                 </div>
+                <div class="flow-statistics">
+                    <div class="stat-item">
+                        <span class="stat-value">${vizData.statistics.program_chain_steps}</span>
+                        <span class="stat-label">Program Steps</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value">${vizData.statistics.file_operations}</span>
+                        <span class="stat-label">File Operations</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value">${vizData.statistics.db2_operations}</span>
+                        <span class="stat-label">DB2 Operations</span>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // FIXED: Program Chain Summary (replaces missing [object Object])
+        if (vizData.visualization_data.program_chain_summary && 
+            vizData.visualization_data.program_chain_summary.length > 0) {
+            html += `
+                <div class="program-chain-section">
+                    <h3>Program Call Chain</h3>
+                    <div class="program-chain-list">
             `;
             
-            // Missing programs section
-            if (vizData.missing_count > 0) {
-                html += `
-                    <div class="missing-programs-section">
-                        <h3>Missing Programs (${vizData.missing_count})</h3>
-                        <div class="missing-list">
-                `;
-                
-                vizData.visualization_data.missing_programs.forEach(program => {
-                    html += `
-                        <div class="missing-program-item">
-                            <span class="program-name">${program}</span>
-                            <button onclick="showMissingProgramImpact('${sessionId}', '${program}')" 
-                                    class="impact-btn">Show Impact</button>
-                            <span class="upload-hint">Upload this program to continue flow analysis</span>
-                        </div>
-                    `;
-                });
+            vizData.visualization_data.program_chain_summary.forEach((step, index) => {
+                const statusClass = step.status === 'MISSING' ? 'missing-program' : 'available-program';
+                const callIcon = step.call_type === 'XCTL' ? '→' : step.call_type === 'LINK' ? '↔' : '📞';
                 
                 html += `
+                    <div class="program-chain-item ${statusClass}">
+                        <div class="chain-sequence">#${step.sequence}</div>
+                        <div class="chain-flow">
+                            <span class="source-program">${step.source_program}</span>
+                            <span class="call-arrow">${callIcon} ${step.call_type}</span>
+                            <span class="target-program">${step.target_program}</span>
+                            ${step.status === 'MISSING' ? '<span class="missing-indicator">❌ MISSING</span>' : ''}
                         </div>
+                        ${step.variable_name ? `<div class="dynamic-info">Dynamic via: ${step.variable_name}</div>` : ''}
+                        ${step.business_context ? `<div class="business-context">${step.business_context}</div>` : ''}
                     </div>
                 `;
-            }
+            });
             
-            // Field flows section
-            if (Object.keys(vizData.visualization_data.field_flows).length > 0) {
-                html += `
-                    <div class="field-flows-section">
-                        <h3>Key Field Data Flows</h3>
-                        <div class="field-flows-list">
-                `;
-                
-                Object.entries(vizData.visualization_data.field_flows).forEach(([fieldName, flows]) => {
-                    html += `
-                        <div class="field-flow-item">
-                            <div class="field-name">${fieldName}</div>
-                            <div class="field-flow-path">
-                    `;
-                    
-                    flows.forEach((flow, index) => {
-                        if (index > 0) html += ' → ';
-                        html += `<span class="flow-step">${flow.from}</span>`;
-                    });
-                    
-                    html += `
-                            </div>
-                            <button onclick="traceFieldFlow('${sessionId}', '${fieldName}')" 
-                                    class="trace-btn">Trace Field</button>
-                        </div>
-                    `;
-                });
-                
-                html += `
-                        </div>
+            html += `
                     </div>
-                `;
-            }
-            
-            // File operations section
-            if (vizData.visualization_data.file_operations && vizData.visualization_data.file_operations.length > 0) {
-                html += `
-                    <div class="file-operations-section">
-                        <h3>File Operations in Flow</h3>
-                        <div class="file-operations-list">
-                `;
-                
-                vizData.visualization_data.file_operations.forEach(fileOp => {
-                    const statusClass = fileOp.has_layout ? 'has-layout' : 'no-layout';
-                    html += `
-                        <div class="file-operation-item ${statusClass}">
-                            <div class="file-info">
-                                <span class="file-name">${fileOp.file_name}</span>
-                                <span class="io-direction">(${fileOp.io_direction})</span>
-                                ${fileOp.has_layout ? '<span class="layout-indicator">Has Layout</span>' : ''}
-                            </div>
-                            <div class="file-program">Used by: ${fileOp.program_name}</div>
-                        </div>
-                    `;
-                });
-                
-                html += `
-                        </div>
-                    </div>
-                `;
-            }
-            
-            detailsContainer.innerHTML = html;
+                </div>
+            `;
         }
+        
+        // FIXED: Missing programs section (properly formatted)
+        if (vizData.visualization_data.missing_programs && 
+            vizData.visualization_data.missing_programs.length > 0) {
+            html += `
+                <div class="missing-programs-section">
+                    <h3>Missing Programs (${vizData.visualization_data.missing_programs.length})</h3>
+                    <div class="missing-programs-list">
+            `;
+            
+            vizData.visualization_data.missing_programs.forEach(program => {
+                html += `
+                    <div class="missing-program-item">
+                        <span class="program-name">${program.program_name}</span>
+                        <span class="called-by">Called by: ${program.called_by}</span>
+                        <span class="call-type">${program.call_type}</span>
+                        <button onclick="showMissingProgramImpact('${sessionId}', '${program.program_name}')" 
+                                class="impact-btn">Show Impact</button>
+                        <span class="upload-hint">Upload this program to continue flow analysis</span>
+                    </div>
+                `;
+            });
+            
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+        
+        // FIXED: Field flows section with layout information
+        if (Object.keys(vizData.visualization_data.field_flows).length > 0) {
+            html += `
+                <div class="field-flows-section">
+                    <h3>Key Field Data Flows</h3>
+                    <div class="field-flows-list">
+            `;
+            
+            Object.entries(vizData.visualization_data.field_flows).forEach(([fieldName, flows]) => {
+                html += `
+                    <div class="field-flow-item">
+                        <div class="field-name">${fieldName}</div>
+                        <div class="field-flow-path">
+                `;
+                
+                flows.forEach((flow, index) => {
+                    if (index > 0) html += ' → ';
+                    html += `<span class="flow-step">${flow.from}</span>`;
+                    if (flow.source_layout) {
+                        html += `<span class="layout-info">[${flow.source_layout}]</span>`;
+                    }
+                });
+                
+                html += `
+                        </div>
+                        <button onclick="traceFieldFlow('${sessionId}', '${fieldName}')" 
+                                class="trace-btn">Trace Field</button>
+                    </div>
+                `;
+            });
+            
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+        
+        // File operations section (with program connections)
+        const fileOpsCount = vizData.visualization_data.nodes.filter(n => n.type === 'file').length;
+        if (fileOpsCount > 0) {
+            html += `
+                <div class="file-operations-section">
+                    <h3>File Operations in Flow (${fileOpsCount})</h3>
+                    <div class="file-operations-list">
+            `;
+            
+            vizData.visualization_data.nodes.filter(n => n.type === 'file').forEach(fileNode => {
+                const statusClass = fileNode.has_layout ? 'has-layout' : 'no-layout';
+                html += `
+                    <div class="file-operation-item ${statusClass}">
+                        <div class="file-info">
+                            <span class="file-name">${fileNode.label}</span>
+                            <span class="io-direction">(${fileNode.io_direction})</span>
+                            <span class="connected-program">Connected to: ${fileNode.connected_to_program}</span>
+                            ${fileNode.has_layout ? '<span class="layout-indicator">Has Layout</span>' : ''}
+                        </div>
+                        <div class="file-interface">Interface: ${fileNode.interface}</div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+        
+        detailsContainer.innerHTML = html;
+    }
+
+
 
         function showNodeDetails(node, vizData) {
             const modal = document.createElement('div');
