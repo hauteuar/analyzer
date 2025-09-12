@@ -865,6 +865,106 @@ class ProgramFlowAnalyzer:
             logger.error(f"Error resolving dynamic call programs for {variable_name}: {str(e)}")
             return []
 
+    def _get_program_calls_from_analysis(self, session_id: str, program_name: str) -> List[Dict]:
+        """Extract program calls from stored component analysis"""
+        program_calls = []
+        
+        try:
+            # Get component analysis for the program
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT analysis_result_json
+                    FROM component_analysis 
+                    WHERE session_id = ? AND component_name = ? AND component_type = 'PROGRAM'
+                ''', (session_id, program_name))
+                
+                result = cursor.fetchone()
+                if not result or not result[0]:
+                    logger.warning(f"No analysis found for program {program_name}")
+                    return program_calls
+                
+                try:
+                    analysis_data = json.loads(result[0])
+                except json.JSONDecodeError as e:
+                    logger.error(f"Error parsing analysis JSON for {program_name}: {e}")
+                    return program_calls
+                
+                # Extract program calls from analysis
+                stored_calls = analysis_data.get('program_calls', [])
+                
+                for call_data in stored_calls:
+                    # Handle both old and new call formats
+                    call_info = {
+                        'program_name': call_data.get('program_name', call_data.get('target_program', '')),
+                        'call_type': call_data.get('call_type', 'static'),
+                        'confidence_score': call_data.get('confidence_score', call_data.get('confidence', 0.8)),
+                        'line_number': call_data.get('line_number', 0),
+                        'business_context': call_data.get('business_context', ''),
+                        'variable_name': call_data.get('variable_name', ''),
+                        'resolved_programs': call_data.get('resolved_programs', [])
+                    }
+                    
+                    # Ensure we have a program name
+                    if call_info['program_name']:
+                        program_calls.append(call_info)
+                    elif call_info['call_type'] == 'dynamic' and call_info['variable_name']:
+                        # For dynamic calls, we might need to resolve the variable
+                        # Use the variable name as placeholder if no resolved programs
+                        if not call_info['resolved_programs']:
+                            call_info['program_name'] = f"DYNAMIC_{call_info['variable_name']}"
+                            program_calls.append(call_info)
+                        else:
+                            # Create separate entries for each resolved program
+                            for resolved in call_info['resolved_programs']:
+                                resolved_call = call_info.copy()
+                                if isinstance(resolved, dict):
+                                    resolved_call['program_name'] = resolved.get('program_name', resolved.get('name', ''))
+                                    resolved_call['confidence_score'] = resolved.get('confidence', call_info['confidence_score'])
+                                else:
+                                    resolved_call['program_name'] = str(resolved)
+                                
+                                if resolved_call['program_name']:
+                                    program_calls.append(resolved_call)
+                
+                # Also check for dependencies stored separately (for dynamic calls)
+                cursor.execute('''
+                    SELECT target_component, relationship_type, analysis_details_json, confidence_score
+                    FROM dependency_relationships
+                    WHERE session_id = ? AND source_component = ? 
+                    AND relationship_type IN ('PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL')
+                ''', (session_id, program_name))
+                
+                dependency_results = cursor.fetchall()
+                
+                for target_comp, rel_type, analysis_json, confidence in dependency_results:
+                    try:
+                        analysis_details = json.loads(analysis_json) if analysis_json else {}
+                    except:
+                        analysis_details = {}
+                    
+                    # Avoid duplicates by checking if we already have this call
+                    existing_call = next((call for call in program_calls 
+                                        if call['program_name'] == target_comp), None)
+                    
+                    if not existing_call:
+                        call_info = {
+                            'program_name': target_comp,
+                            'call_type': 'dynamic' if rel_type == 'DYNAMIC_PROGRAM_CALL' else 'static',
+                            'confidence_score': confidence or 0.8,
+                            'line_number': analysis_details.get('line_number', 0),
+                            'business_context': analysis_details.get('business_context', ''),
+                            'variable_name': analysis_details.get('variable_name', ''),
+                            'resolved_programs': []
+                        }
+                        program_calls.append(call_info)
+                
+                logger.debug(f"Extracted {len(program_calls)} program calls from {program_name}")
+                return program_calls
+                
+        except Exception as e:
+            logger.error(f"Error getting program calls from analysis for {program_name}: {str(e)}")
+            return program_calls
     def _is_program_missing(self, session_id: str, program_name: str) -> bool:
         """Check if a program is missing from the session"""
         try:
