@@ -5756,7 +5756,7 @@ function createProgramFlowView(sessionId) {
             
             edges.each(function(d, i) {
                 try {
-                    drawEnhancedEdgeWithConnection(d3.select(this), d);
+                    drawEnhancedEdge(d3.select(this), d);
                 } catch (error) {
                     console.error(`Error drawing edge ${i}:`, error, d);
                 }
@@ -6772,23 +6772,61 @@ function drawDefaultShape(g, node) {
 }
 
 function drawEnhancedEdge(selection, edge) {
-            const source = edge.source;
-            const target = edge.target;
-            
-            // Determine edge style
-            const edgeClass = getEdgeClass(edge);
-            const markerEnd = getMarkerEnd(edge);
-            const strokeColor = getEdgeColor(edge);
-            
-            // Draw path
-            const path = selection.append('path')
-                .attr('class', `flow-edge ${edgeClass}`)
-                .attr('d', edge.path || `M${source.x},${source.y} L${target.x},${target.y}`)
-                .attr('fill', 'none')
-                .attr('stroke', strokeColor)
-                .attr('stroke-width', getStrokeWidth(edge))
-                .attr('marker-end', `url(#${markerEnd})`);
-        }
+    const source = edge.source;
+    const target = edge.target;
+    
+    // Draw the line
+    const path = selection.append('path')
+        .attr('class', `flow-edge ${getEdgeClass(edge)}`)
+        .attr('d', edge.path || `M${source.x},${source.y} L${target.x},${target.y}`)
+        .attr('fill', 'none')
+        .attr('stroke', getEdgeColor(edge))
+        .attr('stroke-width', getStrokeWidth(edge))
+        .attr('marker-end', `url(#${getMarkerEnd(edge)})`);
+    
+    // Add dasharray for dynamic calls
+    if (edge.type === 'dynamic_call' || edge.is_dynamic) {
+        path.attr('stroke-dasharray', '8,4');
+    }
+    
+    // Calculate midpoint for label
+    const midX = (source.x + target.x) / 2;
+    const midY = (source.y + target.y) / 2;
+    
+    // Add edge label with call type and operation
+    let labelText = '';
+    if (edge.type === 'program_call') {
+        labelText = edge.call_type || 'CALL';
+    } else if (edge.type === 'file_operation') {
+        labelText = `FILE ${edge.io_direction || 'READ'}`;
+    } else if (edge.type === 'db2_operation') {
+        labelText = `DB2 ${edge.io_direction || 'read'}`;
+    }
+    
+    if (labelText) {
+        // Background rectangle for label
+        selection.append('rect')
+            .attr('x', midX - 25)
+            .attr('y', midY - 8)
+            .attr('width', 50)
+            .attr('height', 16)
+            .attr('fill', 'white')
+            .attr('stroke', getEdgeColor(edge))
+            .attr('stroke-width', 1)
+            .attr('rx', 3);
+        
+        // Label text
+        selection.append('text')
+            .attr('x', midX)
+            .attr('y', midY)
+            .attr('text-anchor', 'middle')
+            .attr('dy', '0.35em')
+            .attr('font-size', '9px')
+            .attr('font-weight', 'bold')
+            .attr('fill', getEdgeColor(edge))
+            .text(labelText);
+    }
+}
 
 function getConnectionPoint(node, otherNode, role) {
     const x = node.x;
