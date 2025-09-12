@@ -5769,50 +5769,10 @@ function createProgramFlowView(sessionId) {
                 }
             });
             
-            // Add interactivity
-            addInteractivity(nodes, layoutEdges);
             
-            // Create legend
-            createVisualizationLegend(legend);
-        }
     
     
-    // Add arrow markers
-    const defs = svg.append('defs');
-    createEnhancedArrowMarkers(defs);
-    
-    // FIXED: Draw edges first with proper connections
-    const edges = svg.selectAll('.flow-edge')
-        .data(layoutEdges)
-        .enter()
-        .append('g')
-        .attr('class', 'flow-edge');
-    
-    edges.each(function(d, i) {
-        try {
-            drawEnhancedEdgeWithConnection(d3.select(this), d);
-        } catch (error) {
-            console.error(`Error drawing edge ${i}:`, error, d);
-        }
-    });
-    
-    // FIXED: Draw nodes with proper alignment and spacing
-    const nodes = svg.selectAll('.flow-node')
-        .data(layoutNodes)
-        .enter()
-        .append('g')
-        .attr('class', 'flow-node')
-        .attr('transform', d => `translate(${d.x},${d.y})`);
-    
-    // Draw enhanced shapes for each node type
-    nodes.each(function(d, i) {
-        try {
-            drawEnhancedCustomShape(d3.select(this), d);
-        } catch (error) {
-            console.error(`Error drawing node ${i}:`, error, d);
-        }
-    });
-    
+        
     // FIXED: Add enhanced interactivity
     try {
         addEnhancedInteractivity(nodes, layoutEdges);
@@ -5826,6 +5786,7 @@ function createProgramFlowView(sessionId) {
     } catch (error) {
         console.error('Error creating legend:', error);
     }
+}
 
 
 function createHierarchicalLayout(vizData) {
