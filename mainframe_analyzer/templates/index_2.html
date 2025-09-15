@@ -1519,7 +1519,820 @@
     height: 1200px;  /* Increased from 1000px */
     display: block;
 }
+/* Enhanced Program Flow Styles */
 
+/* Program Chain Section */
+.program-chain-section {
+    margin: 20px 0;
+    padding: 20px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.program-chain-item {
+    display: flex;
+    align-items: flex-start;
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+    background: white;
+    transition: all 0.3s ease;
+}
+
+.program-chain-item:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    transform: translateY(-2px);
+}
+
+.program-chain-item.missing-program {
+    background: #fff8f0;
+    border-left: 4px solid #ff6b35;
+}
+
+.program-chain-item.available-program {
+    background: #f8fff9;
+    border-left: 4px solid #28a745;
+}
+
+.chain-sequence {
+    background: #667eea;
+    color: white;
+    border-radius: 50%;
+    width: 35px;
+    height: 35px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    margin-right: 20px;
+    flex-shrink: 0;
+}
+
+.chain-flow-details {
+    flex: 1;
+}
+
+.program-call-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 10px;
+    font-weight: 500;
+}
+
+.source-program, .target-program {
+    background: #f8f9fa;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+}
+
+.call-arrow {
+    color: #667eea;
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+.missing-indicator {
+    background: #dc3545;
+    color: white;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+.available-indicator {
+    background: #28a745;
+    color: white;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+.dynamic-call-info {
+    background: #e8f4fd;
+    border-left: 3px solid #007bff;
+    padding: 10px;
+    margin: 8px 0;
+    border-radius: 4px;
+}
+
+.dynamic-call-info strong {
+    color: #0056b3;
+}
+
+.dynamic-call-info code {
+    background: #fff;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: bold;
+}
+
+.resolution-details {
+    font-size: 0.9em;
+    color: #6c757d;
+    margin-top: 5px;
+}
+
+.business-context {
+    background: #f8f9fa;
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin: 8px 0;
+    font-size: 0.9em;
+    line-height: 1.4;
+}
+
+.call-metadata {
+    display: flex;
+    gap: 15px;
+    margin-top: 10px;
+}
+
+.confidence-badge, .data-passed-count {
+    background: #e9ecef;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #495057;
+}
+
+/* Layout Associations Section */
+.layout-associations-section {
+    margin: 25px 0;
+    padding: 20px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.layout-flow-grid {
+    display: grid;
+    gap: 20px;
+}
+
+.program-layout-group {
+    background: #f8f9ff;
+    border-radius: 8px;
+    padding: 20px;
+    border-left: 4px solid #667eea;
+}
+
+.program-header {
+    color: #667eea;
+    margin-bottom: 15px;
+    font-size: 1.1em;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.layouts-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 15px;
+}
+
+.layout-item {
+    background: white;
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid #e9ecef;
+    transition: all 0.3s ease;
+}
+
+.layout-item:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+}
+
+.layout-item.layout-complete {
+    border-left: 4px solid #28a745;
+}
+
+.layout-item.layout-partial {
+    border-left: 4px solid #ffc107;
+}
+
+.layout-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.layout-name {
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    color: #333;
+}
+
+.layout-type-badge {
+    background: #667eea;
+    color: white;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.field-count {
+    background: #e9ecef;
+    color: #495057;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.layout-details {
+    margin: 10px 0;
+}
+
+.layout-purpose {
+    color: #666;
+    font-size: 0.9em;
+    line-height: 1.4;
+    margin-bottom: 8px;
+}
+
+.usage-context, .connected-programs {
+    font-size: 0.85rem;
+    margin: 5px 0;
+}
+
+.connected-programs strong {
+    color: #667eea;
+}
+
+.layout-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.btn-sm {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    color: #495057;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-sm:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+}
+
+/* Field Flow Section */
+.field-flows-section {
+    margin: 25px 0;
+    padding: 20px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.field-flows-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 20px;
+}
+
+.field-flow-card {
+    background: #f8fff9;
+    border: 1px solid #d4edda;
+    border-radius: 8px;
+    padding: 15px;
+    border-left: 4px solid #28a745;
+}
+
+.field-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.field-name {
+    color: #155724;
+    margin: 0;
+    font-size: 1.1em;
+}
+
+.flow-steps-count {
+    background: #d4edda;
+    color: #155724;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.field-flow-path {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 15px 0;
+}
+
+.flow-step {
+    display: flex;
+    flex-direction: column;
+    background: white;
+    border-radius: 6px;
+    padding: 10px;
+    border-left: 3px solid #28a745;
+}
+
+.step-program {
+    font-weight: bold;
+    color: #333;
+    font-family: 'Courier New', monospace;
+}
+
+.step-layout {
+    color: #667eea;
+    font-size: 0.85rem;
+    margin: 3px 0;
+}
+
+.step-transformation {
+    color: #666;
+    font-size: 0.9em;
+    font-style: italic;
+}
+
+.flow-connector {
+    text-align: center;
+    color: #28a745;
+    font-size: 1.2em;
+    font-weight: bold;
+    margin: 5px 0;
+}
+
+.field-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.trace-btn, .analyze-btn {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.trace-btn:hover, .analyze-btn:hover {
+    background: #218838;
+}
+
+.analyze-btn {
+    background: #007bff;
+}
+
+.analyze-btn:hover {
+    background: #0056b3;
+}
+
+/* File Operations Section */
+.file-operations-section {
+    margin: 25px 0;
+    padding: 20px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.file-operations-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 15px;
+}
+
+.file-operation-card {
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 15px;
+    background: white;
+    transition: all 0.3s ease;
+}
+
+.file-operation-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+}
+
+.file-operation-card.has-layout {
+    border-left: 4px solid #28a745;
+    background: #f8fff9;
+}
+
+.file-operation-card.no-layout {
+    border-left: 4px solid #ffc107;
+    background: #fffbf0;
+}
+
+.file-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.file-icon {
+    font-size: 1.2em;
+}
+
+.file-name {
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+}
+
+.io-direction-badge {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: bold;
+}
+
+.io-direction-badge.input {
+    background: #d4edda;
+    color: #155724;
+}
+
+.io-direction-badge.output {
+    background: #cce5ff;
+    color: #004085;
+}
+
+.io-direction-badge.input_output {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.layout-indicator {
+    background: #28a745;
+    color: white;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.no-layout-indicator {
+    background: #ffc107;
+    color: #212529;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.file-details {
+    margin: 12px 0;
+    font-size: 0.9em;
+}
+
+.file-details > div {
+    margin: 6px 0;
+}
+
+.file-details strong {
+    color: #333;
+}
+
+.connected-program {
+    font-family: 'Courier New', monospace;
+    background: #f8f9fa;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.associated-layouts {
+    margin-top: 10px;
+}
+
+.layout-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 5px;
+}
+
+.layout-tag {
+    background: #e8ecff;
+    color: #667eea;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.layout-tag:hover {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+}
+
+.file-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+/* Missing Programs Section */
+.missing-programs-section {
+    margin: 25px 0;
+    padding: 20px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    border-left: 4px solid #dc3545;
+}
+
+.missing-programs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.missing-program-card {
+    background: #fff5f5;
+    border: 1px solid #feb2b2;
+    border-radius: 8px;
+    padding: 15px;
+    transition: all 0.3s ease;
+}
+
+.missing-program-card:hover {
+    box-shadow: 0 4px 12px rgba(220,53,69,0.2);
+    transform: translateY(-2px);
+}
+
+.missing-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.missing-icon {
+    font-size: 1.2em;
+}
+
+.program-name {
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    color: #721c24;
+}
+
+.call-type-badge {
+    background: #dc3545;
+    color: white;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}
+
+.missing-details {
+    margin: 12px 0;
+    font-size: 0.9em;
+}
+
+.missing-details > div {
+    margin: 6px 0;
+}
+
+.missing-details strong {
+    color: #721c24;
+}
+
+.impact-description {
+    background: #f8d7da;
+    padding: 8px;
+    border-radius: 4px;
+    margin: 8px 0;
+    color: #721c24;
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+
+.missing-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.impact-btn {
+    background: #dc3545;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.impact-btn:hover {
+    background: #c82333;
+}
+
+.upload-btn {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.upload-btn:hover {
+    background: #218838;
+}
+
+.missing-summary {
+    border-top: 1px solid #dee2e6;
+    padding-top: 20px;
+}
+
+.recommendation-box {
+    background: #f8f9fa;
+    border-left: 4px solid #667eea;
+    padding: 15px;
+    border-radius: 4px;
+}
+
+.recommendation-box h4 {
+    color: #667eea;
+    margin: 0 0 10px 0;
+}
+
+.recommendation-box ul {
+    margin: 10px 0 0 20px;
+    line-height: 1.6;
+}
+
+.recommendation-box li {
+    margin: 5px 0;
+    color: #495057;
+}
+
+/* Field Flow Modal Styles */
+.field-journey-visualization {
+    padding: 20px 0;
+}
+
+.journey-summary {
+    background: #e8f4fd;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    border-left: 4px solid #007bff;
+}
+
+.flow-steps-detailed {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.detailed-flow-step {
+    display: flex;
+    align-items: center;
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 15px;
+    position: relative;
+}
+
+.step-number {
+    background: #007bff;
+    color: white;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    margin-right: 15px;
+    flex-shrink: 0;
+}
+
+.step-content {
+    flex: 1;
+}
+
+.step-content .programs {
+    font-weight: bold;
+    color: #333;
+    font-family: 'Courier New', monospace;
+    margin-bottom: 5px;
+}
+
+.step-content .transformation {
+    color: #666;
+    font-size: 0.9em;
+    margin-bottom: 3px;
+}
+
+.step-content .mechanism {
+    color: #007bff;
+    font-size: 0.8em;
+    font-weight: 500;
+}
+
+.step-arrow {
+    position: absolute;
+    bottom: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    color: #007bff;
+    font-size: 1.5em;
+    font-weight: bold;
+    z-index: 2;
+    padding: 0 10px;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .layouts-list, .field-flows-grid, .file-operations-grid, .missing-programs-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .program-call-header {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    
+    .chain-flow-details {
+        margin-left: 0;
+        margin-top: 10px;
+    }
+    
+    .field-flow-path {
+        font-size: 0.9em;
+    }
+    
+    .call-metadata {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+}
+
+/* Animation for enhanced interactivity */
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.program-chain-item, .layout-item, .field-flow-card, .file-operation-card, .missing-program-card {
+    animation: slideInUp 0.3s ease-out;
+}
+
+/* Enhanced hover effects */
+.layout-item:hover .layout-name {
+    color: #667eea;
+}
+
+.field-flow-card:hover .field-name {
+    color: #0f5132;
+}
+
+.missing-program-card:hover .program-name {
+    color: #a91e2c;
+}
 
     .flow-details {
         background: #f9f9f9;
@@ -2159,7 +2972,7 @@
                     <div class="program-flow-container">
                         <div class="flow-controls">
                             <input type="text" id="startingProgram" placeholder="Enter program name (e.g., TMSTMPM4)" value="TMSTMPM4">
-                            <button onclick="analyzeFlow()">Analyze Program Flow</button>
+                            <button onclick="analyzeEnhancedFlow()">Analyze Program Flow</button>
                         </div>
                         
                         <div id="flowVisualization" class="flow-visualization">
@@ -5634,7 +6447,7 @@ function createProgramFlowView(sessionId) {
         <div class="program-flow-container">
             <div class="flow-controls">
                 <input type="text" id="startingProgram" placeholder="Enter program name (e.g., TMSTM6)">
-                <button onclick="analyzeFlow('${sessionId}')">Analyze Program Flow</button>
+                <button onclick="analyzeEnhancedFlow('${sessionId}')">Analyze Program Flow</button>
             </div>
             
             <div id="flowVisualization" class="flow-visualization">
@@ -7085,163 +7898,609 @@ function getSampleFlowData() {
             renderSampleFlow();
         };
     function renderFlowDetails(flowAnalysis, vizData) {
-        const detailsContainer = document.getElementById('flowDetails');
-        
-        let html = `
-            <div class="flow-summary-section">
-                <h3>Flow Summary</h3>
-                <div class="flow-business-summary">
-                    ${flowAnalysis.business_flow_summary || 'Program flow analysis completed'}
+    const detailsContainer = document.getElementById('flowDetails');
+    
+    let html = `
+        <div class="flow-summary-section">
+            <h3>Program Flow Analysis Summary</h3>
+            <div class="flow-business-summary">
+                ${flowAnalysis.business_flow_summary || 'Program flow analysis completed'}
+            </div>
+            <div class="flow-statistics">
+                <div class="stat-item">
+                    <span class="stat-value">${vizData.statistics.program_chain_steps}</span>
+                    <span class="stat-label">Program Steps</span>
                 </div>
-                <div class="flow-statistics">
-                    <div class="stat-item">
-                        <span class="stat-value">${vizData.statistics.program_chain_steps}</span>
-                        <span class="stat-label">Program Steps</span>
+                <div class="stat-item">
+                    <span class="stat-value">${vizData.statistics.file_operations}</span>
+                    <span class="stat-label">File Operations</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">${vizData.statistics.db2_operations}</span>
+                    <span class="stat-label">DB2 Operations</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value">${vizData.statistics.layout_associations}</span>
+                    <span class="stat-label">Layout Links</span>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Enhanced Program Call Chain with Layout Information
+    if (vizData.visualization_data.program_chain_summary && 
+        vizData.visualization_data.program_chain_summary.length > 0) {
+        html += `
+            <div class="program-chain-section">
+                <h3>📞 Program Call Chain with Data Flow</h3>
+                <div class="program-chain-list">
+        `;
+        
+        vizData.visualization_data.program_chain_summary.forEach((step, index) => {
+            const statusClass = step.status === 'MISSING' ? 'missing-program' : 'available-program';
+            const callIcon = getCallTypeIcon(step.call_type);
+            
+            html += `
+                <div class="program-chain-item ${statusClass}">
+                    <div class="chain-sequence">#${step.sequence}</div>
+                    <div class="chain-flow-details">
+                        <div class="program-call-header">
+                            <span class="source-program">${step.source_program}</span>
+                            <span class="call-arrow">${callIcon} ${step.call_type}</span>
+                            <span class="target-program">${step.target_program}</span>
+                            ${step.status === 'MISSING' ? '<span class="missing-indicator">❌ MISSING</span>' : '<span class="available-indicator">✅ AVAILABLE</span>'}
+                        </div>
+                        
+                        ${step.variable_name ? `
+                            <div class="dynamic-call-info">
+                                <strong>Dynamic Call:</strong> Variable <code>${step.variable_name}</code>
+                                <div class="resolution-details">Resolved at runtime based on business logic</div>
+                            </div>
+                        ` : ''}
+                        
+                        ${step.business_context ? `
+                            <div class="business-context">
+                                <strong>Business Purpose:</strong> ${step.business_context}
+                            </div>
+                        ` : ''}
+                        
+                        <div class="call-metadata">
+                            <span class="confidence-badge">Confidence: ${Math.round(step.confidence * 100)}%</span>
+                            <span class="data-passed-count">Fields Passed: ${step.data_passed_count || 0}</span>
+                        </div>
                     </div>
-                    <div class="stat-item">
-                        <span class="stat-value">${vizData.statistics.file_operations}</span>
-                        <span class="stat-label">File Operations</span>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    // Enhanced Layout Associations Section
+    if (vizData.visualization_data.layout_associations && 
+        vizData.visualization_data.layout_associations.length > 0) {
+        html += `
+            <div class="layout-associations-section">
+                <h3>📋 Record Layout Flow & Data Structures</h3>
+                <div class="layout-flow-grid">
+        `;
+        
+        // Group layouts by program for better organization
+        const layoutsByProgram = {};
+        vizData.visualization_data.layout_associations.forEach(layout => {
+            const program = layout.program_name || 'Unknown';
+            if (!layoutsByProgram[program]) {
+                layoutsByProgram[program] = [];
+            }
+            layoutsByProgram[program].push(layout);
+        });
+        
+        Object.entries(layoutsByProgram).forEach(([program, layouts]) => {
+            html += `
+                <div class="program-layout-group">
+                    <h4 class="program-header">🏗️ ${program}</h4>
+                    <div class="layouts-list">
+            `;
+            
+            layouts.forEach(layout => {
+                const statusClass = layout.has_fields ? 'layout-complete' : 'layout-partial';
+                html += `
+                    <div class="layout-item ${statusClass}">
+                        <div class="layout-header">
+                            <span class="layout-name">${layout.layout_name}</span>
+                            <span class="layout-type-badge">${layout.layout_type || 'RECORD'}</span>
+                            <span class="field-count">${layout.fields_count || 0} fields</span>
+                        </div>
+                        <div class="layout-details">
+                            <div class="layout-purpose">${layout.business_purpose || 'Data structure definition'}</div>
+                            ${layout.usage_context ? `
+                                <div class="usage-context">
+                                    <strong>Usage:</strong> ${layout.usage_context}
+                                </div>
+                            ` : ''}
+                            ${layout.connected_programs && layout.connected_programs.length > 0 ? `
+                                <div class="connected-programs">
+                                    <strong>Used by:</strong> ${layout.connected_programs.join(', ')}
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div class="layout-actions">
+                            <button class="btn-sm" onclick="viewLayoutFields('${layout.layout_name}')">View Fields</button>
+                            <button class="btn-sm" onclick="traceLayoutUsage('${layout.layout_name}')">Trace Usage</button>
+                        </div>
                     </div>
-                    <div class="stat-item">
-                        <span class="stat-value">${vizData.statistics.db2_operations}</span>
-                        <span class="stat-label">DB2 Operations</span>
+                `;
+            });
+            
+            html += `
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    // Enhanced Field Flow Section
+    if (Object.keys(vizData.visualization_data.field_flows).length > 0) {
+        html += `
+            <div class="field-flows-section">
+                <h3>🔄 Field Data Flow Analysis</h3>
+                <div class="field-flows-grid">
+        `;
+        
+        Object.entries(vizData.visualization_data.field_flows).forEach(([fieldName, flows]) => {
+            html += `
+                <div class="field-flow-card">
+                    <div class="field-header">
+                        <h4 class="field-name">📊 ${fieldName}</h4>
+                        <span class="flow-steps-count">${flows.length} flow steps</span>
+                    </div>
+                    <div class="field-flow-path">
+            `;
+            
+            flows.forEach((flow, index) => {
+                const isLast = index === flows.length - 1;
+                html += `
+                    <div class="flow-step">
+                        <div class="step-program">${flow.from}</div>
+                        ${flow.source_layout ? `<div class="step-layout">📋 ${flow.source_layout}</div>` : ''}
+                        <div class="step-transformation">
+                            ${flow.transformation || 'Direct transfer'}
+                        </div>
+                        ${!isLast ? '<div class="flow-arrow">→</div>' : ''}
+                    </div>
+                `;
+                if (!isLast) {
+                    html += '<div class="flow-connector">→</div>';
+                }
+            });
+            
+            html += `
+                    </div>
+                    <div class="field-actions">
+                        <button class="trace-btn" onclick="traceFieldFlow('${currentSessionId}', '${fieldName}')">
+                            Trace Complete Flow
+                        </button>
+                        <button class="analyze-btn" onclick="analyzeFieldTransformations('${fieldName}')">
+                            Analyze Transformations
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    // File Operations with Layout Connections
+    const fileOpsCount = vizData.visualization_data.nodes.filter(n => n.type === 'file').length;
+    if (fileOpsCount > 0) {
+        html += `
+            <div class="file-operations-section">
+                <h3>📁 File Operations & Data Access (${fileOpsCount})</h3>
+                <div class="file-operations-grid">
+        `;
+        
+        vizData.visualization_data.nodes.filter(n => n.type === 'file').forEach(fileNode => {
+            const statusClass = fileNode.has_layout ? 'has-layout' : 'no-layout';
+            const interfaceIcon = fileNode.interface === 'CICS' ? '🏦' : '📁';
+            
+            html += `
+                <div class="file-operation-card ${statusClass}">
+                    <div class="file-header">
+                        <div class="file-info">
+                            <span class="file-icon">${interfaceIcon}</span>
+                            <span class="file-name">${fileNode.label}</span>
+                            <span class="io-direction-badge ${fileNode.io_direction.toLowerCase()}">${fileNode.io_direction}</span>
+                        </div>
+                        ${fileNode.has_layout ? '<span class="layout-indicator">✅ Has Layout</span>' : '<span class="no-layout-indicator">⚠️ No Layout</span>'}
+                    </div>
+                    
+                    <div class="file-details">
+                        <div class="connected-program">
+                            <strong>Connected to:</strong> ${fileNode.connected_to_program}
+                        </div>
+                        <div class="file-operations">
+                            <strong>Operations:</strong> ${fileNode.operations.join(', ') || 'READ/WRITE'}
+                        </div>
+                        <div class="interface-type">
+                            <strong>Interface:</strong> ${fileNode.interface}
+                        </div>
+                        
+                        ${fileNode.associated_layouts && fileNode.associated_layouts.length > 0 ? `
+                            <div class="associated-layouts">
+                                <strong>Associated Layouts:</strong>
+                                <div class="layout-tags">
+                                    ${fileNode.associated_layouts.map(layout => 
+                                        `<span class="layout-tag" onclick="viewLayoutFields('${layout}')">${layout}</span>`
+                                    ).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                    
+                    <div class="file-actions">
+                        <button class="btn-sm" onclick="analyzeFileUsage('${fileNode.label}')">Analyze Usage</button>
+                        ${fileNode.has_layout ? 
+                            `<button class="btn-sm" onclick="viewFileLayout('${fileNode.label}')">View Layout</button>` : 
+                            `<button class="btn-sm" onclick="suggestLayoutCreation('${fileNode.label}')">Create Layout</button>`
+                        }
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    // Missing Programs with Impact Analysis
+    if (vizData.visualization_data.missing_programs && 
+        vizData.visualization_data.missing_programs.length > 0) {
+        html += `
+            <div class="missing-programs-section">
+                <h3>⚠️ Missing Programs Impact (${vizData.visualization_data.missing_programs.length})</h3>
+                <div class="missing-programs-grid">
+        `;
+        
+        vizData.visualization_data.missing_programs.forEach(program => {
+            html += `
+                <div class="missing-program-card">
+                    <div class="missing-header">
+                        <span class="missing-icon">❌</span>
+                        <span class="program-name">${program.program_name}</span>
+                        <span class="call-type-badge">${program.call_type}</span>
+                    </div>
+                    <div class="missing-details">
+                        <div class="called-by">
+                            <strong>Called by:</strong> ${program.called_by}
+                        </div>
+                        <div class="sequence-info">
+                            <strong>At step:</strong> #${program.sequence}
+                        </div>
+                        <div class="impact-description">
+                            This missing program blocks further flow analysis and may prevent complete understanding of data transformations.
+                        </div>
+                    </div>
+                    <div class="missing-actions">
+                        <button class="impact-btn" onclick="showMissingProgramImpact('${currentSessionId}', '${program.program_name}')">
+                            Analyze Impact
+                        </button>
+                        <button class="upload-btn" onclick="promptProgramUpload('${program.program_name}')">
+                            Upload Program
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+                <div class="missing-summary">
+                    <div class="recommendation-box">
+                        <h4>🎯 Recommendations</h4>
+                        <ul>
+                            <li>Upload the missing programs to complete flow analysis</li>
+                            <li>Each missing program may contain additional calls and data transformations</li>
+                            <li>Layout associations may become available once programs are uploaded</li>
+                        </ul>
                     </div>
                 </div>
             </div>
         `;
-        
-        // FIXED: Program Chain Summary (replaces missing [object Object])
-        if (vizData.visualization_data.program_chain_summary && 
-            vizData.visualization_data.program_chain_summary.length > 0) {
-            html += `
-                <div class="program-chain-section">
-                    <h3>Program Call Chain</h3>
-                    <div class="program-chain-list">
-            `;
-            
-            vizData.visualization_data.program_chain_summary.forEach((step, index) => {
-                const statusClass = step.status === 'MISSING' ? 'missing-program' : 'available-program';
-                const callIcon = step.call_type === 'XCTL' ? '→' : step.call_type === 'LINK' ? '↔' : '📞';
-                
-                html += `
-                    <div class="program-chain-item ${statusClass}">
-                        <div class="chain-sequence">#${step.sequence}</div>
-                        <div class="chain-flow">
-                            <span class="source-program">${step.source_program}</span>
-                            <span class="call-arrow">${callIcon} ${step.call_type}</span>
-                            <span class="target-program">${step.target_program}</span>
-                            ${step.status === 'MISSING' ? '<span class="missing-indicator">❌ MISSING</span>' : ''}
-                        </div>
-                        ${step.variable_name ? `<div class="dynamic-info">Dynamic via: ${step.variable_name}</div>` : ''}
-                        ${step.business_context ? `<div class="business-context">${step.business_context}</div>` : ''}
-                    </div>
-                `;
-            });
-            
-            html += `
-                    </div>
-                </div>
-            `;
-        }
-        
-        // FIXED: Missing programs section (properly formatted)
-        if (vizData.visualization_data.missing_programs && 
-            vizData.visualization_data.missing_programs.length > 0) {
-            html += `
-                <div class="missing-programs-section">
-                    <h3>Missing Programs (${vizData.visualization_data.missing_programs.length})</h3>
-                    <div class="missing-programs-list">
-            `;
-            
-            vizData.visualization_data.missing_programs.forEach(program => {
-                html += `
-                    <div class="missing-program-item">
-                        <span class="program-name">${program.program_name}</span>
-                        <span class="called-by">Called by: ${program.called_by}</span>
-                        <span class="call-type">${program.call_type}</span>
-                        <button onclick="showMissingProgramImpact('${sessionId}', '${program.program_name}')" 
-                                class="impact-btn">Show Impact</button>
-                        <span class="upload-hint">Upload this program to continue flow analysis</span>
-                    </div>
-                `;
-            });
-            
-            html += `
-                    </div>
-                </div>
-            `;
-        }
-        
-        // FIXED: Field flows section with layout information
-        if (Object.keys(vizData.visualization_data.field_flows).length > 0) {
-            html += `
-                <div class="field-flows-section">
-                    <h3>Key Field Data Flows</h3>
-                    <div class="field-flows-list">
-            `;
-            
-            Object.entries(vizData.visualization_data.field_flows).forEach(([fieldName, flows]) => {
-                html += `
-                    <div class="field-flow-item">
-                        <div class="field-name">${fieldName}</div>
-                        <div class="field-flow-path">
-                `;
-                
-                flows.forEach((flow, index) => {
-                    if (index > 0) html += ' → ';
-                    html += `<span class="flow-step">${flow.from}</span>`;
-                    if (flow.source_layout) {
-                        html += `<span class="layout-info">[${flow.source_layout}]</span>`;
-                    }
-                });
-                
-                html += `
-                        </div>
-                        <button onclick="traceFieldFlow('${sessionId}', '${fieldName}')" 
-                                class="trace-btn">Trace Field</button>
-                    </div>
-                `;
-            });
-            
-            html += `
-                    </div>
-                </div>
-            `;
-        }
-        
-        // File operations section (with program connections)
-        const fileOpsCount = vizData.visualization_data.nodes.filter(n => n.type === 'file').length;
-        if (fileOpsCount > 0) {
-            html += `
-                <div class="file-operations-section">
-                    <h3>File Operations in Flow (${fileOpsCount})</h3>
-                    <div class="file-operations-list">
-            `;
-            
-            vizData.visualization_data.nodes.filter(n => n.type === 'file').forEach(fileNode => {
-                const statusClass = fileNode.has_layout ? 'has-layout' : 'no-layout';
-                html += `
-                    <div class="file-operation-item ${statusClass}">
-                        <div class="file-info">
-                            <span class="file-name">${fileNode.label}</span>
-                            <span class="io-direction">(${fileNode.io_direction})</span>
-                            <span class="connected-program">Connected to: ${fileNode.connected_to_program}</span>
-                            ${fileNode.has_layout ? '<span class="layout-indicator">Has Layout</span>' : ''}
-                        </div>
-                        <div class="file-interface">Interface: ${fileNode.interface}</div>
-                    </div>
-                `;
-            });
-            
-            html += `
-                    </div>
-                </div>
-            `;
-        }
-        
-        detailsContainer.innerHTML = html;
     }
+    
+    detailsContainer.innerHTML = html;
+}
+function getCallTypeIcon(callType) {
+    const icons = {
+        'CALL': '📞',
+        'XCTL': '🔄',
+        'LINK': '🔗',
+        'DYNAMIC': '⚡'
+    };
+    return icons[callType] || '📞';
+}
 
+// Action functions for enhanced interactivity
+function viewLayoutFields(layoutName) {
+    // Switch to field matrix tab and show layout fields
+    showTab({target: document.querySelector('.tab-btn:nth-child(4)')}, 'fieldMatrix');
+    const recordLayoutSelect = document.getElementById('recordLayoutSelect');
+    if (recordLayoutSelect) {
+        recordLayoutSelect.value = layoutName;
+        loadFieldMatrix();
+    }
+}
+
+function traceLayoutUsage(layoutName) {
+    // Open chat with layout usage query
+    const chatInput = document.getElementById('chatInput');
+    chatInput.value = `Trace the usage of layout ${layoutName}. Show me which programs use it, how fields are populated, and what business processes it supports.`;
+    chatInput.focus();
+}
+
+function traceFieldFlow(sessionId, fieldName) {
+    // Enhanced field flow tracing with visual representation
+    fetch(`/api/field-flow-trace/${sessionId}/${fieldName}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showFieldFlowModal(data.field_journey);
+            } else {
+                alert('Could not trace field flow: ' + (data.error || data.message));
+            }
+        })
+        .catch(error => {
+            console.error('Error tracing field flow:', error);
+            alert('Error tracing field flow');
+        });
+}
+
+function analyzeFieldTransformations(fieldName) {
+    // Open AI analysis for field transformations
+    const chatInput = document.getElementById('chatInput');
+    chatInput.value = `Analyze all transformations applied to field ${fieldName} throughout the program flow. Include business logic, data type changes, and validation rules.`;
+    sendChatMessage();
+}
+function renderEnhancedFlowDetails(flowAnalysis, vizData) {
+    const detailsContainer = document.getElementById('flowDetails');
+    
+    let html = `
+        <div class="enhanced-flow-header">
+            <h2>📊 Enhanced Program Flow Analysis</h2>
+            <div class="flow-overview-stats">
+                <div class="overview-stat">
+                    <span class="stat-value">${vizData.statistics.total_programs}</span>
+                    <span class="stat-label">Programs</span>
+                </div>
+                <div class="overview-stat">
+                    <span class="stat-value">${vizData.statistics.layout_associations}</span>
+                    <span class="stat-label">Layouts</span>
+                </div>
+                <div class="overview-stat">
+                    <span class="stat-value">${vizData.statistics.field_flows}</span>
+                    <span class="stat-label">Field Flows</span>
+                </div>
+                <div class="overview-stat">
+                    <span class="stat-value">${vizData.statistics.file_operations}</span>
+                    <span class="stat-label">File Ops</span>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Use the enhanced rendering functions from the previous artifacts
+    html += renderProgramChainWithDetails(vizData.visualization_data.program_chain_summary);
+    html += renderLayoutAssociations(vizData.visualization_data.layout_associations);
+    html += renderFieldFlowsWithTransformations(vizData.visualization_data.field_flows);
+    html += renderFileOperationsWithLayouts(vizData.visualization_data.file_operations);
+    
+    if (vizData.visualization_data.missing_programs.length > 0) {
+        html += renderMissingProgramsImpact(vizData.visualization_data.missing_programs);
+    }
+    
+    detailsContainer.innerHTML = html;
+}
+async function analyzeEnhancedFlow() {
+    const programName = document.getElementById('startingProgram').value;
+    if (!programName) {
+        alert('Please enter a program name');
+        return;
+    }
+    
+    showLoadingSpinner('Analyzing enhanced program flow...');
+    
+    try {
+        const flowResponse = await fetch(`/api/program-flow-enhanced/${currentSessionId}/${programName}`);
+        const flowData = await flowResponse.json();
+        
+        if (!flowData.success) {
+            showError(flowData.error);
+            return;
+        }
+        
+        // Render enhanced visualization and details
+        renderFlowVisualization(flowData.visualization_data);
+        renderEnhancedFlowDetails(flowData.flow_analysis, flowData);
+        
+        // Show success message with enhanced features
+        showSuccess(`Enhanced analysis complete! Found ${flowData.statistics.layout_associations} layout associations and ${flowData.statistics.field_flows} field flows.`);
+        
+    } catch (error) {
+        showError(`Error analyzing enhanced flow: ${error.message}`);
+    } finally {
+        hideLoadingSpinner();
+    }
+}
+
+// Add these helper functions for better interaction
+function viewLayoutFieldDetails(layoutName) {
+    // Open a detailed modal for layout fields
+    fetch(`/api/layout-field-details/${currentSessionId}/${layoutName}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showLayoutFieldDetailsModal(data.layout_details);
+            }
+        })
+        .catch(error => console.error('Error loading layout details:', error));
+}
+
+function showLayoutFieldDetailsModal(layoutDetails) {
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content" style="width: 90%; max-width: 1200px;">
+            <div class="modal-header">
+                <h3>📋 Layout Fields: ${layoutDetails.layout_name}</h3>
+                <button class="close" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="layout-field-details">
+                    <div class="layout-summary">
+                        <h4>${layoutDetails.friendly_name}</h4>
+                        <p>${layoutDetails.business_purpose}</p>
+                        <div class="field-statistics">
+                            <span>Total Fields: ${layoutDetails.fields.length}</span>
+                            <span>Usage Context: ${layoutDetails.usage_context}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="fields-table">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Field Name</th>
+                                    <th>Data Type</th>
+                                    <th>Usage</th>
+                                    <th>Business Purpose</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${layoutDetails.fields.map(field => `
+                                    <tr>
+                                        <td><strong>${field.field_name}</strong></td>
+                                        <td><code>${field.data_type}</code></td>
+                                        <td><span class="badge ${getBadgeClass(field.usage_type)}">${field.usage_type}</span></td>
+                                        <td>${field.business_purpose}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+function renderProgramChainWithDetails(programChain) {
+    let html = `
+        <div class="program-chain-section">
+            <h3>📞 Program Call Chain & Data Flow</h3>
+            <div class="program-chain-list">
+    `;
+    
+    programChain.forEach((step, index) => {
+        const statusClass = step.status === 'MISSING' ? 'missing-program' : 'available-program';
+        const callIcon = getCallTypeIcon(step.call_type);
+        
+        html += `
+            <div class="program-chain-item ${statusClass}">
+                <div class="chain-sequence">#${step.sequence}</div>
+                <div class="chain-flow-details">
+                    <div class="program-call-header">
+                        <span class="source-program">${step.source_program}</span>
+                        <span class="call-arrow">${callIcon} ${step.call_type}</span>
+                        <span class="target-program">${step.target_program}</span>
+                        ${step.status === 'MISSING' ? 
+                            '<span class="missing-indicator">❌ MISSING</span>' : 
+                            '<span class="available-indicator">✅ AVAILABLE</span>'}
+                    </div>
+                    
+                    ${step.variable_name ? `
+                        <div class="dynamic-call-info">
+                            <strong>Dynamic Call:</strong> Variable <code>${step.variable_name}</code>
+                            <div class="resolution-details">Resolved at runtime based on business logic</div>
+                        </div>
+                    ` : ''}
+                    
+                    ${step.business_context ? `
+                        <div class="business-context">
+                            <strong>Business Purpose:</strong> ${step.business_context}
+                        </div>
+                    ` : ''}
+                    
+                    <div class="call-metadata">
+                        <span class="confidence-badge">Confidence: ${Math.round(step.confidence * 100)}%</span>
+                        <span class="data-passed-count">Fields Passed: ${step.data_passed_count || 0}</span>
+                        <span class="layout-count">Layouts: ${step.layout_associations_count || 0}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    return html;
+}
+
+function showFieldFlowModal(fieldJourney) {
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content" style="width: 80%; max-width: 1000px;">
+            <div class="modal-header">
+                <h3>🔄 Field Flow Journey: ${fieldJourney.field_name}</h3>
+                <button class="close" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="field-journey-visualization">
+                    <div class="journey-summary">
+                        <strong>Programs Involved:</strong> ${fieldJourney.programs_involved.join(' → ')}
+                    </div>
+                    <div class="flow-steps-detailed">
+                        ${fieldJourney.flow_steps.map((step, index) => `
+                            <div class="detailed-flow-step">
+                                <div class="step-number">${step.sequence}</div>
+                                <div class="step-content">
+                                    <div class="programs">${step.source_program} → ${step.target_program}</div>
+                                    <div class="transformation">${step.transformation}</div>
+                                    <div class="mechanism">${step.call_mechanism}</div>
+                                </div>
+                                ${index < fieldJourney.flow_steps.length - 1 ? '<div class="step-arrow">↓</div>' : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
 
 
         function showNodeDetails(node, vizData) {

@@ -1052,6 +1052,481 @@ class ProgramFlowAnalyzer:
         }
         return mapping.get(mechanism, 'STATIC_CALL') 
 
+
+    def _get_layout_associations_for_flow(self, session_id: str, program_chain: List[Dict]) -> List[Dict]:
+        """Get detailed layout associations for the program flow"""
+        layout_associations = []
+        
+        try:
+            for step in program_chain:
+                if step.get('is_missing'):
+                    continue
+                    
+                program_name = step['source_program']
+                
+                # Get layouts used by this program
+                with self.db_manager.get_connection() as conn:
+                    cursor = conn.cursor()
+                    
+                    # Get record layouts for this program
+                    cursor.execute('''
+                        SELECT rl.layout_name, rl.friendly_name, rl.business_purpose,
+                            rl.fields_count, rl.record_classification, rl.record_usage_description,
+                            COUNT(fad.id) as actual_field_count
+                        FROM record_layouts rl
+                        LEFT JOIN field_analysis_details fad ON rl.id = fad.field_id
+                        WHERE rl.session_id = ? AND rl.program_name = ?
+                        GROUP BY rl.id, rl.layout_name, rl.friendly_name, rl.business_purpose,
+                                rl.fields_count, rl.record_classification, rl.record_usage_description
+                    ''', (session_id, program_name))
+                    
+                    program_layouts = cursor.fetchall()
+                    
+                    for layout_row in program_layouts:
+                        layout_info = {
+                            'layout_name': layout_row[0],
+                            'friendly_name': layout_row[1] or layout_row[0].replace('-', ' ').title(),
+                            'business_purpose': layout_row[2] or f'Data structure for {program_name}',
+                            'fields_count': layout_row[6] or layout_row[3] or 0,  # Use actual count if available
+                            'record_classification': layout_row[4] or 'RECORD',
+                            'usage_description': layout_row[5] or 'Program data structure',
+                            'program_name': program_name,
+                            'sequence_in_flow': step['sequence'],
+                            'layout_type': layout_row[4] or 'RECORD',
+                            'has_fields': (layout_row[6] or 0) > 0,
+                            'usage_context': self._determine_layout_usage_context(session_id, layout_row[0], program_name),
+                            'connected_programs': self._get_programs_using_layout(session_id, layout_row[0])
+                        }
+                        
+                        # Get key fields for this layout
+                        layout_info['key_fields'] = self._get_layout_key_fields(session_id, layout_row[0])
+                        
+                        layout_associations.append(layout_info)
+            
+            logger.info(f"Found {len(layout_associations)} layout associations in flow")
+            return layout_associations
+            
+        except Exception as e:
+            logger.error(f"Error getting layout associations: {str(e)}")
+            return []
+
+    def _determine_layout_usage_context(self, session_id: str, layout_name: str, program_name: str) -> str:
+        """Determine how a layout is used in the context of the program"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check field usage types for this layout in this program
+                cursor.execute('''
+                    SELECT fad.usage_type, COUNT(*) as count
+                    FROM field_analysis_details fad
+                    JOIN record_layouts rl ON fad.field_id = rl.id
+                    WHERE fad.session_id = ? AND rl.layout_name = ? AND fad.program_name = ?
+                    GROUP BY fad.usage_type
+                    ORDER BY count DESC
+                ''', (session_id, layout_name, program_name))
+                
+                usage_types = cursor.fetchall()
+                
+                if not usage_types:
+                    return "Data structure definition"
+                
+                # Determine primary usage
+                primary_usage = usage_types[0][0]
+                usage_contexts = {
+                    'INPUT': 'Input data processing and validation',
+                    'OUTPUT': 'Output data formatting and generation',
+                    'INPUT_OUTPUT': 'Bidirectional data processing',
+                    'DERIVED': 'Calculated field generation',
+                    'STATIC': 'Constant data and configuration',
+                    'REFERENCE': 'Data lookup and reference'
+                }
+                
+                context = usage_contexts.get(primary_usage, 'General data processing')
+                
+                # Add additional context if multiple usage types
+                if len(usage_types) > 1:
+                    other_types = [ut[0] for ut in usage_types[1:3]]  # Top 2 additional types
+                    context += f" (also used for {', '.join(other_types).lower()})"
+                
+                return context
+                
+        except Exception as e:
+            logger.error(f"Error determining layout usage context: {str(e)}")
+            return "Data structure processing"
+
+    def _get_programs_using_layout(self, session_id: str, layout_name: str) -> List[str]:
+        """Get list of programs that use a specific layout"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT DISTINCT rl.program_name
+                    FROM record_layouts rl
+                    WHERE rl.session_id = ? AND rl.layout_name = ?
+                    AND rl.program_name IS NOT NULL
+                ''', (session_id, layout_name))
+                
+                return [row[0] for row in cursor.fetchall()]
+                
+        except Exception as e:
+            logger.error(f"Error getting programs using layout: {str(e)}")
+            return []
+
+    def _get_layout_key_fields(self, session_id: str, layout_name: str, limit: int = 5) -> List[Dict]:
+        """Get key fields for a layout with their usage information"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT fad.field_name, fad.friendly_name, fad.usage_type, 
+                        fad.business_purpose, fad.mainframe_data_type
+                    FROM field_analysis_details fad
+                    JOIN record_layouts rl ON fad.field_id = rl.id
+                    WHERE fad.session_id = ? AND rl.layout_name = ?
+                    ORDER BY fad.total_program_references DESC, fad.field_name
+                    LIMIT ?
+                ''', (session_id, layout_name, limit))
+                
+                key_fields = []
+                for row in cursor.fetchall():
+                    field_info = {
+                        'field_name': row[0],
+                        'friendly_name': row[1] or row[0].replace('-', ' ').title(),
+                        'usage_type': row[2] or 'STATIC',
+                        'business_purpose': row[3] or f'Field {row[0]} processing',
+                        'data_type': row[4] or 'UNKNOWN'
+                    }
+                    key_fields.append(field_info)
+                
+                return key_fields
+                
+        except Exception as e:
+            logger.error(f"Error getting layout key fields: {str(e)}")
+            return []
+
+    def _enhance_field_flows_with_layout_info(self, session_id: str, field_flows: List[Dict]) -> List[Dict]:
+        """Enhance field flows with layout information"""
+        enhanced_flows = []
+        
+        for field_flow in field_flows:
+            enhanced_flow = field_flow.copy()
+            
+            # Get source and target layout information
+            field_name = field_flow['field_name']
+            source_program = field_flow['source_program']
+            target_program = field_flow['target_program']
+            
+            # Find layouts containing this field in source program
+            source_layouts = self._find_layouts_containing_field(session_id, field_name, source_program)
+            enhanced_flow['source_layouts'] = source_layouts
+            
+            # Find layouts containing this field in target program
+            target_layouts = self._find_layouts_containing_field(session_id, field_name, target_program)
+            enhanced_flow['target_layouts'] = target_layouts
+            
+            # Determine data transformation details
+            transformation_details = self._analyze_field_transformation(
+                session_id, field_name, source_program, target_program
+            )
+            enhanced_flow['transformation_details'] = transformation_details
+            
+            enhanced_flows.append(enhanced_flow)
+        
+        return enhanced_flows
+
+    def _find_layouts_containing_field(self, session_id: str, field_name: str, program_name: str) -> List[Dict]:
+        """Find layouts that contain a specific field in a program"""
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT DISTINCT rl.layout_name, rl.friendly_name, rl.business_purpose
+                    FROM record_layouts rl
+                    JOIN field_analysis_details fad ON rl.id = fad.field_id
+                    WHERE fad.session_id = ? AND fad.field_name = ? AND rl.program_name = ?
+                ''', (session_id, field_name, program_name))
+                
+                layouts = []
+                for row in cursor.fetchall():
+                    layout_info = {
+                        'layout_name': row[0],
+                        'friendly_name': row[1] or row[0].replace('-', ' ').title(),
+                        'business_purpose': row[2] or 'Data structure'
+                    }
+                    layouts.append(layout_info)
+                
+                return layouts
+                
+        except Exception as e:
+            logger.error(f"Error finding layouts containing field: {str(e)}")
+            return []
+
+    def _analyze_field_transformation(self, session_id: str, field_name: str, 
+                                    source_program: str, target_program: str) -> Dict:
+        """Analyze how a field is transformed between programs"""
+        try:
+            transformation_details = {
+                'transformation_type': 'DIRECT_PASS',
+                'data_type_changes': [],
+                'validation_rules': [],
+                'business_logic_applied': []
+            }
+            
+            # Get field details from both programs
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Source field details
+                cursor.execute('''
+                    SELECT usage_type, mainframe_data_type, business_purpose, 
+                        field_references_json
+                    FROM field_analysis_details
+                    WHERE session_id = ? AND field_name = ? AND program_name = ?
+                ''', (session_id, field_name, source_program))
+                
+                source_field = cursor.fetchone()
+                
+                # Target field details  
+                cursor.execute('''
+                    SELECT usage_type, mainframe_data_type, business_purpose,
+                        field_references_json
+                    FROM field_analysis_details
+                    WHERE session_id = ? AND field_name = ? AND program_name = ?
+                ''', (session_id, field_name, target_program))
+                
+                target_field = cursor.fetchone()
+                
+                if source_field and target_field:
+                    # Analyze data type changes
+                    if source_field[1] != target_field[1]:
+                        transformation_details['data_type_changes'].append({
+                            'from_type': source_field[1] or 'UNKNOWN',
+                            'to_type': target_field[1] or 'UNKNOWN',
+                            'change_type': 'DATA_TYPE_CONVERSION'
+                        })
+                        transformation_details['transformation_type'] = 'DATA_TYPE_CONVERSION'
+                    
+                    # Analyze usage type changes
+                    if source_field[0] != target_field[0]:
+                        transformation_details['transformation_type'] = 'USAGE_TYPE_CHANGE'
+                        transformation_details['business_logic_applied'].append({
+                            'logic_type': 'USAGE_TRANSFORMATION',
+                            'description': f"Field usage changed from {source_field[0]} to {target_field[0]}"
+                        })
+                    
+                    # Extract business logic from field references
+                    source_refs = self._parse_field_references(source_field[3])
+                    target_refs = self._parse_field_references(target_field[3])
+                    
+                    # Look for validation or calculation patterns
+                    for ref in source_refs + target_refs:
+                        ref_line = ref.get('line_content', '').upper()
+                        if any(keyword in ref_line for keyword in ['IF', 'WHEN', 'EVALUATE']):
+                            transformation_details['validation_rules'].append({
+                                'rule_type': 'CONDITIONAL_LOGIC',
+                                'description': ref.get('line_content', '').strip()[:100]
+                            })
+                        elif any(keyword in ref_line for keyword in ['COMPUTE', 'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE']):
+                            transformation_details['business_logic_applied'].append({
+                                'logic_type': 'CALCULATION',
+                                'description': ref.get('line_content', '').strip()[:100]
+                            })
+            
+            return transformation_details
+            
+        except Exception as e:
+            logger.error(f"Error analyzing field transformation: {str(e)}")
+            return {'transformation_type': 'UNKNOWN', 'data_type_changes': [], 'validation_rules': [], 'business_logic_applied': []}
+
+    def _parse_field_references(self, references_json: str) -> List[Dict]:
+        """Parse field references JSON safely"""
+        try:
+            if references_json:
+                return json.loads(references_json)
+            return []
+        except:
+            return []
+
+    # Update the main analyze_complete_program_flow method to include layout associations
+    def analyze_complete_program_flow_enhanced(self, session_id: str, starting_program: str) -> Dict:
+        """Enhanced complete program flow analysis with detailed layout information"""
+        logger.info(f"Starting enhanced flow analysis from {starting_program}")
+        
+        flow_analysis = {
+            'flow_id': str(uuid.uuid4()),
+            'starting_program': starting_program,
+            'program_chain': [],
+            'field_flows': [],
+            'file_operations': [],
+            'layout_associations': [],  # NEW: Detailed layout information
+            'missing_programs': [],
+            'data_transformations': [],
+            'business_flow_summary': ''
+        }
+        
+        try:
+            # Refresh dependencies before analysis
+            self._refresh_dependency_status(session_id)
+            
+            # Step 1: Build program call chain
+            program_chain = self._build_program_call_chain_fixed(session_id, starting_program)
+            flow_analysis['program_chain'] = program_chain
+            
+            # Step 2: Get detailed layout associations for the flow
+            layout_associations = self._get_layout_associations_for_flow(session_id, program_chain)
+            flow_analysis['layout_associations'] = layout_associations
+            
+            # Step 3: Trace field data flow with layout information
+            field_flows = self._trace_field_data_flow_fixed(session_id, program_chain)
+            enhanced_field_flows = self._enhance_field_flows_with_layout_info(session_id, field_flows)
+            flow_analysis['field_flows'] = enhanced_field_flows
+            
+            # Step 4: Identify file operations with layout associations
+            file_operations = self._identify_file_operations_with_layouts(session_id, program_chain)
+            flow_analysis['file_operations'] = file_operations
+            
+            # Step 5: Identify missing programs
+            missing_programs = self._identify_missing_programs_in_flow(session_id, program_chain)
+            flow_analysis['missing_programs'] = missing_programs
+            
+            # Step 6: Generate enhanced business summary
+            business_summary = self._generate_enhanced_business_flow_summary(session_id, flow_analysis)
+            flow_analysis['business_flow_summary'] = business_summary
+            
+            # Store in database
+            self._store_program_flow_analysis(session_id, flow_analysis)
+            
+            logger.info(f"Enhanced program flow analysis completed: {len(program_chain)} programs, "
+                    f"{len(layout_associations)} layouts, {len(enhanced_field_flows)} field flows")
+            return flow_analysis
+            
+        except Exception as e:
+            logger.error(f"Error in enhanced program flow analysis: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return flow_analysis
+
+    def _generate_enhanced_business_flow_summary(self, session_id: str, flow_analysis: Dict) -> str:
+        """Generate enhanced business summary with layout and data transformation details"""
+        try:
+            summary_parts = []
+            
+            starting_prog = flow_analysis['starting_program']
+            summary_parts.append(f"Enhanced Program Flow Analysis for {starting_prog}")
+            summary_parts.append("=" * 60)
+            summary_parts.append("")
+            
+            # Program chain summary
+            chain = flow_analysis.get('program_chain', [])
+            if chain:
+                summary_parts.append("📞 PROGRAM CALL CHAIN:")
+                for step in chain:
+                    status = "[MISSING]" if step.get('is_missing') else "[AVAILABLE]"
+                    call_type = step.get('call_type', 'CALL')
+                    
+                    if step.get('variable_name'):
+                        summary_parts.append(f"  {step['source_program']} --({call_type} via {step['variable_name']})--> {step['target_program']} {status}")
+                    else:
+                        summary_parts.append(f"  {step['source_program']} --({call_type})--> {step['target_program']} {status}")
+                summary_parts.append("")
+            
+            # Layout associations summary
+            layouts = flow_analysis.get('layout_associations', [])
+            if layouts:
+                summary_parts.append("📋 RECORD LAYOUTS & DATA STRUCTURES:")
+                
+                # Group by program
+                by_program = {}
+                for layout in layouts:
+                    prog = layout['program_name']
+                    if prog not in by_program:
+                        by_program[prog] = []
+                    by_program[prog].append(layout)
+                
+                for program, prog_layouts in by_program.items():
+                    summary_parts.append(f"  {program}:")
+                    for layout in prog_layouts:
+                        field_count = layout.get('fields_count', 0)
+                        usage = layout.get('usage_context', 'Data processing')
+                        summary_parts.append(f"    - {layout['layout_name']} ({field_count} fields) - {usage}")
+                    summary_parts.append("")
+            
+            # Field flows with transformation details
+            field_flows = flow_analysis.get('field_flows', [])
+            if field_flows:
+                summary_parts.append("🔄 FIELD DATA FLOWS:")
+                for field_flow in field_flows[:10]:  # Limit to top 10
+                    field_name = field_flow['field_name']
+                    source = field_flow['source_program']
+                    target = field_flow['target_program']
+                    transform_type = field_flow.get('transformation_details', {}).get('transformation_type', 'DIRECT_PASS')
+                    
+                    summary_parts.append(f"  {field_name}: {source} --> {target} ({transform_type})")
+                    
+                    # Add transformation details if available
+                    transform_details = field_flow.get('transformation_details', {})
+                    if transform_details.get('business_logic_applied'):
+                        logic = transform_details['business_logic_applied'][0]
+                        summary_parts.append(f"    Business Logic: {logic.get('description', 'Applied')[:50]}...")
+                
+                if len(field_flows) > 10:
+                    summary_parts.append(f"  ... and {len(field_flows) - 10} more field flows")
+                summary_parts.append("")
+            
+            # File operations summary
+            file_ops = flow_analysis.get('file_operations', [])
+            if file_ops:
+                summary_parts.append("📁 FILE OPERATIONS:")
+                for file_op in file_ops:
+                    file_name = file_op['file_name']
+                    program = file_op['program_name']
+                    operations = ', '.join(file_op.get('operations', []))
+                    layout_status = "with layouts" if file_op.get('has_layout_resolution') else "no layouts"
+                    
+                    summary_parts.append(f"  {program} --> {file_name} ({operations}) [{layout_status}]")
+                summary_parts.append("")
+            
+            # Missing programs impact
+            missing = flow_analysis.get('missing_programs', [])
+            if missing:
+                summary_parts.append("⚠️ MISSING PROGRAMS IMPACT:")
+                for missing_prog in missing:
+                    prog_name = missing_prog['program_name']
+                    called_by = missing_prog['called_by']
+                    impact = "blocks flow analysis" if missing_prog.get('blocks_further_analysis') else "limits analysis"
+                    summary_parts.append(f"  {prog_name} (called by {called_by}) - {impact}")
+                summary_parts.append("")
+            
+            # Summary statistics
+            summary_parts.append("📊 ANALYSIS STATISTICS:")
+            summary_parts.append(f"  Programs in chain: {len(chain)}")
+            summary_parts.append(f"  Record layouts identified: {len(layouts)}")
+            summary_parts.append(f"  Field data flows traced: {len(field_flows)}")
+            summary_parts.append(f"  File operations found: {len(file_ops)}")
+            summary_parts.append(f"  Missing programs: {len(missing)}")
+            
+            # Data quality assessment
+            complete_programs = len([s for s in chain if not s.get('is_missing')])
+            if complete_programs > 0:
+                completeness_pct = (complete_programs / len(chain)) * 100
+                summary_parts.append(f"  Analysis completeness: {completeness_pct:.1f}%")
+            
+            if missing:
+                summary_parts.append("")
+                summary_parts.append("🎯 NEXT STEPS:")
+                summary_parts.append("  1. Upload missing programs to complete flow analysis")
+                summary_parts.append("  2. Verify layout associations are correct")
+                summary_parts.append("  3. Validate field transformation logic")
+                summary_parts.append("  4. Document business rules discovered")
+            
+            return '\n'.join(summary_parts)
+            
+        except Exception as e:
+            logger.error(f"Error generating enhanced business flow summary: {str(e)}")
+            return f"Enhanced business flow summary generation failed: {str(e)}"
+
+
     def _store_program_flow_analysis(self, session_id: str, flow_analysis: Dict):
         """Store program flow analysis in database"""
         try:

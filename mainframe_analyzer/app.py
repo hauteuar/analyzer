@@ -2618,6 +2618,192 @@ def refresh_dependencies_status(session_id):
             'success': False,
             'error': str(e)
         })
+@app.route('/api/program-flow-enhanced/<session_id>/<program_name>', methods=['GET'])
+def get_enhanced_program_flow(session_id, program_name):
+    """Get enhanced program flow with detailed layout associations"""
+    try:
+        logger.info(f"Enhanced program flow request: {program_name} in session {session_id[:8]}")
+        
+        # Check if program exists
+        components = analyzer.db_manager.get_session_components(session_id)
+        program_exists = any(c['component_name'].upper() == program_name.upper() for c in components)
+        
+        if not program_exists:
+            available_programs = [c['component_name'] for c in components if c.get('component_type') == 'PROGRAM']
+            return jsonify({
+                'success': False,
+                'error': f'Program {program_name} not found in session',
+                'available_programs': available_programs
+            })
+        
+        # Use enhanced analysis method
+        flow_analysis = analyzer.program_flow_analyzer.analyze_complete_program_flow_enhanced(session_id, program_name)
+        
+        # Create enhanced visualization data
+        visualization_data = create_enhanced_visualization_data(flow_analysis, session_id)
+        
+        return jsonify({
+            'success': True,
+            'flow_analysis': flow_analysis,
+            'visualization_data': visualization_data,
+            'program_name': program_name,
+            'enhanced_features': True,
+            'layout_details_included': True,
+            'field_transformation_analysis': True,
+            'statistics': {
+                'total_programs': len(flow_analysis.get('program_chain', [])),
+                'layout_associations': len(flow_analysis.get('layout_associations', [])),
+                'field_flows': len(flow_analysis.get('field_flows', [])),
+                'file_operations': len(flow_analysis.get('file_operations', [])),
+                'missing_programs': len(flow_analysis.get('missing_programs', []))
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in enhanced program flow: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+def create_enhanced_visualization_data(flow_analysis, session_id):
+    """Create enhanced visualization data with layout details"""
+    
+    visualization_data = {
+        'nodes': [],
+        'edges': [],
+        'program_chain_summary': [],
+        'layout_associations': flow_analysis.get('layout_associations', []),
+        'field_flows': {},
+        'missing_programs': flow_analysis.get('missing_programs', []),
+        'file_operations': flow_analysis.get('file_operations', [])
+    }
+    
+    # Create program nodes with layout information
+    programs_in_flow = set()
+    program_details = {}
+    
+    # Collect program information
+    for step in flow_analysis.get('program_chain', []):
+        programs_in_flow.add(step['source_program'])
+        programs_in_flow.add(step['target_program'])
+        
+        program_details[step['source_program']] = {
+            'status': 'present',
+            'is_starting': step['source_program'] == flow_analysis['starting_program']
+        }
+        
+        program_details[step['target_program']] = {
+            'status': 'missing' if step.get('is_missing') else 'present',
+            'is_starting': False
+        }
+    
+    # Create program nodes with enhanced layout associations
+    node_levels = assign_node_levels(flow_analysis.get('program_chain', []), flow_analysis['starting_program'])
+    
+    for program in programs_in_flow:
+        details = program_details.get(program, {'status': 'unknown', 'is_starting': False})
+        level = node_levels.get(program, 999)
+        
+        # Get layout associations for this program
+        program_layouts = [layout for layout in flow_analysis.get('layout_associations', []) 
+                          if layout.get('program_name') == program]
+        
+        node = {
+            'id': program,
+            'label': program,
+            'type': 'program',
+            'status': details['status'],
+            'is_starting_program': details.get('is_starting', False),
+            'level': level,
+            'x': 100 + (level * 200),
+            'y': 100 + (len([p for p, l in node_levels.items() if l == level and p != program]) * 80),
+            'width': 120,
+            'height': 60,
+            'layout_count': len(program_layouts),
+            'associated_layouts': [layout['layout_name'] for layout in program_layouts],
+            'layout_details': program_layouts
+        }
+        
+        visualization_data['nodes'].append(node)
+    
+    # Create program chain summary with enhanced details
+    for step in flow_analysis.get('program_chain', []):
+        summary_item = {
+            'sequence': step.get('sequence'),
+            'source_program': step.get('source_program'),
+            'target_program': step.get('target_program'),
+            'call_type': step.get('call_type', 'CALL'),
+            'status': 'MISSING' if step.get('is_missing') else 'AVAILABLE',
+            'business_context': step.get('business_context', ''),
+            'variable_name': step.get('variable_name', ''),
+            'confidence': step.get('confidence', 0.8),
+            'data_passed_count': len(step.get('data_passed', [])),
+            'layout_associations_count': len([layout for layout in flow_analysis.get('layout_associations', []) 
+                                            if layout.get('program_name') == step.get('source_program')])
+        }
+        visualization_data['program_chain_summary'].append(summary_item)
+    
+    # Enhanced field flows with transformation details
+    field_flows_enhanced = {}
+    for field_flow in flow_analysis.get('field_flows', []):
+        field_name = field_flow.get('field_name')
+        if field_name:
+            if field_name not in field_flows_enhanced:
+                field_flows_enhanced[field_name] = []
+            
+            # Add transformation details to flow info
+            flow_info = {
+                'from': field_flow.get('source_program'),
+                'to': field_flow.get('target_program'),
+                'type': field_flow.get('flow_type'),
+                'transformation': field_flow.get('transformation_logic', 'Direct transfer'),
+                'source_layouts': field_flow.get('source_layouts', []),
+                'target_layouts': field_flow.get('target_layouts', []),
+                'transformation_details': field_flow.get('transformation_details', {})
+            }
+            field_flows_enhanced[field_name].append(flow_info)
+    
+    visualization_data['field_flows'] = field_flows_enhanced
+    
+    # Add file operations with layout connections
+    enhanced_file_ops = []
+    for file_op in flow_analysis.get('file_operations', []):
+        enhanced_op = {
+            **file_op,
+            'layout_connections': file_op.get('layout_details', []),
+            'fields_involved': file_op.get('fields_involved', [])
+        }
+        enhanced_file_ops.append(enhanced_op)
+    
+    visualization_data['file_operations'] = enhanced_file_ops
+    
+    return visualization_data
+
+def assign_node_levels(program_chain, starting_program):
+    """Assign hierarchical levels to programs for visualization"""
+    node_levels = {}
+    
+    # Starting program at level 0
+    if starting_program:
+        node_levels[starting_program] = 0
+    
+    # Assign levels based on call sequence
+    for step in sorted(program_chain, key=lambda x: x.get('sequence', 0)):
+        source = step.get('source_program')
+        target = step.get('target_program')
+        
+        if source in node_levels:
+            source_level = node_levels[source]
+            if target not in node_levels:
+                node_levels[target] = source_level + 1
+        elif source not in node_levels:
+            # Assign a default level if source not yet assigned
+            node_levels[source] = 0
+            if target not in node_levels:
+                node_levels[target] = 1
+    
+    return node_levels
 
 @app.route('/api/program-flow-visualization/<session_id>/<program_name>', methods=['GET'])
 def get_program_flow_visualization_fixed(session_id, program_name):
@@ -3064,6 +3250,480 @@ def get_missing_program_impact(session_id, program_name):
             'success': False,
             'error': str(e)
         })
+
+
+# Add this route to your main.py Flask application
+
+@app.route('/api/layout-field-details/<session_id>/<layout_name>')
+def get_layout_field_details(session_id, layout_name):
+    """Get detailed field information for a specific layout"""
+    try:
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get layout basic information
+            cursor.execute('''
+                SELECT layout_name, friendly_name, business_purpose, fields_count,
+                       record_classification, record_usage_description, program_name
+                FROM record_layouts 
+                WHERE session_id = ? AND layout_name = ?
+                LIMIT 1
+            ''', (session_id, layout_name))
+            
+            layout_info = cursor.fetchone()
+            
+            if not layout_info:
+                return jsonify({
+                    'success': False,
+                    'error': f'Layout {layout_name} not found'
+                })
+            
+            # Get all fields for this layout with detailed information
+            cursor.execute('''
+                SELECT fad.field_name, fad.friendly_name, fad.usage_type, 
+                       fad.business_purpose, fad.mainframe_data_type, fad.oracle_data_type,
+                       fad.mainframe_length, fad.oracle_length, fad.total_program_references,
+                       fad.move_source_count, fad.move_target_count, fad.definition_code
+                FROM field_analysis_details fad
+                JOIN record_layouts rl ON fad.field_id = rl.id
+                WHERE fad.session_id = ? AND rl.layout_name = ?
+                ORDER BY fad.field_name
+            ''', (session_id, layout_name))
+            
+            fields_data = cursor.fetchall()
+            
+            # Get usage context for this layout
+            cursor.execute('''
+                SELECT fad.usage_type, COUNT(*) as count
+                FROM field_analysis_details fad
+                JOIN record_layouts rl ON fad.field_id = rl.id
+                WHERE fad.session_id = ? AND rl.layout_name = ?
+                GROUP BY fad.usage_type
+                ORDER BY count DESC
+            ''', (session_id, layout_name))
+            
+            usage_stats = cursor.fetchall()
+            
+            # Build layout details structure
+            layout_details = {
+                'layout_name': layout_info[0],
+                'friendly_name': layout_info[1] or layout_info[0].replace('-', ' ').title(),
+                'business_purpose': layout_info[2] or f'Data structure for {layout_info[6] or "program"}',
+                'fields_count': len(fields_data),
+                'record_classification': layout_info[4] or 'RECORD',
+                'program_name': layout_info[6] or 'Unknown',
+                'usage_context': determine_layout_usage_context(usage_stats),
+                'usage_statistics': [{'usage_type': row[0], 'field_count': row[1]} for row in usage_stats],
+                'fields': []
+            }
+            
+            # Process field details
+            for field_row in fields_data:
+                field_detail = {
+                    'field_name': field_row[0],
+                    'friendly_name': field_row[1] or field_row[0].replace('-', ' ').title(),
+                    'usage_type': field_row[2] or 'STATIC',
+                    'business_purpose': field_row[3] or f'Field {field_row[0]} processing',
+                    'data_type': field_row[4] or 'UNKNOWN',
+                    'oracle_data_type': field_row[5] or 'VARCHAR2(50)',
+                    'mainframe_length': field_row[6] or 0,
+                    'oracle_length': field_row[7] or 50,
+                    'reference_count': field_row[8] or 0,
+                    'move_operations': {
+                        'source_count': field_row[9] or 0,
+                        'target_count': field_row[10] or 0
+                    },
+                    'definition_code': field_row[11] or '',
+                    'complexity_score': calculate_field_complexity(field_row)
+                }
+                layout_details['fields'].append(field_detail)
+            
+            return jsonify({
+                'success': True,
+                'layout_details': layout_details
+            })
+            
+    except Exception as e:
+        logger.error(f"Error getting layout field details for {layout_name}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+def determine_layout_usage_context(usage_stats):
+    """Determine the primary usage context for a layout based on field usage statistics"""
+    if not usage_stats:
+        return "General data structure"
+    
+    primary_usage = usage_stats[0][0]  # Most common usage type
+    total_fields = sum(row[1] for row in usage_stats)
+    primary_count = usage_stats[0][1]
+    primary_percentage = (primary_count / total_fields) * 100
+    
+    context_map = {
+        'INPUT': f"Primary input processing ({primary_percentage:.0f}% of fields)",
+        'OUTPUT': f"Primary output generation ({primary_percentage:.0f}% of fields)", 
+        'INPUT_OUTPUT': f"Bidirectional data processing ({primary_percentage:.0f}% of fields)",
+        'DERIVED': f"Calculated field generation ({primary_percentage:.0f}% of fields)",
+        'STATIC': f"Configuration and constants ({primary_percentage:.0f}% of fields)",
+        'REFERENCE': f"Data lookup and validation ({primary_percentage:.0f}% of fields)"
+    }
+    
+    base_context = context_map.get(primary_usage, f"Data processing ({primary_percentage:.0f}% {primary_usage.lower()})")
+    
+    # Add mixed usage note if significant secondary usage
+    if len(usage_stats) > 1 and usage_stats[1][1] > total_fields * 0.2:  # >20% secondary usage
+        secondary_usage = usage_stats[1][0]
+        secondary_percentage = (usage_stats[1][1] / total_fields) * 100
+        base_context += f", with significant {secondary_usage.lower()} usage ({secondary_percentage:.0f}%)"
+    
+    return base_context
+
+def calculate_field_complexity(field_row):
+    """Calculate a complexity score for a field based on its usage patterns"""
+    reference_count = field_row[8] or 0
+    move_source = field_row[9] or 0
+    move_target = field_row[10] or 0
+    
+    # Simple complexity calculation
+    complexity = 0
+    
+    # More references = more complex
+    if reference_count > 10:
+        complexity += 0.3
+    elif reference_count > 5:
+        complexity += 0.2
+    elif reference_count > 0:
+        complexity += 0.1
+    
+    # Bidirectional usage = more complex
+    if move_source > 0 and move_target > 0:
+        complexity += 0.4
+    elif move_source > 0 or move_target > 0:
+        complexity += 0.2
+    
+    # Field name complexity (heuristic)
+    field_name = field_row[0] or ''
+    if len(field_name) > 20 or '-' in field_name:
+        complexity += 0.1
+    
+    return min(complexity, 1.0)  # Cap at 1.0
+
+@app.route('/api/trace-layout-usage/<session_id>/<layout_name>')
+def trace_layout_usage(session_id, layout_name):
+    """Trace how a layout is used across programs"""
+    try:
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get programs that use this layout
+            cursor.execute('''
+                SELECT DISTINCT rl.program_name, ca.component_type, ca.business_purpose
+                FROM record_layouts rl
+                LEFT JOIN component_analysis ca ON (rl.program_name = ca.component_name AND ca.session_id = ?)
+                WHERE rl.session_id = ? AND rl.layout_name = ?
+                AND rl.program_name IS NOT NULL
+            ''', (session_id, session_id, layout_name))
+            
+            using_programs = cursor.fetchall()
+            
+            # Get field usage across programs
+            cursor.execute('''
+                SELECT fad.program_name, fad.field_name, fad.usage_type, 
+                       fad.move_source_count, fad.move_target_count, fad.total_program_references
+                FROM field_analysis_details fad
+                JOIN record_layouts rl ON fad.field_id = rl.id
+                WHERE fad.session_id = ? AND rl.layout_name = ?
+                ORDER BY fad.program_name, fad.total_program_references DESC
+            ''', (session_id, layout_name))
+            
+            field_usage = cursor.fetchall()
+            
+            # Get program call relationships involving these programs
+            cursor.execute('''
+                SELECT dr.source_component, dr.target_component, dr.relationship_type
+                FROM dependency_relationships dr
+                WHERE dr.session_id = ? 
+                AND (dr.source_component IN ({}) OR dr.target_component IN ({}))
+                AND dr.relationship_type LIKE '%PROGRAM_CALL%'
+            '''.format(
+                ','.join('?' * len(using_programs)), 
+                ','.join('?' * len(using_programs))
+            ), tuple([session_id] + [prog[0] for prog in using_programs] * 2))
+            
+            program_relationships = cursor.fetchall()
+            
+            # Build usage trace
+            usage_trace = {
+                'layout_name': layout_name,
+                'using_programs': [
+                    {
+                        'program_name': prog[0],
+                        'program_type': prog[1] or 'PROGRAM',
+                        'business_purpose': prog[2] or f'Program {prog[0]} processing'
+                    } for prog in using_programs
+                ],
+                'field_usage_by_program': {},
+                'program_relationships': [
+                    {
+                        'source': rel[0],
+                        'target': rel[1], 
+                        'relationship_type': rel[2]
+                    } for rel in program_relationships
+                ],
+                'usage_flow': analyze_layout_usage_flow(using_programs, field_usage, program_relationships)
+            }
+            
+            # Group field usage by program
+            for field_usage_row in field_usage:
+                program = field_usage_row[0]
+                if program not in usage_trace['field_usage_by_program']:
+                    usage_trace['field_usage_by_program'][program] = []
+                
+                usage_trace['field_usage_by_program'][program].append({
+                    'field_name': field_usage_row[1],
+                    'usage_type': field_usage_row[2],
+                    'move_source_count': field_usage_row[3] or 0,
+                    'move_target_count': field_usage_row[4] or 0,
+                    'reference_count': field_usage_row[5] or 0
+                })
+            
+            return jsonify({
+                'success': True,
+                'usage_trace': usage_trace
+            })
+            
+    except Exception as e:
+        logger.error(f"Error tracing layout usage: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+def analyze_layout_usage_flow(using_programs, field_usage, program_relationships):
+    """Analyze how the layout flows through the program chain"""
+    
+    # Create a simple flow analysis
+    programs = [prog[0] for prog in using_programs]
+    flow_steps = []
+    
+    # Find program call chains
+    call_chains = []
+    for rel in program_relationships:
+        source, target, rel_type = rel
+        if source in programs and target in programs:
+            call_chains.append({
+                'from_program': source,
+                'to_program': target,
+                'call_type': rel_type,
+                'layout_passed': True  # Assume layout is passed in program calls
+            })
+    
+    # Build flow narrative
+    flow_narrative = []
+    if call_chains:
+        flow_narrative.append("Layout flows through program calls:")
+        for chain in call_chains:
+            flow_narrative.append(f"  {chain['from_program']} -> {chain['to_program']} ({chain['call_type']})")
+    else:
+        flow_narrative.append("Layout used independently in each program (no direct program calls detected)")
+    
+    # Analyze field modification patterns
+    modification_programs = []
+    for program in programs:
+        program_fields = [f for f in field_usage if f[0] == program]
+        
+        # Count field modifications
+        input_fields = len([f for f in program_fields if f[2] == 'INPUT' or f[4] > 0])  # move_target_count > 0
+        output_fields = len([f for f in program_fields if f[2] == 'OUTPUT' or f[3] > 0])  # move_source_count > 0
+        
+        if input_fields > 0 and output_fields > 0:
+            modification_programs.append(f"{program} (modifies {input_fields} fields, outputs {output_fields} fields)")
+        elif input_fields > 0:
+            modification_programs.append(f"{program} (reads {input_fields} fields)")
+        elif output_fields > 0:
+            modification_programs.append(f"{program} (populates {output_fields} fields)")
+        else:
+            modification_programs.append(f"{program} (references layout structure)")
+    
+    if modification_programs:
+        flow_narrative.append("Field modification patterns:")
+        flow_narrative.extend([f"  {prog}" for prog in modification_programs])
+    
+    return {
+        'call_chains': call_chains,
+        'flow_description': ' '.join(flow_narrative),
+        'programs_involved': programs,
+        'total_relationships': len(call_chains)
+    }
+
+@app.route('/api/program-layout-summary/<session_id>/<program_name>')
+def get_program_layout_summary(session_id, program_name):
+    """Get summary of all layouts used by a specific program"""
+    try:
+        with analyzer.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get all layouts for this program with field counts and usage stats
+            cursor.execute('''
+                SELECT rl.layout_name, rl.friendly_name, rl.business_purpose,
+                       COUNT(fad.id) as field_count,
+                       SUM(CASE WHEN fad.usage_type = 'INPUT' THEN 1 ELSE 0 END) as input_fields,
+                       SUM(CASE WHEN fad.usage_type = 'OUTPUT' THEN 1 ELSE 0 END) as output_fields,
+                       SUM(CASE WHEN fad.usage_type = 'INPUT_OUTPUT' THEN 1 ELSE 0 END) as io_fields,
+                       SUM(CASE WHEN fad.usage_type = 'STATIC' THEN 1 ELSE 0 END) as static_fields,
+                       SUM(CASE WHEN fad.usage_type = 'DERIVED' THEN 1 ELSE 0 END) as derived_fields
+                FROM record_layouts rl
+                LEFT JOIN field_analysis_details fad ON rl.id = fad.field_id
+                WHERE rl.session_id = ? AND rl.program_name = ?
+                GROUP BY rl.id, rl.layout_name, rl.friendly_name, rl.business_purpose
+                ORDER BY field_count DESC
+            ''', (session_id, program_name))
+            
+            layouts = cursor.fetchall()
+            
+            # Get program's call relationships to understand data flow context
+            cursor.execute('''
+                SELECT dr.target_component, dr.relationship_type, dr.interface_type
+                FROM dependency_relationships dr
+                WHERE dr.session_id = ? AND dr.source_component = ?
+                AND dr.relationship_type IN ('PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL')
+            ''', (session_id, program_name))
+            
+            program_calls = cursor.fetchall()
+            
+            layout_summary = {
+                'program_name': program_name,
+                'total_layouts': len(layouts),
+                'layouts': [],
+                'program_calls': [
+                    {
+                        'target_program': call[0],
+                        'call_type': call[1],
+                        'interface': call[2]
+                    } for call in program_calls
+                ],
+                'data_flow_context': generate_data_flow_context(layouts, program_calls)
+            }
+            
+            for layout in layouts:
+                layout_info = {
+                    'layout_name': layout[0],
+                    'friendly_name': layout[1] or layout[0].replace('-', ' ').title(),
+                    'business_purpose': layout[2] or f'Data structure in {program_name}',
+                    'field_count': layout[3],
+                    'field_distribution': {
+                        'input_fields': layout[4],
+                        'output_fields': layout[5],
+                        'io_fields': layout[6],
+                        'static_fields': layout[7],
+                        'derived_fields': layout[8]
+                    },
+                    'primary_usage': determine_primary_layout_usage(layout[4:9]),
+                    'complexity_indicator': calculate_layout_complexity(layout[3], layout[4:9])
+                }
+                layout_summary['layouts'].append(layout_info)
+            
+            return jsonify({
+                'success': True,
+                'layout_summary': layout_summary
+            })
+            
+    except Exception as e:
+        logger.error(f"Error getting program layout summary: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+def generate_data_flow_context(layouts, program_calls):
+    """Generate context about how layouts relate to program's data flow"""
+    context = []
+    
+    if layouts:
+        total_fields = sum(layout[3] for layout in layouts)  # field_count is at index 3
+        context.append(f"Program manages {total_fields} total fields across {len(layouts)} layouts")
+        
+        # Analyze field distribution patterns
+        total_input = sum(layout[4] for layout in layouts)
+        total_output = sum(layout[5] for layout in layouts)
+        total_io = sum(layout[6] for layout in layouts)
+        
+        if total_input > total_output:
+            context.append("Primarily processes input data (data consumer)")
+        elif total_output > total_input:
+            context.append("Primarily generates output data (data producer)")
+        elif total_io > 0:
+            context.append("Processes data bidirectionally (data transformer)")
+        else:
+            context.append("Works with static data structures")
+    
+    if program_calls:
+        context.append(f"Calls {len(program_calls)} other programs, potentially passing layout data")
+    else:
+        context.append("Standalone program with no detected program calls")
+    
+    return '; '.join(context)
+
+def determine_primary_layout_usage(field_counts):
+    """Determine primary usage pattern for a layout based on field type distribution"""
+    input_fields, output_fields, io_fields, static_fields, derived_fields = field_counts
+    
+    # Create usage pattern analysis
+    usage_scores = {
+        'input_processing': input_fields * 2 + io_fields,
+        'output_generation': output_fields * 2 + io_fields,
+        'data_transformation': io_fields * 3 + derived_fields,
+        'configuration': static_fields * 2,
+        'calculation': derived_fields * 2
+    }
+    
+    # Find primary usage
+    max_score = max(usage_scores.values())
+    if max_score == 0:
+        return 'structure_definition'
+    
+    primary_usage = max(usage_scores.keys(), key=lambda k: usage_scores[k])
+    
+    return primary_usage
+
+def calculate_layout_complexity(field_count, field_type_counts):
+    """Calculate complexity indicator for a layout"""
+    if field_count == 0:
+        return 'simple'
+    
+    input_fields, output_fields, io_fields, static_fields, derived_fields = field_type_counts
+    
+    # Calculate complexity based on multiple factors
+    complexity_score = 0
+    
+    # Field count factor
+    if field_count > 50:
+        complexity_score += 0.4
+    elif field_count > 20:
+        complexity_score += 0.2
+    elif field_count > 10:
+        complexity_score += 0.1
+    
+    # Usage diversity factor
+    usage_types_present = sum(1 for count in field_type_counts if count > 0)
+    complexity_score += usage_types_present * 0.1
+    
+    # Bidirectional usage factor (more complex)
+    if io_fields > 0:
+        complexity_score += 0.2
+    
+    # Derived fields factor (calculations = complexity)
+    if derived_fields > 0:
+        complexity_score += 0.2
+    
+    # Return complexity category
+    if complexity_score >= 0.7:
+        return 'complex'
+    elif complexity_score >= 0.4:
+        return 'moderate'
+    else:
+        return 'simple'
     
 if __name__ == '__main__':
     print(f"\n{'='*60}")
