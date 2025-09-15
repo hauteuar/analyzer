@@ -5798,150 +5798,121 @@ function createHierarchicalLayout(vizData) {
         throw new Error('No nodes provided for layout');
     }
     
-    // Organize nodes by type
     const programNodes = nodes.filter(n => n.type === 'program');
     const fileNodes = nodes.filter(n => n.type === 'file');
     const db2Nodes = nodes.filter(n => n.type === 'db2_table');
     
-    // Calculate proper hierarchy levels for vertical tree layout
-    const hierarchy = calculateProgramHierarchy(programNodes, edges);
-    
-    // Vertical tree layout with centered positioning
+    // Create SIMPLE vertical hierarchy - only 3 levels maximum
     const layoutNodes = [];
-    const levelHeight = 140;  // Vertical spacing between levels
+    const levelHeight = 180;
     const svgWidth = 1400;
-    const nodeSpacing = 180;  // Horizontal spacing between nodes at same level
     
-    // Position program nodes in vertical hierarchy levels (top to bottom)
-    // In createHierarchicalLayout, make sure this part is correct:
-Object.keys(hierarchy).forEach((level, levelIndex) => {
-    const nodesInLevel = hierarchy[level];
-    const levelY = 80 + (levelIndex * 150);  // DIFFERENT Y for each level
-    
-    console.log(`Level ${level} (${levelIndex}): Y=${levelY}, nodes=${nodesInLevel.map(n => n.id)}`);
-    
-    // Position nodes horizontally within this level
-    const nodeSpacing = 200;
-    const totalWidth = nodesInLevel.length * nodeSpacing;
-    const startX = (1400 - totalWidth) / 2;
-    
-    nodesInLevel.forEach((node, nodeIndex) => {
-        const nodeX = startX + (nodeIndex * nodeSpacing);
-        
+    // Level 0: Starting program only
+    const startingProgram = programNodes.find(n => n.is_starting_program) || programNodes[0];
+    if (startingProgram) {
         layoutNodes.push({
-            ...node,
-            x: nodeX,
-            y: levelY,  // Different Y for each level = vertical layout
-            level: parseInt(level),
-            width: getNodeWidth(node),
-            height: getNodeHeight(node)
+            ...startingProgram,
+            x: svgWidth / 2,
+            y: 80,
+            level: 0,
+            width: 120,
+            height: 60
+        });
+    }
+    
+    // Level 1: Direct called programs only (no deep nesting)
+    const directCalls = edges.filter(e => 
+        e.from === startingProgram.id && 
+        e.type === 'program_call'
+    );
+    
+    const calledPrograms = directCalls.map(edge => 
+        programNodes.find(n => n.id === edge.to)
+    ).filter(Boolean);
+    
+    // Position called programs horizontally on level 1
+    const level1Y = 80 + levelHeight;
+    const spacing = Math.min(250, (svgWidth - 200) / Math.max(calledPrograms.length, 1));
+    const startX = (svgWidth - (calledPrograms.length - 1) * spacing) / 2;
+    
+    calledPrograms.forEach((program, index) => {
+        layoutNodes.push({
+            ...program,
+            x: startX + (index * spacing),
+            y: level1Y,
+            level: 1,
+            width: 120,
+            height: 60
         });
     });
-});
     
-    // Build program position lookup for files/DB2 placement
-    const programPositions = {};
-    layoutNodes.forEach(node => {
-        if (node.type === 'program') {
-            programPositions[node.id] = { x: node.x, y: node.y, level: node.level };
-        }
+    // Level 2: Files and DB2 (non-overlapping)
+    const level2Y = level1Y + levelHeight;
+    const allDataNodes = [...fileNodes, ...db2Nodes];
+    
+    // Group by connected program to avoid overlap
+    const grouped = {};
+    allDataNodes.forEach(node => {
+        const connectedProg = node.connected_to_program || 'unassigned';
+        if (!grouped[connectedProg]) grouped[connectedProg] = [];
+        grouped[connectedProg].push(node);
     });
     
-    // Position file nodes below their connected programs in vertical tree
-    const maxProgramLevel = Math.max(...layoutNodes.filter(n => n.type === 'program').map(n => n.level));
-    const filesStartY = 60 + ((maxProgramLevel + 1) * levelHeight) + 40;
-    
-    fileNodes.forEach((fileNode, index) => {
-        const connectedProgram = fileNode.connected_to_program;
-        const programPos = programPositions[connectedProgram];
+    let currentX = 100;
+    Object.entries(grouped).forEach(([progName, nodes]) => {
+        const progPosition = layoutNodes.find(n => n.id === progName);
+        const baseX = progPosition ? progPosition.x : currentX;
         
-        if (programPos) {
-            // Group files under their parent program vertically
-            const filesForThisProgram = fileNodes.filter(f => f.connected_to_program === connectedProgram);
-            const fileIndex = filesForThisProgram.indexOf(fileNode);
-            
+        nodes.forEach((node, index) => {
             layoutNodes.push({
-                ...fileNode,
-                x: programPos.x + ((fileIndex - (filesForThisProgram.length - 1) / 2) * 140),
-                y: filesStartY,
-                level: maxProgramLevel + 2,
-                width: getNodeWidth(fileNode),
-                height: getNodeHeight(fileNode),
-                parentProgram: connectedProgram
+                ...node,
+                x: baseX - 50 + (index * 120), // Spread horizontally under parent
+                y: level2Y,
+                level: 2,
+                width: 100,
+                height: 50
             });
-        } else {
-            // Fallback: arrange orphaned files horizontally at bottom
-            const filesPerRow = Math.floor(svgWidth / 150);
-            const row = Math.floor(index / filesPerRow);
-            const col = index % filesPerRow;
-            
-            layoutNodes.push({
-                ...fileNode,
-                x: 100 + (col * 150),
-                y: filesStartY + (row * 70),
-                level: 999,
-                width: getNodeWidth(fileNode),
-                height: getNodeHeight(fileNode)
-            });
-        }
+        });
+        
+        currentX += (nodes.length * 120) + 50;
     });
     
-    // Position DB2 nodes below files in vertical hierarchy
-    const db2StartY = filesStartY + 100;
-    db2Nodes.forEach((db2Node, index) => {
-        const connectedProgram = db2Node.connected_to_program;
-        const programPos = programPositions[connectedProgram];
-        
-        if (programPos) {
-            const db2ForThisProgram = db2Nodes.filter(d => d.connected_to_program === connectedProgram);
-            const db2Index = db2ForThisProgram.indexOf(db2Node);
-            
-            layoutNodes.push({
-                ...db2Node,
-                x: programPos.x + ((db2Index - (db2ForThisProgram.length - 1) / 2) * 150),
-                y: db2StartY,
-                level: maxProgramLevel + 3,
-                width: getNodeWidth(db2Node),
-                height: getNodeHeight(db2Node),
-                parentProgram: connectedProgram
-            });
-        } else {
-            // Fallback: arrange orphaned DB2 nodes horizontally
-            const db2PerRow = Math.floor(svgWidth / 160);
-            const row = Math.floor(index / db2PerRow);
-            const col = index % db2PerRow;
-            
-            layoutNodes.push({
-                ...db2Node,
-                x: 100 + (col * 160),
-                y: db2StartY + (row * 70),
-                level: 998,
-                width: getNodeWidth(db2Node),
-                height: getNodeHeight(db2Node)
+    // Create CLEAN edges (no overlapping mess)
+    const layoutEdges = [];
+    
+    // Only add direct program calls
+    directCalls.forEach(edge => {
+        const source = layoutNodes.find(n => n.id === edge.from);
+        const target = layoutNodes.find(n => n.id === edge.to);
+        if (source && target) {
+            layoutEdges.push({
+                ...edge,
+                source,
+                target
             });
         }
     });
     
-    // Calculate enhanced edge positions with proper connections
-    const layoutEdges = edges.map(edge => {
-        const sourceNode = layoutNodes.find(n => n.id === edge.from);
-        const targetNode = layoutNodes.find(n => n.id === edge.to);
+    // Add file/DB2 connections only to their direct parent
+    allDataNodes.forEach(dataNode => {
+        const parentProg = layoutNodes.find(n => n.id === dataNode.connected_to_program);
+        const dataNodeLayout = layoutNodes.find(n => n.id === dataNode.id);
         
-        if (!sourceNode || !targetNode) {
-            console.warn(`Missing nodes for edge: ${edge.from} -> ${edge.to}`);
-            return null;
+        if (parentProg && dataNodeLayout) {
+            layoutEdges.push({
+                from: parentProg.id,
+                to: dataNode.id,
+                type: dataNode.type === 'db2_table' ? 'db2_operation' : 'file_operation',
+                io_direction: 'read',
+                source: parentProg,
+                target: dataNodeLayout
+            });
         }
-        
-        return {
-            ...edge,
-            source: sourceNode,
-            target: targetNode,
-            path: calculateEnhancedEdgePath(sourceNode, targetNode, edge)
-        };
-    }).filter(e => e !== null);
+    });
     
     return { layoutNodes, layoutEdges };
 }
+
 
 function calculateEnhancedEdgePath(sourceNode, targetNode, edge) {
             // Simple straight line for now - can be enhanced with curves
@@ -6704,36 +6675,20 @@ function drawProgramShape(g, node) {
         }
 
 function drawFileShape(g, node) {
-            const width = node.width;
-            const height = node.height;
-            const ellipseHeight = height * 0.2;
-            
-            // Cylinder body
-            g.append('rect')
-                .attr('class', 'node-file')
-                .attr('x', -width/2)
-                .attr('y', -height/2 + ellipseHeight/2)
-                .attr('width', width)
-                .attr('height', height - ellipseHeight)
-                .attr('stroke-width', 2);
-            
-            // Top and bottom ellipses
-            g.append('ellipse')
-                .attr('class', 'node-file')
-                .attr('cx', 0)
-                .attr('cy', -height/2 + ellipseHeight/2)
-                .attr('rx', width/2)
-                .attr('ry', ellipseHeight/2)
-                .attr('stroke-width', 2);
-                
-            g.append('ellipse')
-                .attr('class', 'node-file')
-                .attr('cx', 0)
-                .attr('cy', height/2 - ellipseHeight/2)
-                .attr('rx', width/2)
-                .attr('ry', ellipseHeight/2)
-                .attr('stroke-width', 2);
-        }
+    const width = node.width;
+    const height = node.height;
+    
+    // Use RECTANGLE for files (standard flowchart symbol)
+    g.append('rect')
+        .attr('class', 'node-file')
+        .attr('x', -width/2)
+        .attr('y', -height/2)
+        .attr('width', width)
+        .attr('height', height)
+        .attr('rx', 4)
+        .attr('ry', 4)
+        .attr('stroke-width', 2);
+}
 
 
 function drawDB2Shape(g, node) {
