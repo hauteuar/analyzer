@@ -2466,7 +2466,263 @@
         background: #f5f5f5;
         border-radius: 4px;
     }
+    /* Additional CSS for the new layout elements */
 
+.enhanced-flow-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 25px;
+}
+
+.enhanced-flow-header h2 {
+    margin: 0 0 15px 0;
+    font-size: 1.3em;
+}
+
+.flow-overview-stats {
+    display: flex;
+    gap: 30px;
+    justify-content: center;
+}
+
+.overview-stat {
+    text-align: center;
+}
+
+.overview-stat .stat-value {
+    display: block;
+    font-size: 2rem;
+    font-weight: bold;
+    line-height: 1;
+}
+
+.overview-stat .stat-label {
+    font-size: 0.9rem;
+    opacity: 0.9;
+    margin-top: 5px;
+}
+
+/* Field tags and indicators */
+.field-tags, .field-tags-small {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.field-tag, .field-tag-small {
+    background: #e8ecff;
+    color: #667eea;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.field-tag-small {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+}
+
+.field-tag:hover, .field-tag-small:hover {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+}
+
+.more-fields, .more-fields-small {
+    background: #f8f9fa;
+    color: #6c757d;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-style: italic;
+}
+
+.key-fields {
+    margin-top: 10px;
+}
+
+.key-fields strong {
+    color: #667eea;
+}
+
+/* Transformation indicators */
+.step-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.step-header .step-arrow {
+    color: #28a745;
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+.transformation-type {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: bold;
+    margin-right: 8px;
+}
+
+.transformation-type.direct_pass {
+    background: #e8f5e8;
+    color: #2d5a2d;
+}
+
+.transformation-type.data_type_conversion {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.transformation-type.usage_type_change {
+    background: #cce5ff;
+    color: #004085;
+}
+
+.transformation-indicators {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.indicator {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+}
+
+.indicator.business-logic {
+    background: #e8f4fd;
+    color: #0056b3;
+    border-color: #bee5eb;
+}
+
+.indicator.validation {
+    background: #d4edda;
+    color: #155724;
+    border-color: #c3e6cb;
+}
+
+/* Layout connections */
+.layout-connections {
+    margin: 12px 0;
+}
+
+.layout-connection-list {
+    margin-top: 8px;
+}
+
+.layout-connection-item {
+    background: #f8f9ff;
+    border-left: 3px solid #667eea;
+    padding: 8px;
+    margin-bottom: 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.layout-connection-item:hover {
+    background: #e8ecff;
+}
+
+.layout-connection-item .layout-name {
+    font-weight: bold;
+    color: #667eea;
+    margin-right: 8px;
+}
+
+.layout-connection-item .layout-fields {
+    color: #6c757d;
+    font-size: 0.85rem;
+}
+
+.layout-purpose-small {
+    font-size: 0.8rem;
+    color: #666;
+    margin-top: 4px;
+    font-style: italic;
+}
+
+/* Program link styling */
+.program-link {
+    color: #667eea;
+    cursor: pointer;
+    font-weight: bold;
+    text-decoration: underline;
+    transition: color 0.2s ease;
+}
+
+.program-link:hover {
+    color: #5a6fd8;
+}
+
+/* Fields involved section */
+.fields-involved {
+    margin: 12px 0;
+}
+
+.fields-involved strong {
+    color: #28a745;
+}
+
+/* Enhanced step styling */
+.step-program {
+    background: #f8f9fa;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9rem;
+}
+
+/* Upload area highlight animation */
+@keyframes highlight-upload {
+    0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+    50% { box-shadow: 0 0 0 10px rgba(40, 167, 69, 0.2); }
+    100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+}
+
+.upload-section.highlight {
+    animation: highlight-upload 1.5s ease-in-out 3;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .flow-overview-stats {
+        flex-wrap: wrap;
+        gap: 15px;
+    }
+    
+    .layout-connection-item {
+        padding: 6px;
+    }
+    
+    .step-header {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    
+    .transformation-indicators {
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+    
+    .field-tags, .field-tags-small {
+        gap: 4px;
+    }
+}
     .status-present { color: #4caf50; font-weight: bold; }
     .status-missing { color: #f44336; font-weight: bold; }
     .status-file { color: #2196f3; font-weight: bold; }
@@ -7645,6 +7901,364 @@ function getStrokeWidth(edge) {
                 default: return 2;
             }
         }
+
+function renderLayoutAssociations(layoutAssociations) {
+    if (!layoutAssociations || layoutAssociations.length === 0) {
+        return '';
+    }
+    
+    let html = `
+        <div class="layout-associations-section">
+            <h3>📋 Record Layout Flow & Data Structures</h3>
+            <div class="layout-flow-grid">
+    `;
+    
+    // Group layouts by program for better organization
+    const layoutsByProgram = {};
+    layoutAssociations.forEach(layout => {
+        const program = layout.program_name || 'Unknown';
+        if (!layoutsByProgram[program]) {
+            layoutsByProgram[program] = [];
+        }
+        layoutsByProgram[program].push(layout);
+    });
+    
+    Object.entries(layoutsByProgram).forEach(([program, layouts]) => {
+        html += `
+            <div class="program-layout-group">
+                <h4 class="program-header">🏗️ ${program}</h4>
+                <div class="layouts-list">
+        `;
+        
+        layouts.forEach(layout => {
+            const statusClass = layout.has_fields ? 'layout-complete' : 'layout-partial';
+            const fieldCount = layout.fields_count || layout.actual_field_count || 0;
+            const usageContext = layout.usage_context || 'Data structure processing';
+            const connectedPrograms = layout.connected_programs || [];
+            
+            html += `
+                <div class="layout-item ${statusClass}">
+                    <div class="layout-header">
+                        <span class="layout-name">${layout.layout_name}</span>
+                        <span class="layout-type-badge">${layout.layout_type || layout.record_classification || 'RECORD'}</span>
+                        <span class="field-count">${fieldCount} fields</span>
+                    </div>
+                    <div class="layout-details">
+                        <div class="layout-purpose">${layout.business_purpose || layout.friendly_name || 'Data structure definition'}</div>
+                        <div class="usage-context">
+                            <strong>Usage:</strong> ${usageContext}
+                        </div>
+                        ${connectedPrograms.length > 0 ? `
+                            <div class="connected-programs">
+                                <strong>Also used by:</strong> ${connectedPrograms.join(', ')}
+                            </div>
+                        ` : ''}
+                        ${layout.key_fields && layout.key_fields.length > 0 ? `
+                            <div class="key-fields">
+                                <strong>Key fields:</strong> 
+                                <div class="field-tags">
+                                    ${layout.key_fields.slice(0, 3).map(field => 
+                                        `<span class="field-tag" title="${field.business_purpose || ''}">${field.field_name}</span>`
+                                    ).join('')}
+                                    ${layout.key_fields.length > 3 ? `<span class="more-fields">+${layout.key_fields.length - 3} more</span>` : ''}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div class="layout-actions">
+                        <button class="btn-sm" onclick="viewLayoutFields('${layout.layout_name}')">View Fields</button>
+                        <button class="btn-sm" onclick="traceLayoutUsage('${layout.layout_name}')">Trace Usage</button>
+                        ${fieldCount > 0 ? 
+                            `<button class="btn-sm" onclick="viewLayoutFieldDetails('${layout.layout_name}')">Field Details</button>` : 
+                            ''}
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    });
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    return html;
+}
+
+function renderFieldFlowsWithTransformations(fieldFlows) {
+    if (!fieldFlows || Object.keys(fieldFlows).length === 0) {
+        return '';
+    }
+    
+    let html = `
+        <div class="field-flows-section">
+            <h3>🔄 Field Data Flow Analysis</h3>
+            <div class="field-flows-grid">
+    `;
+    
+    Object.entries(fieldFlows).forEach(([fieldName, flows]) => {
+        html += `
+            <div class="field-flow-card">
+                <div class="field-header">
+                    <h4 class="field-name">📊 ${fieldName}</h4>
+                    <span class="flow-steps-count">${flows.length} flow steps</span>
+                </div>
+                <div class="field-flow-path">
+        `;
+        
+        flows.forEach((flow, index) => {
+            const isLast = index === flows.length - 1;
+            const transformationType = flow.transformation_details?.transformation_type || 'DIRECT_PASS';
+            const hasBusinessLogic = flow.transformation_details?.business_logic_applied?.length > 0;
+            const hasValidation = flow.transformation_details?.validation_rules?.length > 0;
+            
+            html += `
+                <div class="flow-step">
+                    <div class="step-header">
+                        <div class="step-program">${flow.from}</div>
+                        <div class="step-arrow">→</div>
+                        <div class="step-program">${flow.to}</div>
+                    </div>
+                    ${flow.source_layouts && flow.source_layouts.length > 0 ? `
+                        <div class="step-layout">
+                            📋 From: ${flow.source_layouts.map(l => l.layout_name).join(', ')}
+                        </div>
+                    ` : ''}
+                    ${flow.target_layouts && flow.target_layouts.length > 0 ? `
+                        <div class="step-layout">
+                            📋 To: ${flow.target_layouts.map(l => l.layout_name).join(', ')}
+                        </div>
+                    ` : ''}
+                    <div class="step-transformation">
+                        <span class="transformation-type ${transformationType.toLowerCase()}">${transformationType}</span>
+                        ${flow.transformation || 'Direct transfer'}
+                    </div>
+                    ${hasBusinessLogic || hasValidation ? `
+                        <div class="transformation-indicators">
+                            ${hasBusinessLogic ? '<span class="indicator business-logic">📊 Business Logic</span>' : ''}
+                            ${hasValidation ? '<span class="indicator validation">✅ Validation</span>' : ''}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+                <div class="field-actions">
+                    <button class="trace-btn" onclick="traceFieldFlow('${currentSessionId}', '${fieldName}')">
+                        Trace Complete Flow
+                    </button>
+                    <button class="analyze-btn" onclick="analyzeFieldTransformations('${fieldName}')">
+                        Analyze Transformations
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    return html;
+}
+
+function renderFileOperationsWithLayouts(fileOperations) {
+    if (!fileOperations || fileOperations.length === 0) {
+        return '';
+    }
+    
+    let html = `
+        <div class="file-operations-section">
+            <h3>📁 File Operations & Data Access (${fileOperations.length})</h3>
+            <div class="file-operations-grid">
+    `;
+    
+    fileOperations.forEach(fileOp => {
+        const statusClass = fileOp.has_layout_resolution ? 'has-layout' : 'no-layout';
+        const interfaceIcon = fileOp.interface_type === 'CICS' ? '🏦' : '📁';
+        const operations = fileOp.operations || [];
+        const layoutConnections = fileOp.layout_connections || fileOp.layout_details || [];
+        const fieldsInvolved = fileOp.fields_involved || [];
+        
+        html += `
+            <div class="file-operation-card ${statusClass}">
+                <div class="file-header">
+                    <div class="file-info">
+                        <span class="file-icon">${interfaceIcon}</span>
+                        <span class="file-name">${fileOp.file_name}</span>
+                        <span class="io-direction-badge ${fileOp.io_direction.toLowerCase()}">${fileOp.io_direction}</span>
+                    </div>
+                    ${fileOp.has_layout_resolution ? 
+                        '<span class="layout-indicator">✅ Has Layout</span>' : 
+                        '<span class="no-layout-indicator">⚠️ No Layout</span>'}
+                </div>
+                
+                <div class="file-details">
+                    <div class="connected-program">
+                        <strong>Connected to:</strong> 
+                        <span class="program-link" onclick="showProgramDetails('${fileOp.program_name}')">${fileOp.program_name}</span>
+                    </div>
+                    <div class="file-operations">
+                        <strong>Operations:</strong> ${operations.join(', ') || 'READ/WRITE'}
+                    </div>
+                    <div class="interface-type">
+                        <strong>Interface:</strong> ${fileOp.interface_type}
+                    </div>
+                    
+                    ${layoutConnections.length > 0 ? `
+                        <div class="layout-connections">
+                            <strong>Layout Connections:</strong>
+                            <div class="layout-connection-list">
+                                ${layoutConnections.map(layout => `
+                                    <div class="layout-connection-item">
+                                        <span class="layout-name" onclick="viewLayoutFieldDetails('${layout.layout_name}')">${layout.layout_name}</span>
+                                        <span class="layout-fields">(${layout.fields_count || layout.key_fields?.length || 0} fields)</span>
+                                        ${layout.business_purpose ? `<div class="layout-purpose-small">${layout.business_purpose}</div>` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    ${fieldsInvolved.length > 0 ? `
+                        <div class="fields-involved">
+                            <strong>Key Fields:</strong>
+                            <div class="field-tags-small">
+                                ${fieldsInvolved.slice(0, 5).map(field => 
+                                    `<span class="field-tag-small">${field}</span>`
+                                ).join('')}
+                                ${fieldsInvolved.length > 5 ? `<span class="more-fields-small">+${fieldsInvolved.length - 5} more</span>` : ''}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <div class="file-actions">
+                    <button class="btn-sm" onclick="analyzeFileUsage('${fileOp.file_name}')">Analyze Usage</button>
+                    ${fileOp.has_layout_resolution ? 
+                        `<button class="btn-sm" onclick="viewFileLayoutConnections('${fileOp.file_name}')">View Layouts</button>` : 
+                        `<button class="btn-sm" onclick="suggestLayoutCreation('${fileOp.file_name}')">Create Layout</button>`
+                    }
+                    <button class="btn-sm" onclick="traceFileDataFlow('${fileOp.file_name}')">Trace Data Flow</button>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    return html;
+}
+
+function renderMissingProgramsImpact(missingPrograms) {
+    if (!missingPrograms || missingPrograms.length === 0) {
+        return '';
+    }
+    
+    let html = `
+        <div class="missing-programs-section">
+            <h3>⚠️ Missing Programs Impact (${missingPrograms.length})</h3>
+            <div class="missing-programs-grid">
+    `;
+    
+    missingPrograms.forEach(program => {
+        html += `
+            <div class="missing-program-card">
+                <div class="missing-header">
+                    <span class="missing-icon">❌</span>
+                    <span class="program-name">${program.program_name}</span>
+                    <span class="call-type-badge">${program.call_type}</span>
+                </div>
+                <div class="missing-details">
+                    <div class="called-by">
+                        <strong>Called by:</strong> ${program.called_by}
+                    </div>
+                    <div class="sequence-info">
+                        <strong>At step:</strong> #${program.sequence}
+                    </div>
+                    <div class="impact-description">
+                        This missing program blocks further flow analysis and may prevent complete understanding of data transformations and layout usage.
+                    </div>
+                </div>
+                <div class="missing-actions">
+                    <button class="impact-btn" onclick="showMissingProgramImpact('${currentSessionId}', '${program.program_name}')">
+                        Analyze Impact
+                    </button>
+                    <button class="upload-btn" onclick="promptProgramUpload('${program.program_name}')">
+                        Upload Program
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += `
+            </div>
+            <div class="missing-summary">
+                <div class="recommendation-box">
+                    <h4>🎯 Recommendations</h4>
+                    <ul>
+                        <li>Upload the missing programs to complete flow analysis</li>
+                        <li>Each missing program may contain additional layout definitions and field transformations</li>
+                        <li>Layout associations become more accurate with complete program set</li>
+                        <li>Data flow tracing improves significantly with all programs available</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    return html;
+}
+
+// Additional helper functions for the new functionality
+function viewFileLayoutConnections(fileName) {
+    // Show all layout connections for a file
+    const chatInput = document.getElementById('chatInput');
+    chatInput.value = `Show me all layout connections for file ${fileName}. Which record structures are used to read from or write to this file?`;
+    sendChatMessage();
+}
+
+function traceFileDataFlow(fileName) {
+    // Trace data flow through file operations
+    const chatInput = document.getElementById('chatInput');
+    chatInput.value = `Trace the complete data flow for file ${fileName}. Show me which programs read from it, which write to it, and how data transforms through the file operations.`;
+    sendChatMessage();
+}
+
+function suggestLayoutCreation(fileName) {
+    // Suggest creating layouts for files without them
+    alert(`File ${fileName} doesn't have associated record layouts. Consider:\n\n1. Uploading COBOL copybooks that define this file's structure\n2. Analyzing programs that use this file to infer its layout\n3. Creating manual layout documentation\n\nWould you like me to analyze programs that use this file to suggest a layout structure?`);
+}
+
+function promptProgramUpload(programName) {
+    // Prompt user to upload missing program
+    const uploadHint = `To complete the analysis for program ${programName}:\n\n1. Locate the ${programName}.cbl or ${programName}.cob file\n2. Use the upload button in the left panel\n3. The system will automatically analyze layout associations and data flows\n\nThis will provide complete visibility into the program call chain and data transformations.`;
+    
+    alert(uploadHint);
+    
+    // Highlight the upload area
+    const uploadSection = document.querySelector('.upload-section');
+    if (uploadSection) {
+        uploadSection.style.border = '3px solid #28a745';
+        uploadSection.style.backgroundColor = '#f8fff9';
+        setTimeout(() => {
+            uploadSection.style.border = '2px dashed #667eea';
+            uploadSection.style.backgroundColor = '#f8f9ff';
+        }, 3000);
+    }
+}
 
 function createPath(source, target, edge) {
     // Create curved path for better visual flow
