@@ -117,96 +117,508 @@ class ProgramFlowAnalyzer:
         except Exception as e:
             logger.error(f"Error refreshing dependency status: {str(e)}")
     
-    def _build_program_call_chain_fixed(self, session_id: str, starting_program: str) -> List[Dict]:
-        """FIXED: Build program call chain with proper dynamic call resolution"""
+    def _build_program_call_chain_cached(self, starting_program: str, session_data: Dict) -> List[Dict]:
+        """Build program chain using cached data"""
         program_chain = []
         programs_to_process = [starting_program]
         processed_programs = set()
         sequence_counter = 1
         
-        while programs_to_process and len(processed_programs) < 20:  # Safety limit
+        while programs_to_process and len(processed_programs) < 20:
             current_program = programs_to_process.pop(0)
-            
             if current_program in processed_programs:
                 continue
                 
             processed_programs.add(current_program)
-            logger.debug(f"Processing program: {current_program}")
             
-            # Get program calls for current program
-            program_calls = self._get_program_calls_from_analysis(session_id, current_program)
+            # Get program calls from cached data
+            program_calls = session_data['program_analyses'].get(current_program, {}).get('program_calls', [])
             
-            # FIXED: Process each program call with dynamic resolution
             for call in program_calls:
-                call_type = call.get('call_type', 'static')
+                target_program = call.get('program_name', '')
+                if not target_program:
+                    continue
+                    
+                is_missing = target_program.upper() not in session_data['uploaded_programs']
                 
-                if call_type == 'dynamic':
-                    # FIXED: Handle dynamic calls - resolve to actual programs
-                    variable_name = call.get('variable_name', '')
-                    logger.info(f"Resolving dynamic call: {current_program} -> {variable_name}")
-                    
-                    # Resolve to actual programs using database
-                    resolved_programs = self._resolve_dynamic_call_programs(
-                        session_id, current_program, variable_name
-                    )
-                    
-                    logger.info(f"Resolved {variable_name} to {len(resolved_programs)} programs: {[p['program_name'] for p in resolved_programs]}")
-                    
-                    # FIXED: Add each resolved program as separate flow step
-                    for resolved_prog in resolved_programs:
-                        target_program = resolved_prog['program_name']
-                        is_missing = resolved_prog['status'] == 'missing'
-                        
-                        flow_step = {
-                            'source_program': current_program,
-                            'target_program': target_program,  # ACTUAL program name
-                            'call_type': f"DYNAMIC({variable_name})",
-                            'variable_name': variable_name,
-                            'is_dynamic_resolution': True,
-                            'sequence': sequence_counter,
-                            'is_missing': is_missing,
-                            'confidence': call.get('confidence_score', 0.8),
-                            'business_context': f"Dynamic call via {variable_name} to {target_program}",
-                            'resolution_method': resolved_prog.get('resolution_method', 'database_lookup'),
-                            'line_number': call.get('line_number', 0)
-                        }
-                        
-                        program_chain.append(flow_step)
-                        sequence_counter += 1
-                        
-                        # FIXED: Continue flow analysis with resolved program if available
-                        if not is_missing and target_program not in processed_programs:
-                            programs_to_process.append(target_program)
-                            logger.debug(f"Added resolved program to processing queue: {target_program}")
-                            
-                else:
-                    # FIXED: Handle static calls as before
-                    target_program = call.get('program_name', '')
-                    if target_program:
-                        # Check if target program is missing
-                        is_missing = self._is_program_missing(session_id, target_program)
-                        
-                        flow_step = {
-                            'source_program': current_program,
-                            'target_program': target_program,
-                            'call_type': call.get('call_type', 'CALL'),
-                            'sequence': sequence_counter,
-                            'is_missing': is_missing,
-                            'confidence': call.get('confidence_score', 0.95),
-                            'business_context': call.get('business_context', f"Static {call.get('call_type', 'CALL')} to {target_program}"),
-                            'line_number': call.get('line_number', 0)
-                        }
-                        
-                        program_chain.append(flow_step)
-                        sequence_counter += 1
-                        
-                        # Continue with static call target if available
-                        if not is_missing and target_program not in processed_programs:
-                            programs_to_process.append(target_program)
+                flow_step = {
+                    'sequence': sequence_counter,
+                    'source_program': current_program,
+                    'target_program': target_program,
+                    'call_type': call.get('call_type', 'CALL'),
+                    'variable_name': call.get('variable_name', ''),
+                    'is_missing': is_missing,
+                    'confidence': call.get('confidence_score', 0.8),
+                    'line_number': call.get('line_number', 0),
+                    'business_context': call.get('business_context', f"{call.get('call_type', 'CALL')} from {current_program} to {target_program}")
+                }
+                
+                program_chain.append(flow_step)
+                sequence_counter += 1
+                
+                # Continue processing if program is available
+                if not is_missing and target_program not in processed_programs:
+                    programs_to_process.append(target_program)
         
-        logger.info(f"Built program call chain with {len(program_chain)} steps, {len([s for s in program_chain if s.get('is_dynamic_resolution')])} dynamic resolutions")
         return program_chain
 
+    def _get_layout_associations_cached(self, session_data: Dict, program_chain: List[Dict]) -> List[Dict]:
+        """Get detailed layout associations with usage patterns"""
+        layout_associations = []
+        
+        for step in program_chain:
+            if step.get('is_missing'):
+                continue
+                
+            program_name = step['source_program']
+            program_layouts = [layout for layout in session_data['layouts_data'].values() 
+                            if layout['program_name'] == program_name]
+            
+            for layout in program_layouts:
+                # Analyze field usage patterns
+                input_fields = [f for f in layout['fields'] if f['usage_type'] in ['INPUT', 'MOVE_TARGET']]
+                output_fields = [f for f in layout['fields'] if f['usage_type'] in ['OUTPUT', 'MOVE_SOURCE']]
+                derived_fields = [f for f in layout['fields'] if f['usage_type'] == 'DERIVED']
+                
+                # Determine layout purpose in the call
+                layout_purpose = self._determine_layout_call_purpose(layout, step, session_data)
+                
+                # Find connected files/DB2 tables
+                connected_files = self._find_connected_files_for_layout(program_name, layout, session_data)
+                
+                layout_info = {
+                    'layout_name': layout['layout_name'],
+                    'friendly_name': layout['friendly_name'],
+                    'business_purpose': layout['business_purpose'],
+                    'program_name': program_name,
+                    'sequence_in_flow': step['sequence'],
+                    'fields_count': len(layout['fields']),
+                    'key_fields': layout['fields'][:8],
+                    'has_fields': len(layout['fields']) > 0,
+                    
+                    # Enhanced details
+                    'usage_in_call': layout_purpose,
+                    'field_distribution': {
+                        'input_fields': len(input_fields),
+                        'output_fields': len(output_fields), 
+                        'derived_fields': len(derived_fields),
+                        'static_fields': len(layout['fields']) - len(input_fields) - len(output_fields) - len(derived_fields)
+                    },
+                    'data_flow_role': self._analyze_layout_data_flow_role(input_fields, output_fields, derived_fields),
+                    'connected_files': connected_files,
+                    'sample_input_fields': [f['field_name'] for f in input_fields[:5]],
+                    'sample_output_fields': [f['field_name'] for f in output_fields[:5]],
+                    'business_narrative': self._create_layout_business_narrative(layout, input_fields, output_fields, connected_files, step)
+                }
+                layout_associations.append(layout_info)
+        
+        return layout_associations
+
+    def _determine_layout_call_purpose(self, layout: Dict, step: Dict, session_data: Dict) -> str:
+        """Determine how this layout is used in the program call"""
+        fields = layout['fields']
+        input_count = len([f for f in fields if f['usage_type'] in ['INPUT', 'MOVE_TARGET']])
+        output_count = len([f for f in fields if f['usage_type'] in ['OUTPUT', 'MOVE_SOURCE']])
+        
+        # Check if this layout might be passed to the called program
+        target_program = step['target_program']
+        target_layouts = [l for l in session_data['layouts_data'].values() 
+                        if l['program_name'] == target_program]
+        
+        # Look for similar layout in target program
+        similar_layout = None
+        for target_layout in target_layouts:
+            if (layout['layout_name'].replace('-', '').replace('WS', '') in 
+                target_layout['layout_name'].replace('-', '').replace('WS', '')):
+                similar_layout = target_layout
+                break
+        
+        if similar_layout:
+            return f"Passed as parameter to {target_program} (maps to {similar_layout['layout_name']})"
+        elif input_count > output_count:
+            return f"Receives data before calling {target_program}"
+        elif output_count > input_count:
+            return f"Processes data after calling {target_program}"
+        else:
+            return f"Working storage for {target_program} call"
+
+    def _analyze_layout_data_flow_role(self, input_fields: List, output_fields: List, derived_fields: List) -> str:
+        """Analyze the layout's role in data flow"""
+        if len(input_fields) > 10 and len(output_fields) < 3:
+            return "Data Collection Hub - Gathers input from multiple sources"
+        elif len(output_fields) > 10 and len(input_fields) < 3:
+            return "Data Distribution Hub - Formats output for multiple destinations"
+        elif len(derived_fields) > 5:
+            return "Calculation Engine - Transforms and computes data"
+        elif len(input_fields) > 0 and len(output_fields) > 0:
+            return "Data Processing Pipeline - Input-Process-Output pattern"
+        else:
+            return "Data Structure Definition - Static data container"
+
+    def _find_connected_files_for_layout(self, program_name: str, layout: Dict, session_data: Dict) -> List[Dict]:
+        """Find files that might use this layout"""
+        connected_files = []
+        program_data = session_data['program_analyses'].get(program_name, {})
+        
+        # Check file operations
+        file_ops = program_data.get('file_operations', [])
+        for file_op in file_ops:
+            file_name = file_op.get('file_name', '')
+            operations = file_op.get('operations', [])
+            
+            # Heuristic: if layout name contains file name or vice versa
+            layout_base = layout['layout_name'].replace('-REC', '').replace('-RECORD', '')
+            if (layout_base.upper() in file_name.upper() or 
+                file_name.replace('-FILE', '').upper() in layout_base.upper()):
+                
+                connected_files.append({
+                    'file_name': file_name,
+                    'operations': operations,
+                    'io_direction': file_op.get('io_direction', 'UNKNOWN'),
+                    'connection_confidence': 'HIGH' if layout_base.upper() in file_name.upper() else 'MEDIUM'
+                })
+        
+        return connected_files
+
+    def _create_layout_business_narrative(self, layout: Dict, input_fields: List, output_fields: List, 
+                                        connected_files: List, step: Dict) -> str:
+        """Create business narrative for the layout"""
+        narrative_parts = []
+        
+        layout_name = layout['layout_name']
+        program_name = step['source_program']
+        target_program = step['target_program']
+        
+        # Start with layout purpose
+        if len(input_fields) > len(output_fields):
+            narrative_parts.append(f"{layout_name} collects input data in {program_name}")
+        elif len(output_fields) > len(input_fields):
+            narrative_parts.append(f"{layout_name} formats output data in {program_name}")
+        else:
+            narrative_parts.append(f"{layout_name} structures working data in {program_name}")
+        
+        # Add file connections
+        if connected_files:
+            file_ops = []
+            for cf in connected_files:
+                ops_str = ', '.join(cf['operations'])
+                file_ops.append(f"{ops_str} {cf['file_name']}")
+            
+            if file_ops:
+                narrative_parts.append(f"Used to {' and '.join(file_ops)}")
+        
+        # Add call context
+        if len(input_fields) > 5:
+            narrative_parts.append(f"Data prepared before calling {target_program}")
+        elif len(output_fields) > 5:
+            narrative_parts.append(f"Results processed after {target_program} returns")
+        
+        return '. '.join(narrative_parts) + '.'
+    
+    def _trace_field_data_flow_cached(self, session_data: Dict, program_chain: List[Dict]) -> List[Dict]:
+        """Enhanced field flow tracing with detailed context"""
+        field_flows = []
+        
+        for step in program_chain:
+            if step.get('is_missing'):
+                continue
+                
+            source_prog = step['source_program']
+            target_prog = step['target_program']
+            
+            # Get layouts for both programs
+            source_layouts = [l for l in session_data['layouts_data'].values() if l['program_name'] == source_prog]
+            target_layouts = [l for l in session_data['layouts_data'].values() if l['program_name'] == target_prog]
+            
+            # Analyze field flows between programs
+            for source_layout in source_layouts:
+                for target_layout in target_layouts:
+                    field_mappings = self._analyze_detailed_field_mapping(source_layout, target_layout, step, session_data)
+                    field_flows.extend(field_mappings)
+        
+        return field_flows
+
+    def _analyze_detailed_field_mapping(self, source_layout: Dict, target_layout: Dict, 
+                                    step: Dict, session_data: Dict) -> List[Dict]:
+        """Analyze detailed field mappings between layouts"""
+        field_mappings = []
+        
+        source_fields = {f['field_name']: f for f in source_layout['fields']}
+        target_fields = {f['field_name']: f for f in target_layout['fields']}
+        
+        # Find exact matches and similar fields
+        for field_name, source_field in source_fields.items():
+            target_field = None
+            mapping_type = None
+            
+            if field_name in target_fields:
+                target_field = target_fields[field_name]
+                mapping_type = 'EXACT_MATCH'
+            else:
+                # Look for similar field names
+                similar_field = self._find_similar_field(field_name, target_fields)
+                if similar_field:
+                    target_field = similar_field
+                    mapping_type = 'SIMILAR_MATCH'
+            
+            if target_field:
+                # Analyze the data transformation
+                transformation_analysis = self._analyze_field_transformation_detailed(
+                    source_field, target_field, source_layout, target_layout, step
+                )
+                
+                field_mapping = {
+                    'field_name': field_name,
+                    'source_program': step['source_program'],
+                    'target_program': step['target_program'],
+                    'source_layout': source_layout['layout_name'],
+                    'target_layout': target_layout['layout_name'],
+                    'mapping_type': mapping_type,
+                    'target_field_name': target_field['field_name'],
+                    'sequence': step['sequence'],
+                    
+                    # Enhanced details
+                    'source_usage': source_field['usage_type'],
+                    'target_usage': target_field['usage_type'],
+                    'data_transformation': transformation_analysis,
+                    'business_impact': self._analyze_field_business_impact(source_field, target_field, transformation_analysis),
+                    'flow_narrative': self._create_field_flow_narrative(source_field, target_field, source_layout, target_layout, step)
+                }
+                field_mappings.append(field_mapping)
+        
+        return field_mappings
+
+    def _find_similar_field(self, field_name: str, target_fields: Dict) -> Dict:
+        """Find similar field names using fuzzy matching"""
+        clean_name = field_name.replace('-', '').replace('_', '').upper()
+        
+        for target_name, target_field in target_fields.items():
+            clean_target = target_name.replace('-', '').replace('_', '').upper()
+            
+            # Check if one contains the other or they share significant portion
+            if (clean_name in clean_target or clean_target in clean_name or 
+                len(set(clean_name) & set(clean_target)) / max(len(clean_name), len(clean_target)) > 0.6):
+                return target_field
+        
+        return None
+
+    def _analyze_field_transformation_detailed(self, source_field: Dict, target_field: Dict, 
+                                            source_layout: Dict, target_layout: Dict, step: Dict) -> Dict:
+        """Detailed analysis of field transformation"""
+        transformation = {
+            'type': 'DIRECT_COPY',
+            'changes': [],
+            'business_rules': [],
+            'data_quality_impact': 'NONE'
+        }
+        
+        # Analyze usage type changes
+        source_usage = source_field['usage_type']
+        target_usage = target_field['usage_type']
+        
+        if source_usage != target_usage:
+            transformation['type'] = 'USAGE_TRANSFORMATION'
+            transformation['changes'].append(f"Usage changed from {source_usage} to {target_usage}")
+            
+            # Interpret business meaning
+            if source_usage == 'INPUT' and target_usage == 'DERIVED':
+                transformation['business_rules'].append("Field becomes calculated/derived in target program")
+            elif source_usage == 'OUTPUT' and target_usage == 'INPUT':
+                transformation['business_rules'].append("Output from source becomes input to target")
+            elif target_usage == 'OUTPUT':
+                transformation['business_rules'].append("Field prepared for output/reporting")
+        
+        # Analyze data type changes
+        source_type = source_field.get('data_type', 'UNKNOWN')
+        target_type = target_field.get('data_type', 'UNKNOWN')
+        
+        if source_type != target_type and source_type != 'UNKNOWN' and target_type != 'UNKNOWN':
+            transformation['changes'].append(f"Data type changed from {source_type} to {target_type}")
+            transformation['data_quality_impact'] = 'POTENTIAL_CONVERSION_ISSUES'
+        
+        # Analyze business purpose changes
+        source_purpose = source_field.get('business_purpose', '')
+        target_purpose = target_field.get('business_purpose', '')
+        
+        if source_purpose and target_purpose and source_purpose != target_purpose:
+            transformation['business_rules'].append(f"Business purpose evolved: {source_purpose} → {target_purpose}")
+        
+        return transformation
+
+    def _analyze_field_business_impact(self, source_field: Dict, target_field: Dict, 
+                                    transformation: Dict) -> str:
+        """Analyze business impact of field transformation"""
+        if transformation['type'] == 'DIRECT_COPY':
+            return "Data passed unchanged - maintains data integrity"
+        elif transformation['type'] == 'USAGE_TRANSFORMATION':
+            if target_field['usage_type'] == 'DERIVED':
+                return "Field becomes calculated - adds business value through computation"
+            elif target_field['usage_type'] == 'OUTPUT':
+                return "Field prepared for reporting/external use - supports business reporting"
+            else:
+                return "Field usage pattern changes - may indicate business logic transformation"
+        else:
+            return "Field transformation applied - review for business rule compliance"
+
+    def _create_field_flow_narrative(self, source_field: Dict, target_field: Dict, 
+                                source_layout: Dict, target_layout: Dict, step: Dict) -> str:
+        """Create business narrative for field flow"""
+        field_name = source_field['field_name']
+        source_prog = step['source_program']
+        target_prog = step['target_program']
+        
+        narrative_parts = []
+        
+        # Field origin and processing
+        if source_field['usage_type'] == 'INPUT':
+            narrative_parts.append(f"{field_name} is collected as input in {source_prog}")
+        elif source_field['usage_type'] == 'DERIVED':
+            narrative_parts.append(f"{field_name} is calculated in {source_prog}")
+        else:
+            narrative_parts.append(f"{field_name} is processed in {source_prog}")
+        
+        # Transfer mechanism
+        narrative_parts.append(f"passed to {target_prog} via {step['call_type']}")
+        
+        # Target usage
+        if target_field['usage_type'] == 'OUTPUT':
+            narrative_parts.append(f"then formatted for output in {target_layout['layout_name']}")
+        elif target_field['usage_type'] == 'DERIVED':
+            narrative_parts.append(f"then used in calculations in {target_layout['layout_name']}")
+        else:
+            narrative_parts.append(f"then further processed in {target_layout['layout_name']}")
+        
+        return ' '.join(narrative_parts) + '.'
+    
+    def _identify_file_operations_cached(self, session_data: Dict, program_chain: List[Dict]) -> List[Dict]:
+        """Identify file operations using cached data"""
+        file_operations = []
+        
+        for step in program_chain:
+            if step.get('is_missing'):
+                continue
+                
+            program_name = step['source_program']
+            program_data = session_data['program_analyses'].get(program_name, {})
+            
+            # Get file operations from cached analysis
+            file_ops = program_data.get('file_operations', [])
+            for file_op in file_ops:
+                file_operations.append({
+                    'program_name': program_name,
+                    'file_name': file_op.get('file_name', ''),
+                    'operations': file_op.get('operations', []),
+                    'io_direction': file_op.get('io_direction', 'UNKNOWN'),
+                    'sequence_in_flow': step['sequence']
+                })
+        
+        return file_operations
+    
+    def _generate_simple_summary(self, flow_analysis: Dict) -> str:
+        """Generate detailed business summary with data flow narrative"""
+        chain = flow_analysis.get('program_chain', [])
+        layouts = flow_analysis.get('layout_associations', [])
+        fields = flow_analysis.get('field_flows', [])
+        files = flow_analysis.get('file_operations', [])
+        missing = [s for s in chain if s.get('is_missing')]
+        
+        summary_parts = []
+        
+        # Executive summary
+        summary_parts.append(f"PROGRAM FLOW ANALYSIS: {flow_analysis['starting_program']}")
+        summary_parts.append("=" * 60)
+        summary_parts.append("")
+        
+        # Flow overview
+        summary_parts.append("BUSINESS PROCESS FLOW:")
+        for i, step in enumerate(chain):
+            status = "[MISSING]" if step.get('is_missing') else "[AVAILABLE]"
+            call_info = f"({step['call_type']}"
+            if step.get('variable_name'):
+                call_info += f" via {step['variable_name']}"
+            call_info += ")"
+            
+            summary_parts.append(f"  {i+1}. {step['source_program']} calls {step['target_program']} {call_info} {status}")
+        summary_parts.append("")
+        
+        # Data structure analysis
+        if layouts:
+            summary_parts.append("DATA STRUCTURES & USAGE:")
+            layout_by_program = {}
+            for layout in layouts:
+                prog = layout['program_name']
+                if prog not in layout_by_program:
+                    layout_by_program[prog] = []
+                layout_by_program[prog].append(layout)
+            
+            for program, prog_layouts in layout_by_program.items():
+                summary_parts.append(f"  {program}:")
+                for layout in prog_layouts:
+                    purpose = layout.get('data_flow_role', 'Data structure')
+                    field_dist = layout.get('field_distribution', {})
+                    summary_parts.append(f"    • {layout['layout_name']}: {purpose}")
+                    summary_parts.append(f"      Fields: {field_dist.get('input_fields', 0)} input, {field_dist.get('output_fields', 0)} output, {field_dist.get('derived_fields', 0)} calculated")
+                    
+                    if layout.get('connected_files'):
+                        file_info = []
+                        for cf in layout['connected_files']:
+                            file_info.append(f"{cf['operations'][0] if cf['operations'] else 'access'} {cf['file_name']}")
+                        summary_parts.append(f"      Files: {', '.join(file_info)}")
+                    
+                    if layout.get('business_narrative'):
+                        summary_parts.append(f"      Purpose: {layout['business_narrative']}")
+                summary_parts.append("")
+        
+        # Field flow analysis
+        if fields:
+            summary_parts.append("KEY FIELD TRANSFORMATIONS:")
+            # Group by field name
+            field_groups = {}
+            for field in fields:
+                fname = field['field_name']
+                if fname not in field_groups:
+                    field_groups[fname] = []
+                field_groups[fname].append(field)
+            
+            for field_name, field_list in list(field_groups.items())[:10]:  # Top 10 fields
+                summary_parts.append(f"  {field_name}:")
+                for field_flow in field_list:
+                    transformation = field_flow.get('data_transformation', {})
+                    impact = field_flow.get('business_impact', 'Standard processing')
+                    summary_parts.append(f"    {field_flow['source_program']} → {field_flow['target_program']}: {impact}")
+                    if transformation.get('business_rules'):
+                        summary_parts.append(f"      Business Rule: {transformation['business_rules'][0]}")
+            summary_parts.append("")
+        
+        # File operations context
+        if files:
+            summary_parts.append("FILE OPERATIONS CONTEXT:")
+            for file_op in files:
+                ops_str = ', '.join(file_op.get('operations', []))
+                summary_parts.append(f"  {file_op['program_name']}: {ops_str} {file_op['file_name']} ({file_op.get('io_direction', 'unknown')} operation)")
+            summary_parts.append("")
+        
+        # Missing programs impact
+        if missing:
+            summary_parts.append("MISSING COMPONENTS IMPACT:")
+            for miss in missing:
+                summary_parts.append(f"  • {miss['target_program']} (called by {miss['source_program']})")
+                summary_parts.append(f"    Impact: Flow analysis incomplete - upload to see full data transformations")
+            summary_parts.append("")
+        
+        # Summary statistics
+        summary_parts.append("ANALYSIS METRICS:")
+        summary_parts.append(f"  Programs Analyzed: {len(chain) - len(missing)}/{len(chain)}")
+        summary_parts.append(f"  Data Structures: {len(layouts)}")
+        summary_parts.append(f"  Field Transformations: {len(fields)}")
+        summary_parts.append(f"  File Operations: {len(files)}")
+        
+        if len(chain) > len(missing):
+            completeness = ((len(chain) - len(missing)) / len(chain)) * 100
+            summary_parts.append(f"  Analysis Completeness: {completeness:.1f}%")
+        
+        return '\n'.join(summary_parts)
+        
     def _group_dynamic_calls_by_variable(self, program_calls: List[Dict]) -> List[Dict]:
         """Group dynamic calls by variable name to handle group variables properly"""
         grouped_calls = []
@@ -866,105 +1278,31 @@ class ProgramFlowAnalyzer:
             return []
 
     def _get_program_calls_from_analysis(self, session_id: str, program_name: str) -> List[Dict]:
-        """Extract program calls from stored component analysis"""
-        program_calls = []
+        # Add caching
+        cache_key = f"{session_id}_{program_name}_calls"
+        if hasattr(self, '_calls_cache') and cache_key in self._calls_cache:
+            return self._calls_cache[cache_key]
         
-        try:
-            # Get component analysis for the program
-            with self.db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT analysis_result_json
-                    FROM component_analysis 
-                    WHERE session_id = ? AND component_name = ? AND component_type = 'PROGRAM'
-                ''', (session_id, program_name))
-                
-                result = cursor.fetchone()
-                if not result or not result[0]:
-                    logger.warning(f"No analysis found for program {program_name}")
-                    return program_calls
-                
-                try:
-                    analysis_data = json.loads(result[0])
-                except json.JSONDecodeError as e:
-                    logger.error(f"Error parsing analysis JSON for {program_name}: {e}")
-                    return program_calls
-                
-                # Extract program calls from analysis
-                stored_calls = analysis_data.get('program_calls', [])
-                
-                for call_data in stored_calls:
-                    # Handle both old and new call formats
-                    call_info = {
-                        'program_name': call_data.get('program_name', call_data.get('target_program', '')),
-                        'call_type': call_data.get('call_type', 'static'),
-                        'confidence_score': call_data.get('confidence_score', call_data.get('confidence', 0.8)),
-                        'line_number': call_data.get('line_number', 0),
-                        'business_context': call_data.get('business_context', ''),
-                        'variable_name': call_data.get('variable_name', ''),
-                        'resolved_programs': call_data.get('resolved_programs', [])
-                    }
-                    
-                    # Ensure we have a program name
-                    if call_info['program_name']:
-                        program_calls.append(call_info)
-                    elif call_info['call_type'] == 'dynamic' and call_info['variable_name']:
-                        # For dynamic calls, we might need to resolve the variable
-                        # Use the variable name as placeholder if no resolved programs
-                        if not call_info['resolved_programs']:
-                            call_info['program_name'] = f"DYNAMIC_{call_info['variable_name']}"
-                            program_calls.append(call_info)
-                        else:
-                            # Create separate entries for each resolved program
-                            for resolved in call_info['resolved_programs']:
-                                resolved_call = call_info.copy()
-                                if isinstance(resolved, dict):
-                                    resolved_call['program_name'] = resolved.get('program_name', resolved.get('name', ''))
-                                    resolved_call['confidence_score'] = resolved.get('confidence', call_info['confidence_score'])
-                                else:
-                                    resolved_call['program_name'] = str(resolved)
-                                
-                                if resolved_call['program_name']:
-                                    program_calls.append(resolved_call)
-                
-                # Also check for dependencies stored separately (for dynamic calls)
-                cursor.execute('''
-                    SELECT target_component, relationship_type, analysis_details_json, confidence_score
-                    FROM dependency_relationships
-                    WHERE session_id = ? AND source_component = ? 
-                    AND relationship_type IN ('PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL')
-                ''', (session_id, program_name))
-                
-                dependency_results = cursor.fetchall()
-                
-                for target_comp, rel_type, analysis_json, confidence in dependency_results:
-                    try:
-                        analysis_details = json.loads(analysis_json) if analysis_json else {}
-                    except:
-                        analysis_details = {}
-                    
-                    # Avoid duplicates by checking if we already have this call
-                    existing_call = next((call for call in program_calls 
-                                        if call['program_name'] == target_comp), None)
-                    
-                    if not existing_call:
-                        call_info = {
-                            'program_name': target_comp,
-                            'call_type': 'dynamic' if rel_type == 'DYNAMIC_PROGRAM_CALL' else 'static',
-                            'confidence_score': confidence or 0.8,
-                            'line_number': analysis_details.get('line_number', 0),
-                            'business_context': analysis_details.get('business_context', ''),
-                            'variable_name': analysis_details.get('variable_name', ''),
-                            'resolved_programs': []
-                        }
-                        program_calls.append(call_info)
-                
-                logger.debug(f"Extracted {len(program_calls)} program calls from {program_name}")
+        if not hasattr(self, '_calls_cache'):
+            self._calls_cache = {}
+        
+        # Single query instead of multiple
+        with self.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT analysis_result_json FROM component_analysis 
+                WHERE session_id = ? AND component_name = ? AND component_type = 'PROGRAM'
+            ''', (session_id, program_name))
+            
+            result = cursor.fetchone()
+            if result and result[0]:
+                analysis_data = json.loads(result[0])
+                program_calls = analysis_data.get('program_calls', [])
+                self._calls_cache[cache_key] = program_calls
                 return program_calls
-                
-        except Exception as e:
-            logger.error(f"Error getting program calls from analysis for {program_name}: {str(e)}")
-            return program_calls
+        
+        return []
+    
     def _is_program_missing(self, session_id: str, program_name: str) -> bool:
         """Check if a program is missing from the session"""
         try:
@@ -1349,9 +1687,12 @@ class ProgramFlowAnalyzer:
             return []
 
     # Update the main analyze_complete_program_flow method to include layout associations
-    def analyze_complete_program_flow_enhanced(self, session_id: str, starting_program: str) -> Dict:
-        """Enhanced complete program flow analysis with detailed layout information"""
-        logger.info(f"Starting enhanced flow analysis from {starting_program}")
+    def analyze_complete_program_flow(self, session_id: str, starting_program: str) -> Dict:
+        """Optimized complete program flow analysis"""
+        logger.info(f"Starting optimized flow analysis from {starting_program}")
+        
+        # Batch load all data once
+        session_data = self._batch_load_session_data(session_id)
         
         flow_analysis = {
             'flow_id': str(uuid.uuid4()),
@@ -1359,54 +1700,103 @@ class ProgramFlowAnalyzer:
             'program_chain': [],
             'field_flows': [],
             'file_operations': [],
-            'layout_associations': [],  # NEW: Detailed layout information
+            'layout_associations': [],
             'missing_programs': [],
-            'data_transformations': [],
             'business_flow_summary': ''
         }
         
         try:
-            # Refresh dependencies before analysis
-            self._refresh_dependency_status(session_id)
-            
-            # Step 1: Build program call chain
-            program_chain = self._build_program_call_chain_fixed(session_id, starting_program)
+            # Build program chain using cached data
+            program_chain = self._build_program_call_chain_cached(starting_program, session_data)
             flow_analysis['program_chain'] = program_chain
             
-            # Step 2: Get detailed layout associations for the flow
-            layout_associations = self._get_layout_associations_for_flow(session_id, program_chain)
+            # Get layout associations using cached data
+            layout_associations = self._get_layout_associations_cached(session_data, program_chain)
             flow_analysis['layout_associations'] = layout_associations
             
-            # Step 3: Trace field data flow with layout information
-            field_flows = self._trace_field_data_flow_fixed(session_id, program_chain)
-            enhanced_field_flows = self._enhance_field_flows_with_layout_info(session_id, field_flows)
-            flow_analysis['field_flows'] = enhanced_field_flows
+            # Trace field flows using cached data
+            field_flows = self._trace_field_data_flow_cached(session_data, program_chain)
+            flow_analysis['field_flows'] = field_flows
             
-            # Step 4: Identify file operations with layout associations
-            file_operations = self._identify_file_operations_with_layouts(session_id, program_chain)
+            # Get file operations using cached data
+            file_operations = self._identify_file_operations_cached(session_data, program_chain)
             flow_analysis['file_operations'] = file_operations
             
-            # Step 5: Identify missing programs
-            missing_programs = self._identify_missing_programs_in_flow(session_id, program_chain)
+            # Identify missing programs
+            missing_programs = [step for step in program_chain if step.get('is_missing')]
             flow_analysis['missing_programs'] = missing_programs
             
-            # Step 6: Generate enhanced business summary
-            business_summary = self._generate_enhanced_business_flow_summary(session_id, flow_analysis)
-            flow_analysis['business_flow_summary'] = business_summary
+            # Generate simple business summary
+            flow_analysis['business_flow_summary'] = self._generate_simple_summary(flow_analysis)
             
-            # Store in database
+            # Store results
             self._store_program_flow_analysis(session_id, flow_analysis)
             
-            logger.info(f"Enhanced program flow analysis completed: {len(program_chain)} programs, "
-                    f"{len(layout_associations)} layouts, {len(enhanced_field_flows)} field flows")
+            logger.info(f"Flow analysis completed: {len(program_chain)} programs, {len(layout_associations)} layouts")
             return flow_analysis
             
         except Exception as e:
-            logger.error(f"Error in enhanced program flow analysis: {str(e)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.error(f"Error in program flow analysis: {str(e)}")
             return flow_analysis
 
+    def _batch_load_session_data(self, session_id: str) -> Dict:
+        """Load all session data in one batch to avoid repeated queries"""
+        with self.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Load all program analyses
+            cursor.execute('''
+                SELECT component_name, analysis_result_json 
+                FROM component_analysis 
+                WHERE session_id = ? AND component_type = 'PROGRAM'
+            ''', (session_id,))
+            program_analyses = {}
+            for row in cursor.fetchall():
+                try:
+                    program_analyses[row[0]] = json.loads(row[1]) if row[1] else {}
+                except:
+                    program_analyses[row[0]] = {}
+            
+            # Load all layouts with their fields
+            cursor.execute('''
+                SELECT rl.layout_name, rl.program_name, rl.friendly_name, rl.business_purpose,
+                    fad.field_name, fad.friendly_name as field_friendly, fad.usage_type,
+                    fad.business_purpose as field_purpose, fad.mainframe_data_type
+                FROM record_layouts rl
+                LEFT JOIN field_analysis_details fad ON rl.id = fad.field_id
+                WHERE rl.session_id = ?
+                ORDER BY rl.layout_name, fad.field_name
+            ''', (session_id,))
+            
+            layouts_data = {}
+            for row in cursor.fetchall():
+                layout_name = row[0]
+                if layout_name not in layouts_data:
+                    layouts_data[layout_name] = {
+                        'layout_name': layout_name,
+                        'program_name': row[1],
+                        'friendly_name': row[2] or layout_name,
+                        'business_purpose': row[3] or 'Data structure',
+                        'fields': []
+                    }
+                
+                if row[4]:  # field_name exists
+                    layouts_data[layout_name]['fields'].append({
+                        'field_name': row[4],
+                        'friendly_name': row[5] or row[4],
+                        'usage_type': row[6] or 'STATIC',
+                        'business_purpose': row[7] or 'Field processing',
+                        'data_type': row[8] or 'UNKNOWN'
+                    })
+            
+            # Load uploaded programs
+            uploaded_programs = set(program_analyses.keys())
+            
+            return {
+                'program_analyses': program_analyses,
+                'layouts_data': layouts_data,
+                'uploaded_programs': uploaded_programs
+            }
     def _generate_enhanced_business_flow_summary(self, session_id: str, flow_analysis: Dict) -> str:
         """Generate enhanced business summary with layout and data transformation details"""
         try:
