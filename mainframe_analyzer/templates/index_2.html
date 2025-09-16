@@ -8938,23 +8938,29 @@ async function analyzeEnhancedFlow() {
     showLoadingSpinner('Analyzing enhanced program flow...');
     
     try {
-        const flowResponse = await fetch(`/api/program-flow-enhanced/${currentSessionId}/${programName}`);
-        const flowData = await flowResponse.json();
+        // Use the correct endpoint
+        const response = await fetch(`/api/program-flow-visualization/${currentSessionId}/${programName}`);
+        const data = await response.json();
         
-        if (!flowData.success) {
-            showError(flowData.error);
+        if (!data.success) {
+            showError(data.error);
             return;
         }
         
-        // Render enhanced visualization and details
-        renderFlowVisualization(flowData.visualization_data);
-        renderEnhancedFlowDetails(flowData.flow_analysis, flowData);
+        // FIX: Use the correct data structure
+        renderFlowVisualization(data.visualization_data);
         
-        // Show success message with enhanced features
-        showSuccess(`Enhanced analysis complete! Found ${flowData.statistics.layout_associations} layout associations and ${flowData.statistics.field_flows} field flows.`);
+        // Clear or populate flow details
+        document.getElementById('flowDetails').innerHTML = `
+            <div class="flow-summary">
+                <h3>Program Flow: ${programName}</h3>
+                <p>Nodes: ${data.visualization_data.nodes.length}</p>
+                <p>Edges: ${data.visualization_data.edges.length}</p>
+            </div>
+        `;
         
     } catch (error) {
-        showError(`Error analyzing enhanced flow: ${error.message}`);
+        showError(`Error analyzing flow: ${error.message}`);
     } finally {
         hideLoadingSpinner();
     }

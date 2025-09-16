@@ -2837,9 +2837,14 @@ def get_program_flow_visualization(session_id, program_name):
             session_id, program_name, dependency_data, analyzer.db_manager
         )
         
+        # FIX: Flatten the structure for frontend
+        visualization_data = {
+            'nodes': flow_viz['program_nodes'] + flow_viz['file_nodes'] + flow_viz['db2_nodes'],
+            'edges': flow_viz['program_edges'] + flow_viz['file_edges'] + flow_viz['db2_edges']
+        }
         return jsonify({
             'success': True,
-            'flow_visualization': flow_viz,
+            'flow_visualization': visualization_data,
             'program_name': program_name,
             'data_source': 'existing_analyzed_dependencies',
             'statistics': {
