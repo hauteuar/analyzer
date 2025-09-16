@@ -8917,14 +8917,48 @@ async function analyzeEnhancedFlow() {
         }
         
         // Render the flow visualization
-        if (data.flow_visualization) {
-            console.log('Rendering program flow visualization...');
-            renderFlowVisualization(data.flow_visualization);
-        } else {
-            console.error('No flow visualization data received');
-            showError('No visualization data received from server');
-            return;
-        }
+        // Replace the existing flow visualization with a modal button
+if (data.flow_visualization) {
+    console.log('Preparing modal flow visualization...');
+    
+    document.getElementById('flowVisualization').innerHTML = `
+        <div style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 400px;
+            background: #f8f9fa;
+            border: 2px dashed #667eea;
+            border-radius: 10px;
+            flex-direction: column;
+        ">
+            <div style="font-size: 3rem; margin-bottom: 20px;">🔍</div>
+            <h3 style="color: #667eea; margin-bottom: 15px;">Program Flow Visualization</h3>
+            <p style="color: #666; margin-bottom: 20px;">Click below to view the complete program flow in an expanded view</p>
+            <button onclick="openProgramFlowModal(${JSON.stringify(data.flow_visualization).replace(/"/g, '&quot;')}, '${programName}')" 
+                    style="
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                        border: none;
+                        padding: 15px 30px;
+                        border-radius: 8px;
+                        font-size: 16px;
+                        cursor: pointer;
+                        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+                    ">
+                📊 View Detailed Program Flow
+            </button>
+        </div>
+    `;
+    
+    // Store the data globally for the modal
+    window.currentFlowData = data.flow_visualization;
+    
+} else {
+    console.error('No flow visualization data received');
+    showError('No visualization data received from server');
+    return;
+}
         
         // Display flow details with proper data structure
         const flowDetails = document.getElementById('flowDetails');
@@ -9563,6 +9597,65 @@ function createModalHierarchicalLayout(vizData, svgWidth, svgHeight) {
     
     return { layoutNodes, layoutEdges };
 }
+function addModalZoomControls(container, svg, zoom) {
+    const controls = d3.select(container)
+        .append('div')
+        .style('position', 'absolute')
+        .style('top', '15px')
+        .style('left', '15px')
+        .style('z-index', '100');
+    
+    const buttonStyle = `
+        background: #667eea;
+        color: white;
+        border: none;
+        padding: 8px 12px;
+        margin: 2px;
+        border-radius: 5px;
+        cursor: pointer;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    `;
+    
+    controls.append('button')
+        .attr('style', buttonStyle)
+        .text('🔍+')
+        .on('click', function() {
+            svg.transition().call(zoom.scaleBy, 1.3);
+        });
+    
+    controls.append('button')
+        .attr('style', buttonStyle)
+        .text('🔍-')
+        .on('click', function() {
+            svg.transition().call(zoom.scaleBy, 0.7);
+        });
+    
+    controls.append('button')
+        .attr('style', buttonStyle)
+        .text('↻ Reset')
+        .on('click', function() {
+            svg.transition().call(zoom.transform, d3.zoomIdentity);
+        });
+    
+    controls.append('button')
+        .attr('style', buttonStyle)
+        .text('🎯 Fit')
+        .on('click', function() {
+            const bounds = svg.select('.zoom-container').node().getBBox();
+            const parent = svg.node().parentNode;
+            const fullWidth = parent.clientWidth;
+            const fullHeight = parent.clientHeight;
+            const width = bounds.width;
+            const height = bounds.height;
+            const midX = bounds.x + width / 2;
+            const midY = bounds.y + height / 2;
+            const scale = Math.min(fullWidth / width, fullHeight / height) * 0.9;
+            const translate = [fullWidth / 2 - scale * midX, fullHeight / 2 - scale * midY];
+            
+            svg.transition().call(zoom.transform, d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
+        });
+}
+
 // Add these helper functions for better interaction
 function viewLayoutFieldDetails(layoutName) {
     // Open a detailed modal for layout fields
