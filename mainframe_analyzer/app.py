@@ -2806,356 +2806,246 @@ def assign_node_levels(program_chain, starting_program):
     return node_levels
 
 @app.route('/api/program-flow-visualization/<session_id>/<program_name>', methods=['GET'])
-def get_program_flow_visualization_fixed(session_id, program_name):
-    """FIXED: Program flow with proper alignment, data connections, and missing program handling"""
+
+def get_program_flow_visualization(session_id, program_name):
+    """FINAL FIXED: Complete program flow using existing analyzed dependencies"""
     try:
-        # Force refresh dependencies first
-        analyzer.program_flow_analyzer._refresh_dependency_status(session_id)
+        logger.info(f"FIXED program flow visualization for {program_name} using existing dependency data")
         
-        # Get fresh flow analysis
-        flow_analysis = analyzer.program_flow_analyzer.analyze_complete_program_flow(session_id, program_name)
+        # Get complete dependency data (already analyzed and stored)
+        dependency_data = analyzer.db_manager.get_complete_dependency_data_for_flow(session_id)
         
-        # Get all dependencies to include files and DB2
-        all_dependencies = analyzer.db_manager.get_dependencies_with_layout_resolution_complete(session_id)
+        if not dependency_data['dependencies']:
+            return jsonify({
+                'success': False,
+                'error': f'No dependencies found for session {session_id}. Upload and analyze COBOL programs first.',
+                'recommendations': ['Upload COBOL programs', 'Run dependency analysis', 'Check session data']
+            })
         
-        # FIXED: Transform for visualization with proper structure
-        visualization_data = {
-            'nodes': [],
-            'edges': [],
-            'field_flows': {},
-            'missing_programs': [],
-            'file_operations': [],
-            'layout_associations': [],
-            'program_chain_summary': []
-        }
+        # Check if starting program exists
+        uploaded_programs = set(comp['component_name'].upper() for comp in dependency_data['components'])
+        if program_name.upper() not in uploaded_programs:
+            available_programs = [comp['component_name'] for comp in dependency_data['components'] if comp['component_type'] == 'PROGRAM']
+            return jsonify({
+                'success': False,
+                'error': f'Program {program_name} not found in session',
+                'available_programs': available_programs[:10]
+            })
         
-        # FIXED: Collect all programs in the flow with proper missing handling
-        programs_in_flow = set()
-        missing_programs = []
-        program_details = {}
-        
-        for step in flow_analysis.get('program_chain', []):
-            source_prog = step.get('source_program')
-            target_prog = step.get('target_program')
-            
-            if source_prog:
-                programs_in_flow.add(source_prog)
-                program_details[source_prog] = {
-                    'status': 'present',
-                    'is_starting': source_prog == program_name
-                }
-            
-            if target_prog:
-                programs_in_flow.add(target_prog)
-                # FIXED: Properly handle missing programs
-                if step.get('is_missing'):
-                    program_details[target_prog] = {
-                        'status': 'missing',
-                        'is_starting': False,
-                        'missing_reason': f"Called by {source_prog} but not uploaded"
-                    }
-                    missing_programs.append({
-                        'program_name': target_prog,
-                        'called_by': source_prog,
-                        'call_type': step.get('call_type', 'CALL'),
-                        'sequence': step.get('sequence', 0)
-                    })
-                else:
-                    if target_prog not in program_details:
-                        program_details[target_prog] = {
-                            'status': 'present',
-                            'is_starting': False
-                        }
-        
-        # FIXED: Create program nodes with proper positioning
-        node_levels = {}
-        current_level = 0
-        
-        # Start with the main program at level 0
-        if program_name in programs_in_flow:
-            node_levels[program_name] = 0
-            current_level = 1
-        
-        # Assign levels based on call sequence
-        for step in sorted(flow_analysis.get('program_chain', []), key=lambda x: x.get('sequence', 0)):
-            target_prog = step.get('target_program')
-            if target_prog and target_prog not in node_levels:
-                node_levels[target_prog] = current_level
-                current_level += 1
-        
-        # Create program nodes with proper positioning
-        for program in programs_in_flow:
-            details = program_details.get(program, {'status': 'unknown', 'is_starting': False})
-            level = node_levels.get(program, 999)
-            
-            node = {
-                'id': program,
-                'label': program,
-                'type': 'program',
-                'status': details['status'],
-                'is_starting_program': details.get('is_starting', False),
-                'level': level,
-                'x': 100 + (level * 200),  # Horizontal positioning
-                'y': 100 + (len([p for p, l in node_levels.items() if l == level and p != program]) * 80),  # Vertical spacing
-                'width': 120,
-                'height': 60
-            }
-            
-            # Add business purpose if available
-            components = analyzer.db_manager.get_session_components(session_id)
-            for comp in components:
-                if comp['component_name'] == program:
-                    node['business_purpose'] = comp.get('business_purpose', '')
-                    break
-            
-            visualization_data['nodes'].append(node)
-        
-        # FIXED: Add file and DB2 nodes with proper connections to programs
-        files_by_program = {}
-        db2_tables_by_program = {}
-        
-        for dep in all_dependencies:
-            source_prog = dep.get('source_component')
-            target_comp = dep.get('target_component')
-            rel_type = dep.get('relationship_type', '')
-            interface_type = dep.get('interface_type', '')
-            analysis = dep.get('analysis_details', {})
-            
-            # Only include dependencies from programs in our flow
-            if source_prog not in programs_in_flow:
-                continue
-            
-            # FIXED: Group files by source program for proper connection
-            if 'FILE' in rel_type:
-                if source_prog not in files_by_program:
-                    files_by_program[source_prog] = []
-                
-                file_info = {
-                    'id': f"FILE_{target_comp}_{source_prog}",  # Unique ID per program
-                    'label': target_comp,
-                    'type': 'file',
-                    'interface': interface_type,
-                    'io_direction': analysis.get('io_direction', 'UNKNOWN'),
-                    'has_layout': analysis.get('layout_resolved', False),
-                    'associated_layouts': analysis.get('associated_layouts', []),
-                    'operations': analysis.get('operations', []),
-                    'source_program': source_prog,
-                    'connected_to': source_prog
-                }
-                files_by_program[source_prog].append(file_info)
-            
-            # FIXED: Group DB2 tables by source program
-            elif interface_type == 'DB2':
-                if source_prog not in db2_tables_by_program:
-                    db2_tables_by_program[source_prog] = []
-                
-                db2_info = {
-                    'id': f"DB2_{target_comp}_{source_prog}",  # Unique ID per program
-                    'label': target_comp,
-                    'type': 'db2_table',
-                    'sql_operation': analysis.get('sql_operation', 'UNKNOWN'),
-                    'io_direction': analysis.get('io_direction', 'UNKNOWN'),
-                    'interface': 'DB2',
-                    'source_program': source_prog,
-                    'connected_to': source_prog
-                }
-                db2_tables_by_program[source_prog].append(db2_info)
-        
-        # FIXED: Add file nodes with proper positioning relative to their programs
-        for source_prog, files in files_by_program.items():
-            program_level = node_levels.get(source_prog, 0)
-            base_y = 300 + (program_level * 100)  # Position files below programs
-            
-            for i, file_info in enumerate(files):
-                file_node = {
-                    'id': file_info['id'],
-                    'label': file_info['label'],
-                    'type': 'file',
-                    'interface': file_info['interface'],
-                    'io_direction': file_info['io_direction'],
-                    'has_layout': file_info['has_layout'],
-                    'associated_layouts': file_info['associated_layouts'],
-                    'operations': file_info['operations'],
-                    'x': 80 + (program_level * 200) + (i * 150),  # Spread horizontally
-                    'y': base_y,
-                    'width': 100,
-                    'height': 50,
-                    'connected_to_program': source_prog
-                }
-                visualization_data['nodes'].append(file_node)
-                
-                # FIXED: Create proper edge connection
-                file_edge = {
-                    'from': source_prog,
-                    'to': file_info['id'],
-                    'type': 'file_operation',
-                    'io_direction': file_info['io_direction'],
-                    'operations': file_info['operations'],
-                    'interface_type': file_info['interface'],
-                    'has_layout_resolution': file_info['has_layout'],
-                    'label': f"{file_info['io_direction']}: {', '.join(file_info['operations'])}"
-                }
-                visualization_data['edges'].append(file_edge)
-        
-        # FIXED: Add DB2 nodes with proper positioning
-        for source_prog, tables in db2_tables_by_program.items():
-            program_level = node_levels.get(source_prog, 0)
-            base_y = 400 + (program_level * 100)  # Position DB2 below files
-            
-            for i, table_info in enumerate(tables):
-                db2_node = {
-                    'id': table_info['id'],
-                    'label': table_info['label'],
-                    'type': 'db2_table',
-                    'sql_operation': table_info['sql_operation'],
-                    'io_direction': table_info['io_direction'],
-                    'interface': 'DB2',
-                    'x': 80 + (program_level * 200) + (i * 150),
-                    'y': base_y,
-                    'width': 110,
-                    'height': 50,
-                    'connected_to_program': source_prog
-                }
-                visualization_data['nodes'].append(db2_node)
-                
-                # FIXED: Create proper DB2 edge connection
-                db2_edge = {
-                    'from': source_prog,
-                    'to': table_info['id'],
-                    'type': 'db2_operation',
-                    'sql_operation': table_info['sql_operation'],
-                    'io_direction': table_info['io_direction'],
-                    'interface_type': 'DB2',
-                    'label': f"DB2 {table_info['sql_operation']}"
-                }
-                visualization_data['edges'].append(db2_edge)
-        
-        # FIXED: Add program call edges with proper data flow information
-        for step in flow_analysis.get('program_chain', []):
-            source_prog = step.get('source_program')
-            target_prog = step.get('target_program')
-            
-            if source_prog and target_prog:
-                edge_data = {
-                    'from': source_prog,
-                    'to': target_prog,  # This will now be the ACTUAL program name
-                    'type': 'program_call',
-                    'call_type': step.get('call_type', 'CALL'),
-                    'status': 'missing' if step.get('is_missing') else 'present',
-                    'sequence': step.get('sequence'),
-                    'confidence': step.get('confidence', 0.8),
-                    'business_context': step.get('business_context', ''),
-                }
-                
-                # FIXED: Enhanced labeling for dynamic calls
-                if step.get('is_dynamic_resolution'):
-                    variable_name = step.get('variable_name', '')
-                    edge_data['label'] = f"DYNAMIC via {variable_name} → {target_prog}"
-                    edge_data['is_dynamic'] = True
-                    edge_data['variable_name'] = variable_name
-                else:
-                    edge_data['label'] = f"{step.get('call_type', 'CALL')} #{step.get('sequence', '')}"
-                
-                visualization_data['edges'].append(edge_data)
-        
-        # FIXED: Create proper field flow summary with layout information
-        field_flow_summary = {}
-        for field_flow in flow_analysis.get('field_flows', []):
-            field_name = field_flow.get('field_name')
-            if field_name:
-                if field_name not in field_flow_summary:
-                    field_flow_summary[field_name] = []
-                
-                flow_info = {
-                    'from': field_flow.get('source_program'),
-                    'to': field_flow.get('target_program'),
-                    'type': field_flow.get('flow_type'),
-                    'business_purpose': field_flow.get('business_purpose', ''),
-                    'parameter_type': field_flow.get('parameter_type', 'BY_REFERENCE'),
-                    'source_layout': field_flow.get('source_layout', ''),
-                    'target_layout': field_flow.get('target_layout', ''),
-                    'transformation': field_flow.get('transformation_logic', '')
-                }
-                field_flow_summary[field_name].append(flow_info)
-        
-        visualization_data['field_flows'] = field_flow_summary
-        
-        # FIXED: Proper missing programs list (not [object Object])
-        visualization_data['missing_programs'] = missing_programs
-        
-        # FIXED: Create program chain summary for flow details
-        program_chain_summary = []
-        for step in sorted(flow_analysis.get('program_chain', []), key=lambda x: x.get('sequence', 0)):
-            summary_item = {
-                'sequence': step.get('sequence'),
-                'source_program': step.get('source_program'),
-                'target_program': step.get('target_program'),
-                'call_type': step.get('call_type', 'CALL'),
-                'status': 'MISSING' if step.get('is_missing') else 'AVAILABLE',
-                'business_context': step.get('business_context', ''),
-                'data_passed_count': len(step.get('data_passed', [])),
-                'variable_name': step.get('variable_name', ''),
-                'confidence': step.get('confidence', 0.8)
-            }
-            program_chain_summary.append(summary_item)
-        
-        visualization_data['program_chain_summary'] = program_chain_summary
-        
-        logger.info(f"FIXED flow visualization: {len(visualization_data['nodes'])} nodes, {len(visualization_data['edges'])} edges")
-        logger.info(f"Files connected to programs: {sum(len(files) for files in files_by_program.values())}")
-        logger.info(f"DB2 tables connected to programs: {sum(len(tables) for tables in db2_tables_by_program.values())}")
-        logger.info(f"Missing programs properly formatted: {len(missing_programs)}")
+        # Build complete flow visualization
+        flow_viz = build_final_flow_visualization(
+            session_id, program_name, dependency_data, analyzer.db_manager
+        )
         
         return jsonify({
             'success': True,
-            'visualization_data': visualization_data,
-            'business_summary': flow_analysis.get('business_flow_summary', ''),
-            'total_programs': len(programs_in_flow),
-            'total_files': sum(len(files) for files in files_by_program.values()),
-            'total_db2_tables': sum(len(tables) for tables in db2_tables_by_program.values()),
-            'missing_count': len(missing_programs),
-            'dependency_refreshed': True,
-            'enhanced_with_data_sources': True,
-            'fixed_alignment': True,
-            'fixed_missing_programs': True,
+            'flow_visualization': flow_viz,
+            'program_name': program_name,
+            'data_source': 'existing_analyzed_dependencies',
             'statistics': {
-                'field_flows': len(field_flow_summary),
-                'file_operations': sum(len(files) for files in files_by_program.values()),
-                'db2_operations': sum(len(tables) for tables in db2_tables_by_program.values()),
-                'layout_associations': len(flow_analysis.get('layout_associations', [])),
-                'program_chain_steps': len(program_chain_summary)
+                'total_programs_in_flow': len(flow_viz.get('program_nodes', [])),
+                'missing_programs': len(flow_viz.get('missing_programs', [])),
+                'file_operations': len(flow_viz.get('file_nodes', [])),
+                'db2_operations': len(flow_viz.get('db2_nodes', [])),
+                'dynamic_calls': len([e for e in flow_viz.get('program_edges', []) if e.get('is_dynamic')])
             }
         })
         
     except Exception as e:
-        logger.error(f"Error getting FIXED flow visualization: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Error in fixed program flow visualization: {str(e)}")
         return jsonify({
             'success': False,
-            'error': str(e),
-            'traceback': traceback.format_exc() if app.debug else None
+            'error': str(e)
         })
+
+def build_final_flow_visualization(session_id, starting_program, dependency_data, db_manager):
+    """Build flow visualization using existing dependency data"""
     
-def _create_group_variable_summary(self, group_variable_info: Dict) -> Dict:
-    """Create summary of group variable information for UI display"""
-    summary = {
-        'total_group_variables': len(group_variable_info),
-        'variables': {}
+    dependencies = dependency_data['dependencies']
+    components = dependency_data['components']
+    uploaded_programs = set(comp['component_name'].upper() for comp in components)
+    
+    flow_viz = {
+        'starting_program': starting_program,
+        'program_nodes': [],
+        'file_nodes': [],
+        'db2_nodes': [],
+        'program_edges': [],
+        'file_edges': [],
+        'db2_edges': [],
+        'missing_programs': []
     }
     
-    for var_name, var_info in group_variable_info.items():
-        summary['variables'][var_name] = {
-            'source_program': var_info['source_program'],
-            'total_possible': len(var_info['all_possible_programs']),
-            'total_resolved': len(var_info['resolved_programs']),
-            'present_count': len(var_info['present_programs']),
-            'missing_count': len(var_info['missing_programs']),
-            'resolution_rate': len(var_info['present_programs']) / len(var_info['resolved_programs']) if var_info['resolved_programs'] else 0,
-            'status': 'complete' if len(var_info['missing_programs']) == 0 else 'partial' if len(var_info['present_programs']) > 0 else 'missing'
-        }
+    # Build program hierarchy from existing dependencies
+    program_hierarchy = {}
+    programs_to_process = [(starting_program, 0)]
+    processed = set()
     
-    return summary
+    while programs_to_process and len(processed) < 50:
+        current_program, depth = programs_to_process.pop(0)
+        
+        if current_program in processed or depth > 5:
+            continue
+            
+        processed.add(current_program)
+        
+        program_info = {
+            'program_name': current_program,
+            'depth': depth,
+            'is_missing': current_program.upper() not in uploaded_programs,
+            'calls_to': [],
+            'file_operations': [],
+            'db2_operations': []
+        }
+        
+        # Process dependencies for this program
+        for dep in dependencies:
+            if dep['source_component'] != current_program:
+                continue
+                
+            target = dep['target_component']
+            rel_type = dep['relationship_type']
+            interface = dep['interface_type']
+            analysis = dep.get('analysis_details', {})
+            
+            # Program calls
+            if rel_type in ['PROGRAM_CALL', 'DYNAMIC_PROGRAM_CALL']:
+                call_info = {
+                    'target': target,
+                    'call_type': analysis.get('call_type', 'CALL'),
+                    'is_dynamic': rel_type == 'DYNAMIC_PROGRAM_CALL',
+                    'variable_name': analysis.get('variable_name', ''),
+                    'status': dep.get('dependency_status', 'unknown')
+                }
+                program_info['calls_to'].append(call_info)
+                
+                # Queue target for processing
+                if target.upper() in uploaded_programs and depth < 5:
+                    programs_to_process.append((target, depth + 1))
+            
+            # File operations
+            elif 'FILE' in rel_type or interface in ['FILE_SYSTEM', 'CICS']:
+                file_info = {
+                    'file_name': target,
+                    'operations': analysis.get('operations', []),
+                    'io_direction': analysis.get('io_direction', 'UNKNOWN'),
+                    'interface_type': interface,
+                    'has_layout_resolution': analysis.get('layout_resolved', False)
+                }
+                program_info['file_operations'].append(file_info)
+            
+            # DB2 operations
+            elif interface == 'DB2':
+                db2_info = {
+                    'table_name': target,
+                    'sql_operation': analysis.get('sql_operation', 'UNKNOWN'),
+                    'io_direction': analysis.get('io_direction', 'UNKNOWN')
+                }
+                program_info['db2_operations'].append(db2_info)
+        
+        program_hierarchy[current_program] = program_info
+    
+    # Calculate positions
+    level_positions = {}
+    for program, info in program_hierarchy.items():
+        level_positions[program] = info['depth']
+    
+    # Create nodes and edges
+    for program_name, program_info in program_hierarchy.items():
+        is_missing = program_info['is_missing']
+        level = level_positions.get(program_name, 0)
+        
+        # Program node
+        program_node = {
+            'id': program_name,
+            'label': program_name,
+            'type': 'program',
+            'status': 'missing' if is_missing else 'present',
+            'is_starting_program': program_name == starting_program,
+            'level': level,
+            'x': 100 + (level * 200),
+            'y': 100 + (list(program_hierarchy.keys()).index(program_name) % 5) * 80,
+            'width': 140,
+            'height': 70
+        }
+        flow_viz['program_nodes'].append(program_node)
+        
+        if is_missing:
+            flow_viz['missing_programs'].append({
+                'program_name': program_name,
+                'status': 'missing'
+            })
+        
+        # Program call edges
+        for call in program_info['calls_to']:
+            edge = {
+                'from': program_name,
+                'to': call['target'],
+                'type': 'program_call',
+                'call_type': call['call_type'],
+                'is_dynamic': call['is_dynamic'],
+                'variable_name': call['variable_name'],
+                'status': call['status'],
+                'label': f"DYNAMIC via {call['variable_name']}" if call['is_dynamic'] else call['call_type']
+            }
+            flow_viz['program_edges'].append(edge)
+        
+        # File nodes and edges
+        for i, file_op in enumerate(program_info['file_operations']):
+            file_node_id = f"FILE_{file_op['file_name']}_{program_name}_{i}"
+            
+            file_node = {
+                'id': file_node_id,
+                'label': file_op['file_name'],
+                'type': 'file',
+                'interface_type': file_op['interface_type'],
+                'io_direction': file_op['io_direction'],
+                'operations': file_op['operations'],
+                'has_layout_resolution': file_op['has_layout_resolution'],
+                'x': 80 + (level * 200) + (i * 130),
+                'y': 300,
+                'width': 120,
+                'height': 50
+            }
+            flow_viz['file_nodes'].append(file_node)
+            
+            file_edge = {
+                'from': program_name,
+                'to': file_node_id,
+                'type': 'file_operation',
+                'io_direction': file_op['io_direction'],
+                'operations': file_op['operations'],
+                'label': f"{file_op['io_direction']}: {', '.join(file_op['operations'])}"
+            }
+            flow_viz['file_edges'].append(file_edge)
+        
+        # DB2 nodes and edges
+        for i, db2_op in enumerate(program_info['db2_operations']):
+            db2_node_id = f"DB2_{db2_op['table_name']}_{program_name}_{i}"
+            
+            db2_node = {
+                'id': db2_node_id,
+                'label': db2_op['table_name'],
+                'type': 'db2_table',
+                'sql_operation': db2_op['sql_operation'],
+                'io_direction': db2_op['io_direction'],
+                'x': 80 + (level * 200) + (i * 130),
+                'y': 400,
+                'width': 120,
+                'height': 50
+            }
+            flow_viz['db2_nodes'].append(db2_node)
+            
+            db2_edge = {
+                'from': program_name,
+                'to': db2_node_id,
+                'type': 'db2_operation',
+                'sql_operation': db2_op['sql_operation'],
+                'label': f"DB2 {db2_op['sql_operation']}"
+            }
+            flow_viz['db2_edges'].append(db2_edge)
+    
+    return flow_viz
 
 @app.route('/api/field-flow-trace/<session_id>/<field_name>', methods=['GET'])
 def trace_field_flow(session_id, field_name):

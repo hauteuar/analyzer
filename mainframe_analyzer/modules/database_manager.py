@@ -2469,6 +2469,66 @@ class DatabaseManager:
             logger.error(f"Error getting enhanced dependencies with dynamic summary: {str(e)}")
             return self.get_enhanced_dependencies(session_id)
     # Add method to get missing dependencies summary
+    def get_complete_dependency_data_for_flow(self, session_id: str) -> Dict:
+        """Get complete dependency data optimized for program flow visualization"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get all dependencies with enhanced details
+                cursor.execute('''
+                    SELECT dr.source_component, dr.target_component, dr.relationship_type,
+                        dr.interface_type, dr.confidence_score, dr.analysis_details_json,
+                        dr.dependency_status, dr.source_code_evidence,
+                        ca1.business_purpose as source_business_purpose,
+                        ca2.business_purpose as target_business_purpose
+                    FROM dependency_relationships dr
+                    LEFT JOIN component_analysis ca1 ON (dr.source_component = ca1.component_name AND ca1.session_id = ?)
+                    LEFT JOIN component_analysis ca2 ON (dr.target_component = ca2.component_name AND ca2.session_id = ?)
+                    WHERE dr.session_id = ?
+                    ORDER BY dr.source_component, dr.relationship_type, dr.target_component
+                ''', (session_id, session_id, session_id))
+                
+                dependencies = []
+                for row in cursor.fetchall():
+                    dep_dict = dict(row)
+                    
+                    # Parse analysis details
+                    try:
+                        analysis_json = dep_dict.get('analysis_details_json', '{}')
+                        analysis_details = json.loads(analysis_json) if analysis_json else {}
+                    except:
+                        analysis_details = {}
+                    
+                    dep_dict['analysis_details'] = analysis_details
+                    dependencies.append(dep_dict)
+                
+                # Get all session components
+                cursor.execute('''
+                    SELECT component_name, component_type, business_purpose, total_lines, total_fields
+                    FROM component_analysis 
+                    WHERE session_id = ?
+                    ORDER BY component_name
+                ''', (session_id,))
+                
+                components = [dict(row) for row in cursor.fetchall()]
+                
+                return {
+                    'dependencies': dependencies,
+                    'components': components,
+                    'summary': {
+                        'total_dependencies': len(dependencies),
+                        'total_components': len(components),
+                        'program_calls': len([d for d in dependencies if 'PROGRAM_CALL' in d['relationship_type']]),
+                        'file_operations': len([d for d in dependencies if 'FILE' in d['relationship_type']]),
+                        'db2_operations': len([d for d in dependencies if d['interface_type'] == 'DB2']),
+                        'cics_operations': len([d for d in dependencies if d['interface_type'] == 'CICS'])
+                    }
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting complete dependency data: {str(e)}")
+            return {'dependencies': [], 'components': [], 'summary': {}}
     def get_missing_dependencies_summary(self, session_id: str) -> Dict:
         """Get summary of missing dependencies"""
         try:
