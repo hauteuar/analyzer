@@ -6800,10 +6800,22 @@ function createProgramFlowView(sessionId) {
     .attr('class', 'flow-legend');
     // Create SVG with proper vertical tree dimensions
      const svg = d3.select(container)
-        .append('svg')
-        .attr('width', '1400px')
-        .attr('height', '1200px')
-        .attr('viewBox', '0 0 1400 1200');
+    .append('svg')
+    .attr('width', '1400px')
+    .attr('height', '1200px')
+    .attr('viewBox', '0 0 1400 1200')
+    .style('border', '1px solid #ddd')
+    .style('background', '#fafafa');
+
+// Add zoom container
+const zoomContainer = svg.append('g').attr('class', 'zoom-container');
+
+// Add zoom functionality
+addZoomAndPan(svg);
+
+// Move all drawing operations to zoomContainer instead of svg
+const defs = zoomContainer.append('defs');
+// ... rest of the drawing code uses zoomContainer instead of svg
 
     
     // Verify SVG was created
@@ -6813,7 +6825,7 @@ function createProgramFlowView(sessionId) {
         return;
     }
             // Add arrow markers
-            const defs = svg.append('defs');
+            //const defs = svg.append('defs');
             createArrowMarkers(defs);
             
             // Draw edges first
@@ -6856,7 +6868,67 @@ function createProgramFlowView(sessionId) {
         }
     
     
-        
+        function addZoomAndPan(svg) {
+    const zoom = d3.zoom()
+        .scaleExtent([0.5, 3])
+        .on('zoom', function(event) {
+            const { transform } = event;
+            svg.select('g.zoom-container').attr('transform', transform);
+        });
+    
+    svg.call(zoom);
+    
+    // Add zoom controls
+    const controls = d3.select(svg.node().parentNode)
+        .append('div')
+        .attr('class', 'zoom-controls')
+        .style('position', 'absolute')
+        .style('top', '10px')
+        .style('left', '10px')
+        .style('z-index', '100');
+    
+    controls.append('button')
+        .attr('class', 'zoom-btn')
+        .style('margin', '2px')
+        .style('padding', '5px 10px')
+        .style('background', '#667eea')
+        .style('color', 'white')
+        .style('border', 'none')
+        .style('border-radius', '4px')
+        .style('cursor', 'pointer')
+        .text('Zoom In')
+        .on('click', function() {
+            svg.transition().call(zoom.scaleBy, 1.2);
+        });
+    
+    controls.append('button')
+        .attr('class', 'zoom-btn')
+        .style('margin', '2px')
+        .style('padding', '5px 10px')
+        .style('background', '#667eea')
+        .style('color', 'white')
+        .style('border', 'none')
+        .style('border-radius', '4px')
+        .style('cursor', 'pointer')
+        .text('Zoom Out')
+        .on('click', function() {
+            svg.transition().call(zoom.scaleBy, 0.8);
+        });
+    
+    controls.append('button')
+        .attr('class', 'zoom-btn')
+        .style('margin', '2px')
+        .style('padding', '5px 10px')
+        .style('background', '#667eea')
+        .style('color', 'white')
+        .style('border', 'none')
+        .style('border-radius', '4px')
+        .style('cursor', 'pointer')
+        .text('Reset')
+        .on('click', function() {
+            svg.transition().call(zoom.transform, d3.zoomIdentity);
+        });
+}
     
 
 
@@ -8452,45 +8524,64 @@ function createHierarchicalLayout(vizData) {
     });
     
     // Position data nodes under their connected programs
-    let unconnectedIndex = 0;
-    allDataNodes.forEach((node) => {
-        let connectedProgram = null;
-        let programPosition = null;
-        
-        // Find which program connects to this node
-        for (const [progName, connections] of Object.entries(nodeConnections)) {
-            if (connections.includes(node.id)) {
-                connectedProgram = progName;
-                programPosition = layoutNodes.find(n => n.id === progName);
-                break;
-            }
+    // Position data nodes under their connected programs with better spacing
+let unconnectedIndex = 0;
+const usedPositions = new Set(); // Track used positions to avoid overlap
+
+allDataNodes.forEach((node) => {
+    let connectedProgram = null;
+    let programPosition = null;
+    
+    // Find which program connects to this node
+    for (const [progName, connections] of Object.entries(nodeConnections)) {
+        if (connections.includes(node.id)) {
+            connectedProgram = progName;
+            programPosition = layoutNodes.find(n => n.id === progName);
+            break;
         }
+    }
+    
+    let xPosition, yPosition;
+    if (programPosition) {
+        // Better spacing for files under programs
+        const siblingsCount = nodeConnections[connectedProgram].length;
+        const siblingIndex = nodeConnections[connectedProgram].indexOf(node.id);
         
-        let xPosition, yPosition;
-        if (programPosition) {
-            // Position under the connected program
-            const siblingsCount = nodeConnections[connectedProgram].length;
-            const siblingIndex = nodeConnections[connectedProgram].indexOf(node.id);
-            const offsetX = siblingsCount > 1 ? (siblingIndex - (siblingsCount - 1) / 2) * 110 : 0;
-            xPosition = programPosition.x + offsetX;
-            yPosition = dataY;
+        if (siblingsCount === 1) {
+            xPosition = programPosition.x;
+        } else if (siblingsCount === 2) {
+            xPosition = programPosition.x + (siblingIndex === 0 ? -80 : 80);
         } else {
-            // Position unconnected nodes to the right side
-            xPosition = svgWidth - 150 - (unconnectedIndex * 110);
-            yPosition = dataY;
-            unconnectedIndex++;
+            // For multiple files, spread them wider
+            const spacing = Math.min(120, 300 / siblingsCount);
+            const startX = programPosition.x - ((siblingsCount - 1) * spacing) / 2;
+            xPosition = startX + (siblingIndex * spacing);
         }
-        
-        layoutNodes.push({
-            ...node,
-            x: xPosition,
-            y: yPosition,
-            level: dataLevel,
-            width: 100,
-            height: 50,
-            connected_to_program: connectedProgram
-        });
+        yPosition = dataY;
+    } else {
+        // Position unconnected nodes in a separate column
+        xPosition = svgWidth - 200 - (unconnectedIndex % 2) * 120;
+        yPosition = dataY + Math.floor(unconnectedIndex / 2) * 60;
+        unconnectedIndex++;
+    }
+    
+    // Ensure no overlap by checking used positions
+    const posKey = `${Math.round(xPosition/10)*10}-${Math.round(yPosition/10)*10}`;
+    if (usedPositions.has(posKey)) {
+        xPosition += (usedPositions.size % 3) * 40; // Offset overlapping items
+    }
+    usedPositions.add(posKey);
+    
+    layoutNodes.push({
+        ...node,
+        x: xPosition,
+        y: yPosition,
+        level: dataLevel,
+        width: 100,
+        height: 50,
+        connected_to_program: connectedProgram
     });
+});
     
     // Create all edges including those to missing programs
     const layoutEdges = [];
@@ -8879,46 +8970,60 @@ if (programNodes.length > 0) {
     programNodes.sort((a, b) => (a.level || 0) - (b.level || 0));
     
     // Build the actual call chain from edges
-    const edges = data.flow_visualization.edges?.filter(e => e.type === 'program_call') || [];
-    const chainSteps = buildProgramCallChain(programNodes, edges);
+    // Enhanced program call chain with layout information
+const edges = data.flow_visualization.edges?.filter(e => e.type === 'program_call') || [];
+const chainSteps = buildProgramCallChainWithLayouts(programNodes, edges, currentSessionId);
+
+chainSteps.forEach((step, index) => {
+    const statusClass = step.target_status === 'missing' ? 'missing-program' : 'available-program';
+    const callIcon = getCallTypeIcon(step.call_type);
     
-    chainSteps.forEach((step, index) => {
-        const statusClass = step.target_status === 'missing' ? 'missing-program' : 'available-program';
-        const callIcon = getCallTypeIcon(step.call_type);
-        
-        html += `
-            <div class="program-chain-item ${statusClass}">
-                <div class="chain-sequence">#${index + 1}</div>
-                <div class="chain-flow-details">
-                    <div class="program-call-header">
-                        <span class="source-program">${step.source}</span>
-                        <span class="call-arrow">${callIcon} ${step.call_type}</span>
-                        <span class="target-program">${step.target}</span>
-                        ${step.target_status === 'missing' ? 
-                            '<span class="missing-indicator">❌ MISSING</span>' : 
-                            '<span class="available-indicator">✅ AVAILABLE</span>'}
-                    </div>
-                    
-                    ${step.variable_name ? `
-                        <div class="dynamic-call-info">
-                            <strong>Dynamic Call:</strong> Variable <code>${step.variable_name}</code>
-                            <div class="resolution-details">Resolved at runtime based on business logic</div>
+    html += `
+        <div class="program-chain-item ${statusClass}">
+            <div class="chain-sequence">#${index + 1}</div>
+            <div class="chain-flow-details">
+                <div class="program-call-header">
+                    <span class="source-program">${step.source}</span>
+                    <span class="call-arrow">${callIcon} ${step.call_type}</span>
+                    <span class="target-program">${step.target}</span>
+                    ${step.target_status === 'missing' ? 
+                        '<span class="missing-indicator">❌ MISSING</span>' : 
+                        '<span class="available-indicator">✅ AVAILABLE</span>'}
+                </div>
+                
+                ${step.layout_info && step.layout_info.length > 0 ? `
+                    <div class="layout-flow-info">
+                        <strong>Data Layouts Used:</strong>
+                        <div class="layout-details">
+                            ${step.layout_info.map(layout => `
+                                <div class="layout-item">
+                                    <span class="layout-name">${layout.layout_name}</span>
+                                    <span class="layout-fields">(${layout.key_fields.slice(0,3).join(', ')})${layout.key_fields.length > 3 ? '...' : ''}</span>
+                                    <span class="layout-purpose">${layout.usage_type}</span>
+                                </div>
+                            `).join('')}
                         </div>
-                    ` : ''}
-                    
-                    <div class="business-context">
-                        <strong>Level:</strong> ${step.source_level} → ${step.target_level}
-                        ${step.business_context ? `<br><strong>Context:</strong> ${step.business_context}` : ''}
                     </div>
-                    
-                    <div class="call-metadata">
-                        <span class="confidence-badge">Confidence: ${Math.round((step.confidence || 0.9) * 100)}%</span>
-                        <span class="data-passed-count">Level: ${step.target_level}</span>
+                ` : ''}
+                
+                ${step.file_operations && step.file_operations.length > 0 ? `
+                    <div class="file-operations-info">
+                        <strong>File Operations:</strong> ${step.file_operations.map(f => `${f.file_name} (${f.operation})`).join(', ')}
                     </div>
+                ` : ''}
+                
+                <div class="business-context">
+                    <strong>Call Flow:</strong> ${step.business_context || `${step.source} transfers control to ${step.target}`}
+                </div>
+                
+                <div class="call-metadata">
+                    <span class="confidence-badge">Confidence: ${Math.round((step.confidence || 0.9) * 100)}%</span>
+                    <span class="data-passed-count">Level: ${step.source_level} → ${step.target_level}</span>
                 </div>
             </div>
-        `;
-    });
+        </div>
+    `;
+});
     
     html += `
             </div>
@@ -9134,6 +9239,330 @@ if (missingPrograms.length > 0) {
     }
 }
 
+function buildProgramCallChainWithLayouts(programNodes, edges, sessionId) {
+    const chainSteps = [];
+    const processedEdges = new Set();
+    
+    edges.forEach(edge => {
+        if (edge.type !== 'program_call' || processedEdges.has(`${edge.from}-${edge.to}`)) return;
+        
+        const sourceProgram = programNodes.find(p => p.id === edge.from);
+        let targetProgram = programNodes.find(p => p.id === edge.to);
+        
+        if (!targetProgram) {
+            targetProgram = { id: edge.to, label: edge.to, status: 'missing', level: 999 };
+        }
+        
+        if (sourceProgram) {
+            const step = {
+                source: edge.from,
+                target: edge.to,
+                call_type: edge.call_type || 'CALL',
+                source_level: sourceProgram.level || 0,
+                target_level: targetProgram.level || 999,
+                target_status: targetProgram.status || 'missing',
+                variable_name: edge.variable_name,
+                confidence: edge.confidence_score || 0.9,
+                layout_info: [],
+                file_operations: [],
+                business_context: `${edge.from} calls ${edge.to} using ${edge.call_type || 'CALL'}`
+            };
+            
+            // Add layout information if available
+            if (edge.layout_data) {
+                step.layout_info = edge.layout_data;
+            }
+            
+            // Add file operations if available
+            if (edge.file_operations) {
+                step.file_operations = edge.file_operations;
+            }
+            
+            chainSteps.push(step);
+            processedEdges.add(`${edge.from}-${edge.to}`);
+        }
+    });
+    
+    return chainSteps.sort((a, b) => a.source_level - b.source_level);
+}
+
+function openProgramFlowModal(vizData, programName) {
+    const modal = document.createElement('div');
+    modal.className = 'program-flow-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0,0,0,0.8);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    `;
+    
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+        background: white;
+        width: 95vw;
+        height: 90vh;
+        border-radius: 10px;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    `;
+    
+    modalContent.innerHTML = `
+        <div class="modal-header" style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        ">
+            <h3>Program Flow Analysis: ${programName}</h3>
+            <div>
+                <button onclick="toggleFlowLayout()" style="
+                    background: rgba(255,255,255,0.2);
+                    border: none;
+                    color: white;
+                    padding: 8px 15px;
+                    margin-right: 10px;
+                    border-radius: 5px;
+                    cursor: pointer;
+                ">Switch Layout</button>
+                <button onclick="closeFlowModal()" style="
+                    background: rgba(255,255,255,0.2);
+                    border: none;
+                    color: white;
+                    padding: 8px 15px;
+                    border-radius: 5px;
+                    cursor: pointer;
+                    font-size: 18px;
+                ">✕</button>
+            </div>
+        </div>
+        <div style="display: flex; height: calc(100% - 70px);">
+            <div id="modalFlowVisualization" style="
+                flex: 1;
+                background: #f9f9f9;
+                position: relative;
+                overflow: hidden;
+            "></div>
+            <div id="modalFlowDetails" style="
+                width: 400px;
+                background: white;
+                border-left: 1px solid #ddd;
+                overflow-y: auto;
+                padding: 20px;
+            "></div>
+        </div>
+    `;
+    
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+    
+    // Render the flow in modal with better spacing
+    renderModalFlowVisualization(vizData, 'modalFlowVisualization');
+    renderModalFlowDetails(vizData, 'modalFlowDetails', programName);
+    
+    // Make modal closable by clicking outside
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeFlowModal();
+        }
+    });
+}
+
+function closeFlowModal() {
+    const modal = document.querySelector('.program-flow-modal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+window.closeFlowModal = closeFlowModal;
+
+function renderModalFlowVisualization(vizData, containerId) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+    
+    // Create larger SVG for modal
+    const svgWidth = 1600;
+    const svgHeight = 1000;
+    
+    const svg = d3.select(container)
+        .append('svg')
+        .attr('width', '100%')
+        .attr('height', '100%')
+        .attr('viewBox', `0 0 ${svgWidth} ${svgHeight}`)
+        .style('background', '#fafafa');
+    
+    // Add zoom functionality
+    const zoom = d3.zoom()
+        .scaleExtent([0.3, 2])
+        .on('zoom', function(event) {
+            zoomContainer.attr('transform', event.transform);
+        });
+    
+    svg.call(zoom);
+    
+    const zoomContainer = svg.append('g').attr('class', 'zoom-container');
+    
+    // Create better spaced layout for modal
+    const modalLayout = createModalHierarchicalLayout(vizData, svgWidth, svgHeight);
+    
+    // Add zoom controls
+    addModalZoomControls(container, svg, zoom);
+    
+    // Draw everything
+    const defs = zoomContainer.append('defs');
+    createArrowMarkers(defs);
+    
+    // Draw edges
+    const edges = zoomContainer.selectAll('.flow-edge')
+        .data(modalLayout.layoutEdges)
+        .enter()
+        .append('g')
+        .attr('class', 'flow-edge');
+    
+    edges.each(function(d) {
+        drawEnhancedEdge(d3.select(this), d);
+    });
+    
+    // Draw nodes
+    const nodes = zoomContainer.selectAll('.flow-node')
+        .data(modalLayout.layoutNodes)
+        .enter()
+        .append('g')
+        .attr('class', 'flow-node')
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+    
+    nodes.each(function(d) {
+        drawEnhancedCustomShape(d3.select(this), d);
+    });
+    
+    // Add interactivity
+    addEnhancedInteractivity(nodes, modalLayout.layoutEdges);
+}
+
+function createModalHierarchicalLayout(vizData, svgWidth, svgHeight) {
+    const nodes = vizData.nodes || [];
+    const edges = vizData.edges || [];
+    
+    const programNodes = nodes.filter(n => n.type === 'program');
+    const fileNodes = nodes.filter(n => n.type === 'file');
+    const db2Nodes = nodes.filter(n => n.type === 'db2_table');
+    
+    const layoutNodes = [];
+    const levelHeight = 200; // More space between levels
+    
+    // Build program hierarchy
+    const startingProgram = programNodes.find(n => n.is_starting_program) || programNodes[0];
+    const programLevels = buildProgramHierarchyWithMissing(programNodes, edges, startingProgram);
+    
+    // Position programs with more space
+    Object.entries(programLevels).forEach(([level, programs]) => {
+        const levelNum = parseInt(level);
+        const yPosition = 100 + (levelNum * levelHeight);
+        const spacing = Math.min(280, (svgWidth - 300) / Math.max(programs.length, 1));
+        const startX = (svgWidth - (programs.length - 1) * spacing) / 2;
+        
+        programs.forEach((program, index) => {
+            layoutNodes.push({
+                ...program,
+                x: startX + (index * spacing),
+                y: yPosition,
+                level: levelNum,
+                width: 140,
+                height: 70
+            });
+        });
+    });
+    
+    // Position files in multiple rows to avoid overlap
+    const maxProgramLevel = Math.max(...Object.keys(programLevels).map(Number));
+    const dataStartY = 100 + ((maxProgramLevel + 1) * levelHeight);
+    
+    const nodeConnections = {};
+    edges.forEach(edge => {
+        if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
+            if (!nodeConnections[edge.from]) {
+                nodeConnections[edge.from] = [];
+            }
+            nodeConnections[edge.from].push(edge.to);
+        }
+    });
+    
+    // Group files by rows to prevent overlap
+    const allDataNodes = [...fileNodes, ...db2Nodes];
+    const filesPerRow = Math.ceil(Math.sqrt(allDataNodes.length));
+    let fileIndex = 0;
+    
+    allDataNodes.forEach((node) => {
+        let connectedProgram = null;
+        let programPosition = null;
+        
+        for (const [progName, connections] of Object.entries(nodeConnections)) {
+            if (connections.includes(node.id)) {
+                connectedProgram = progName;
+                programPosition = layoutNodes.find(n => n.id === progName);
+                break;
+            }
+        }
+        
+        let xPosition, yPosition;
+        if (programPosition) {
+            const siblingsCount = nodeConnections[connectedProgram].length;
+            const siblingIndex = nodeConnections[connectedProgram].indexOf(node.id);
+            
+            if (siblingsCount <= 3) {
+                // Small groups: spread horizontally under program
+                const spacing = 150;
+                xPosition = programPosition.x - ((siblingsCount - 1) * spacing) / 2 + (siblingIndex * spacing);
+                yPosition = dataStartY;
+            } else {
+                // Large groups: arrange in grid pattern
+                const cols = Math.ceil(Math.sqrt(siblingsCount));
+                const row = Math.floor(siblingIndex / cols);
+                const col = siblingIndex % cols;
+                xPosition = programPosition.x - ((cols - 1) * 130) / 2 + (col * 130);
+                yPosition = dataStartY + (row * 80);
+            }
+        } else {
+            // Unconnected nodes: arrange in grid on the right
+            const row = Math.floor(fileIndex / 3);
+            const col = fileIndex % 3;
+            xPosition = svgWidth - 300 + (col * 120);
+            yPosition = dataStartY + (row * 80);
+            fileIndex++;
+        }
+        
+        layoutNodes.push({
+            ...node,
+            x: xPosition,
+            y: yPosition,
+            level: maxProgramLevel + 2,
+            width: 110,
+            height: 60,
+            connected_to_program: connectedProgram
+        });
+    });
+    
+    // Create edges
+    const layoutEdges = [];
+    edges.forEach(edge => {
+        const source = layoutNodes.find(n => n.id === edge.from);
+        const target = layoutNodes.find(n => n.id === edge.to);
+        if (source && target) {
+            layoutEdges.push({ ...edge, source, target });
+        }
+    });
+    
+    return { layoutNodes, layoutEdges };
+}
 // Add these helper functions for better interaction
 function viewLayoutFieldDetails(layoutName) {
     // Open a detailed modal for layout fields
