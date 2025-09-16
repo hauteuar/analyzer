@@ -4,11 +4,7 @@ from typing import Optional, List, Dict, Any
 import oracledb
 from mcp import types
 from mcp.server import Server
-from starlette.applications import Starlette
-from starlette.responses import StreamingResponse, JSONResponse
-from starlette.requests import Request
-from starlette.routing import Route
-import uvicorn
+from mcp.server.stdio import stdio_server
 
 # ---- Oracle Config ----
 ORACLE_USER = "your_user"
@@ -126,109 +122,16 @@ async def handle_list_prompts() -> list[types.Prompt]:
 
 
 # ----------------------
-# SSE Endpoint
-# ----------------------
-async def sse_endpoint(request: Request):
-    """SSE endpoint for MCP communication"""
-    
-    async def event_stream():
-        # Send initial connection event
-        yield f"data: {json.dumps({'type': 'connection', 'status': 'connected'})}\n\n"
-        
-        # Keep connection alive
-        try:
-            while True:
-                await asyncio.sleep(1)
-                yield f"data: {json.dumps({'type': 'ping', 'timestamp': asyncio.get_event_loop().time()})}\n\n"
-        except asyncio.CancelledError:
-            return
-    
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-        }
-    )
-
-
-# ----------------------
-# HTTP POST endpoint for MCP messages
-# ----------------------
-async def handle_mcp_request(request: Request):
-    """Handle MCP JSON-RPC requests via HTTP"""
-    try:
-        message = await request.json()
-        method = message.get("method", "")
-        
-        # Handle initialize method
-        if method == "initialize":
-            response_data = {
-                "jsonrpc": "2.0",
-                "id": message.get("id"),
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {},
-                        "resources": {},
-                        "prompts": {}
-                    },
-                    "serverInfo": {
-                        "name": "oracle-db",
-                        "version": "1.0.0"
-                    }
-                }
-            }
-            return JSONResponse(content=response_data)
-        
-        # Handle initialized notification
-        elif method == "notifications/initialized":
-            response_data = {
-                "jsonrpc": "2.0",
-                "result": {}
-            }
-            return JSONResponse(content=response_data)
-        
-        # Handle other methods through MCP server
-        else:
-            from mcp.server.session import ServerSession
-            from mcp.shared.session import RequestHandlers
-            
-            # Create a simple transport for HTTP
-            session = ServerSession(server, RequestHandlers())
-            
-            # Process through MCP server
-            response = await session.handle_message(message)
-            return JSONResponse(content=response)
-        
-    except Exception as e:
-        error_response = {
-            "jsonrpc": "2.0",
-            "id": message.get("id", None) if 'message' in locals() else None,
-            "error": {"code": -32603, "message": str(e)}
-        }
-        return JSONResponse(content=error_response, status_code=500)
-
-
-# ----------------------
-# Run MCP Server (HTTP/SSE)
+# Run MCP Server (stdio)
 # ----------------------
 async def main() -> None:
-    app = Starlette(
-        routes=[
-            Route("/events", endpoint=sse_endpoint, methods=["GET"]),  # Changed to /events
-            Route("/mcp", endpoint=handle_mcp_request, methods=["POST"]),
-            Route("/", endpoint=lambda request: {"status": "MCP Oracle Server Running"}, methods=["GET"]),  # Health check
-        ]
-    )
-    
-    config = uvicorn.Config(app, host="0.0.0.0", port=5300, log_level="info")
-    server_instance = uvicorn.Server(config)
-    await server_instance.serve()
+    # Run with stdio transport (standard for MCP)
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(
+            read_stream,
+            write_stream,
+            server.create_initialization_options()
+        )
 
 
 if __name__ == "__main__":
