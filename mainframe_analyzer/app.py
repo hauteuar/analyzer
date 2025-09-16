@@ -2806,7 +2806,6 @@ def assign_node_levels(program_chain, starting_program):
     return node_levels
 
 @app.route('/api/program-flow-visualization/<session_id>/<program_name>', methods=['GET'])
-
 def get_program_flow_visualization(session_id, program_name):
     """FINAL FIXED: Complete program flow using existing analyzed dependencies"""
     try:
@@ -2886,6 +2885,10 @@ def build_final_flow_visualization(session_id, starting_program, dependency_data
     programs_to_process = [(starting_program, 0)]
     processed = set()
     
+    # FIXED: Create unique node IDs for files and DB2 tables to avoid duplicates
+    file_node_counter = {}
+    db2_node_counter = {}
+    
     while programs_to_process and len(processed) < 50:
         current_program, depth = programs_to_process.pop(0)
         
@@ -2928,23 +2931,35 @@ def build_final_flow_visualization(session_id, starting_program, dependency_data
                 if target.upper() in uploaded_programs and depth < 5:
                     programs_to_process.append((target, depth + 1))
             
-            # File operations
+            # File operations - FIXED: Create proper node structure
             elif 'FILE' in rel_type or interface in ['FILE_SYSTEM', 'CICS']:
+                file_key = f"{target}_{current_program}"
+                if file_key not in file_node_counter:
+                    file_node_counter[file_key] = len(file_node_counter)
+                
                 file_info = {
                     'file_name': target,
-                    'operations': analysis.get('operations', []),
+                    'unique_id': f"FILE_{target}_{file_node_counter[file_key]}",
+                    'operations': analysis.get('operations', ['READ']),
                     'io_direction': analysis.get('io_direction', 'UNKNOWN'),
                     'interface_type': interface,
-                    'has_layout_resolution': analysis.get('layout_resolved', False)
+                    'has_layout_resolution': analysis.get('layout_resolved', False),
+                    'connected_to_program': current_program
                 }
                 program_info['file_operations'].append(file_info)
             
-            # DB2 operations
+            # DB2 operations - FIXED: Create proper node structure
             elif interface == 'DB2':
+                db2_key = f"{target}_{current_program}"
+                if db2_key not in db2_node_counter:
+                    db2_node_counter[db2_key] = len(db2_node_counter)
+                
                 db2_info = {
                     'table_name': target,
+                    'unique_id': f"DB2_{target}_{db2_node_counter[db2_key]}",
                     'sql_operation': analysis.get('sql_operation', 'UNKNOWN'),
-                    'io_direction': analysis.get('io_direction', 'UNKNOWN')
+                    'io_direction': analysis.get('io_direction', 'UNKNOWN'),
+                    'connected_to_program': current_program
                 }
                 program_info['db2_operations'].append(db2_info)
         
@@ -2995,18 +3010,17 @@ def build_final_flow_visualization(session_id, starting_program, dependency_data
             }
             flow_viz['program_edges'].append(edge)
         
-        # File nodes and edges
+        # FIXED: File nodes and edges with proper connections
         for i, file_op in enumerate(program_info['file_operations']):
-            file_node_id = f"FILE_{file_op['file_name']}_{program_name}_{i}"
-            
             file_node = {
-                'id': file_node_id,
+                'id': file_op['unique_id'],
                 'label': file_op['file_name'],
                 'type': 'file',
                 'interface_type': file_op['interface_type'],
                 'io_direction': file_op['io_direction'],
                 'operations': file_op['operations'],
                 'has_layout_resolution': file_op['has_layout_resolution'],
+                'connected_to_program': program_name,
                 'x': 80 + (level * 200) + (i * 130),
                 'y': 300,
                 'width': 120,
@@ -3016,7 +3030,7 @@ def build_final_flow_visualization(session_id, starting_program, dependency_data
             
             file_edge = {
                 'from': program_name,
-                'to': file_node_id,
+                'to': file_op['unique_id'],
                 'type': 'file_operation',
                 'io_direction': file_op['io_direction'],
                 'operations': file_op['operations'],
@@ -3024,16 +3038,15 @@ def build_final_flow_visualization(session_id, starting_program, dependency_data
             }
             flow_viz['file_edges'].append(file_edge)
         
-        # DB2 nodes and edges
+        # FIXED: DB2 nodes and edges with proper connections
         for i, db2_op in enumerate(program_info['db2_operations']):
-            db2_node_id = f"DB2_{db2_op['table_name']}_{program_name}_{i}"
-            
             db2_node = {
-                'id': db2_node_id,
+                'id': db2_op['unique_id'],
                 'label': db2_op['table_name'],
                 'type': 'db2_table',
                 'sql_operation': db2_op['sql_operation'],
                 'io_direction': db2_op['io_direction'],
+                'connected_to_program': program_name,
                 'x': 80 + (level * 200) + (i * 130),
                 'y': 400,
                 'width': 120,
@@ -3043,7 +3056,7 @@ def build_final_flow_visualization(session_id, starting_program, dependency_data
             
             db2_edge = {
                 'from': program_name,
-                'to': db2_node_id,
+                'to': db2_op['unique_id'],
                 'type': 'db2_operation',
                 'sql_operation': db2_op['sql_operation'],
                 'label': f"DB2 {db2_op['sql_operation']}"

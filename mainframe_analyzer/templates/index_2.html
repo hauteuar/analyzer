@@ -6915,41 +6915,68 @@ function createHierarchicalLayout(vizData) {
         });
     });
     
-    // Level 2: Files and DB2 (non-overlapping)
+    // FIXED Level 2: Files and DB2 with proper connections based on EDGES, not metadata
     const level2Y = level1Y + levelHeight;
     const allDataNodes = [...fileNodes, ...db2Nodes];
     
-    // Group by connected program to avoid overlap
-    const grouped = {};
-    allDataNodes.forEach(node => {
-        const connectedProg = node.connected_to_program || 'unassigned';
-        if (!grouped[connectedProg]) grouped[connectedProg] = [];
-        grouped[connectedProg].push(node);
+    // FIXED: Group data nodes by their ACTUAL connections from edges
+    const nodeConnections = {};
+    edges.forEach(edge => {
+        if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
+            const sourceProgram = edge.from;
+            const targetData = edge.to;
+            
+            if (!nodeConnections[sourceProgram]) {
+                nodeConnections[sourceProgram] = [];
+            }
+            nodeConnections[sourceProgram].push(targetData);
+        }
     });
     
-    let currentX = 100;
-    Object.entries(grouped).forEach(([progName, nodes]) => {
-        const progPosition = layoutNodes.find(n => n.id === progName);
-        const baseX = progPosition ? progPosition.x : currentX;
+    // Position data nodes under their connected programs
+    let unconnectedIndex = 0;
+    allDataNodes.forEach((node) => {
+        // Find which program connects to this node
+        let connectedProgram = null;
+        let programPosition = null;
         
-        nodes.forEach((node, index) => {
-            layoutNodes.push({
-                ...node,
-                x: baseX - 50 + (index * 120), // Spread horizontally under parent
-                y: level2Y,
-                level: 2,
-                width: 100,
-                height: 50
-            });
+        for (const [progName, connections] of Object.entries(nodeConnections)) {
+            if (connections.includes(node.id)) {
+                connectedProgram = progName;
+                programPosition = layoutNodes.find(n => n.id === progName);
+                break;
+            }
+        }
+        
+        let xPosition, yPosition;
+        if (programPosition) {
+            // Position under the connected program
+            const siblingsCount = nodeConnections[connectedProgram].length;
+            const siblingIndex = nodeConnections[connectedProgram].indexOf(node.id);
+            xPosition = programPosition.x - 50 + (siblingIndex * 120);
+            yPosition = level2Y;
+        } else {
+            // Position unconnected nodes to the side
+            xPosition = 100 + (unconnectedIndex * 120);
+            yPosition = level2Y + 60;
+            unconnectedIndex++;
+        }
+        
+        layoutNodes.push({
+            ...node,
+            x: xPosition,
+            y: yPosition,
+            level: 2,
+            width: 100,
+            height: 50,
+            connected_to_program: connectedProgram
         });
-        
-        currentX += (nodes.length * 120) + 50;
     });
     
-    // Create CLEAN edges (no overlapping mess)
+    // Create CLEAN edges based on actual edge data
     const layoutEdges = [];
     
-    // Only add direct program calls
+    // Add program call edges
     directCalls.forEach(edge => {
         const source = layoutNodes.find(n => n.id === edge.from);
         const target = layoutNodes.find(n => n.id === edge.to);
@@ -6962,20 +6989,19 @@ function createHierarchicalLayout(vizData) {
         }
     });
     
-    // Add file/DB2 connections only to their direct parent
-    allDataNodes.forEach(dataNode => {
-        const parentProg = layoutNodes.find(n => n.id === dataNode.connected_to_program);
-        const dataNodeLayout = layoutNodes.find(n => n.id === dataNode.id);
-        
-        if (parentProg && dataNodeLayout) {
-            layoutEdges.push({
-                from: parentProg.id,
-                to: dataNode.id,
-                type: dataNode.type === 'db2_table' ? 'db2_operation' : 'file_operation',
-                io_direction: 'read',
-                source: parentProg,
-                target: dataNodeLayout
-            });
+    // FIXED: Add file/DB2 edges based on actual edge data
+    edges.forEach(edge => {
+        if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
+            const source = layoutNodes.find(n => n.id === edge.from);
+            const target = layoutNodes.find(n => n.id === edge.to);
+            
+            if (source && target) {
+                layoutEdges.push({
+                    ...edge,
+                    source,
+                    target
+                });
+            }
         }
     });
     
@@ -8522,47 +8548,50 @@ function getSampleFlowData() {
             </div>
             <div class="flow-statistics">
                 <div class="stat-item">
-                    <span class="stat-value">${vizData.statistics.program_chain_steps}</span>
+                    <span class="stat-value">${vizData.statistics?.program_chain_steps || 0}</span>
                     <span class="stat-label">Program Steps</span>
                 </div>
                 <div class="stat-item">
-                    <span class="stat-value">${vizData.statistics.file_operations}</span>
+                    <span class="stat-value">${vizData.statistics?.file_operations || 0}</span>
                     <span class="stat-label">File Operations</span>
                 </div>
                 <div class="stat-item">
-                    <span class="stat-value">${vizData.statistics.db2_operations}</span>
+                    <span class="stat-value">${vizData.statistics?.db2_operations || 0}</span>
                     <span class="stat-label">DB2 Operations</span>
                 </div>
                 <div class="stat-item">
-                    <span class="stat-value">${vizData.statistics.layout_associations}</span>
+                    <span class="stat-value">${vizData.statistics?.layout_associations || 0}</span>
                     <span class="stat-label">Layout Links</span>
                 </div>
             </div>
         </div>
     `;
     
-    // Enhanced Program Call Chain with Layout Information
-    if (vizData.visualization_data.program_chain_summary && 
-        vizData.visualization_data.program_chain_summary.length > 0) {
+    // Enhanced Program Call Chain with Layout Information - FIXED
+    const programChain = flowAnalysis.program_chain || [];
+    if (programChain.length > 0) {
         html += `
             <div class="program-chain-section">
                 <h3>📞 Program Call Chain with Data Flow</h3>
                 <div class="program-chain-list">
         `;
         
-        vizData.visualization_data.program_chain_summary.forEach((step, index) => {
-            const statusClass = step.status === 'MISSING' ? 'missing-program' : 'available-program';
-            const callIcon = getCallTypeIcon(step.call_type);
+        programChain.forEach((step, index) => {
+            const statusClass = step.status === 'MISSING' || step.is_missing ? 'missing-program' : 'available-program';
+            const callIcon = getCallTypeIcon(step.call_type || 'CALL');
+            const confidence = step.confidence || 0.8;
             
             html += `
                 <div class="program-chain-item ${statusClass}">
-                    <div class="chain-sequence">#${step.sequence}</div>
+                    <div class="chain-sequence">#${step.sequence || index + 1}</div>
                     <div class="chain-flow-details">
                         <div class="program-call-header">
                             <span class="source-program">${step.source_program}</span>
-                            <span class="call-arrow">${callIcon} ${step.call_type}</span>
+                            <span class="call-arrow">${callIcon} ${step.call_type || 'CALL'}</span>
                             <span class="target-program">${step.target_program}</span>
-                            ${step.status === 'MISSING' ? '<span class="missing-indicator">❌ MISSING</span>' : '<span class="available-indicator">✅ AVAILABLE</span>'}
+                            ${statusClass === 'missing-program' ? 
+                                '<span class="missing-indicator">❌ MISSING</span>' : 
+                                '<span class="available-indicator">✅ AVAILABLE</span>'}
                         </div>
                         
                         ${step.variable_name ? `
@@ -8579,121 +8608,69 @@ function getSampleFlowData() {
                         ` : ''}
                         
                         <div class="call-metadata">
-                            <span class="confidence-badge">Confidence: ${Math.round(step.confidence * 100)}%</span>
+                            <span class="confidence-badge">Confidence: ${Math.round(confidence * 100)}%</span>
                             <span class="data-passed-count">Fields Passed: ${step.data_passed_count || 0}</span>
                         </div>
                     </div>
                 </div>
             `;
-        });
-        
-        html += `
-                </div>
-            </div>
-        `;
-    }
+        }
     
-    // Enhanced Layout Associations Section
-    if (vizData.visualization_data.layout_associations && 
-        vizData.visualization_data.layout_associations.length > 0) {
-        html += `
-            <div class="layout-associations-section">
-                <h3>📋 Record Layout Flow & Data Structures</h3>
-                <div class="layout-flow-grid">
-        `;
-        
-        // Group layouts by program for better organization
-        const layoutsByProgram = {};
-        vizData.visualization_data.layout_associations.forEach(layout => {
-            const program = layout.program_name || 'Unknown';
-            if (!layoutsByProgram[program]) {
-                layoutsByProgram[program] = [];
-            }
-            layoutsByProgram[program].push(layout);
-        });
-        
-        Object.entries(layoutsByProgram).forEach(([program, layouts]) => {
-            html += `
-                <div class="program-layout-group">
-                    <h4 class="program-header">🏗️ ${program}</h4>
-                    <div class="layouts-list">
-            `;
-            
-            layouts.forEach(layout => {
-                const statusClass = layout.has_fields ? 'layout-complete' : 'layout-partial';
-                html += `
-                    <div class="layout-item ${statusClass}">
-                        <div class="layout-header">
-                            <span class="layout-name">${layout.layout_name}</span>
-                            <span class="layout-type-badge">${layout.layout_type || 'RECORD'}</span>
-                            <span class="field-count">${layout.fields_count || 0} fields</span>
-                        </div>
-                        <div class="layout-details">
-                            <div class="layout-purpose">${layout.business_purpose || 'Data structure definition'}</div>
-                            ${layout.usage_context ? `
-                                <div class="usage-context">
-                                    <strong>Usage:</strong> ${layout.usage_context}
-                                </div>
-                            ` : ''}
-                            ${layout.connected_programs && layout.connected_programs.length > 0 ? `
-                                <div class="connected-programs">
-                                    <strong>Used by:</strong> ${layout.connected_programs.join(', ')}
-                                </div>
-                            ` : ''}
-                        </div>
-                        <div class="layout-actions">
-                            <button class="btn-sm" onclick="viewLayoutFields('${layout.layout_name}')">View Fields</button>
-                            <button class="btn-sm" onclick="traceLayoutUsage('${layout.layout_name}')">Trace Usage</button>
-                        </div>
-                    </div>
-                `;
-            });
-            
-            html += `
-                    </div>
-                </div>
-            `;
-        });
-        
-        html += `
-                </div>
-            </div>
-        `;
-    }
-    
-    // Enhanced Field Flow Section
-    if (Object.keys(vizData.visualization_data.field_flows).length > 0) {
+    // FIXED: Enhanced Field Flow Section - handle missing data structure
+    const fieldFlows = flowAnalysis.field_flows || vizData.field_flows || {};
+    if (Object.keys(fieldFlows).length > 0) {
         html += `
             <div class="field-flows-section">
                 <h3>🔄 Field Data Flow Analysis</h3>
                 <div class="field-flows-grid">
         `;
         
-        Object.entries(vizData.visualization_data.field_flows).forEach(([fieldName, flows]) => {
+        Object.entries(fieldFlows).forEach(([fieldName, flows]) => {
+            const flowArray = Array.isArray(flows) ? flows : [flows];
             html += `
                 <div class="field-flow-card">
                     <div class="field-header">
                         <h4 class="field-name">📊 ${fieldName}</h4>
-                        <span class="flow-steps-count">${flows.length} flow steps</span>
+                        <span class="flow-steps-count">${flowArray.length} flow steps</span>
                     </div>
                     <div class="field-flow-path">
             `;
             
-            flows.forEach((flow, index) => {
-                const isLast = index === flows.length - 1;
+            flowArray.forEach((flow, index) => {
+                const isLast = index === flowArray.length - 1;
+                const transformationType = flow.transformation_details?.transformation_type || 'DIRECT_PASS';
+                const hasBusinessLogic = flow.transformation_details?.business_logic_applied?.length > 0;
+                const hasValidation = flow.transformation_details?.validation_rules?.length > 0;
+                
                 html += `
                     <div class="flow-step">
-                        <div class="step-program">${flow.from}</div>
-                        ${flow.source_layout ? `<div class="step-layout">📋 ${flow.source_layout}</div>` : ''}
-                        <div class="step-transformation">
-                            ${flow.transformation || 'Direct transfer'}
+                        <div class="step-header">
+                            <div class="step-program">${flow.from || flow.source_program}</div>
+                            <div class="step-arrow">→</div>
+                            <div class="step-program">${flow.to || flow.target_program}</div>
                         </div>
-                        ${!isLast ? '<div class="flow-arrow">→</div>' : ''}
+                        ${flow.source_layouts && flow.source_layouts.length > 0 ? `
+                            <div class="step-layout">
+                                📋 From: ${flow.source_layouts.map(l => l.layout_name || l).join(', ')}
+                            </div>
+                        ` : ''}
+                        ${flow.target_layouts && flow.target_layouts.length > 0 ? `
+                            <div class="step-layout">
+                                📋 To: ${flow.target_layouts.map(l => l.layout_name || l).join(', ')}
+                            </div>
+                        ` : ''}
+                        <div class="step-transformation">
+                            <span class="transformation-type ${transformationType.toLowerCase()}">${transformationType}</span>
+                            ${flow.transformation || flow.transformation_logic || 'Direct transfer'}
+                        </div>
+                        ${hasBusinessLogic || hasValidation ? `
+                            <div class="transformation-indicators">
+                                ${hasBusinessLogic ? '<span class="indicator business-logic">📊 Business Logic</span>' : ''}
+                                ${hasValidation ? '<span class="indicator validation">✅ Validation</span>' : ''}
+                            </div>
+                        ` : ''}
                     </div>
                 `;
-                if (!isLast) {
-                    html += '<div class="flow-connector">→</div>';
-                }
             });
             
             html += `
@@ -8716,59 +8693,82 @@ function getSampleFlowData() {
         `;
     }
     
-    // File Operations with Layout Connections
-    const fileOpsCount = vizData.visualization_data.nodes.filter(n => n.type === 'file').length;
-    if (fileOpsCount > 0) {
+    // FIXED: File Operations with Layout Connections - handle both flowAnalysis and vizData
+    const fileOperations = flowAnalysis.file_operations || vizData.file_operations || [];
+    if (fileOperations.length > 0) {
         html += `
             <div class="file-operations-section">
-                <h3>📁 File Operations & Data Access (${fileOpsCount})</h3>
+                <h3>📁 File Operations & Data Access (${fileOperations.length})</h3>
                 <div class="file-operations-grid">
         `;
         
-        vizData.visualization_data.nodes.filter(n => n.type === 'file').forEach(fileNode => {
-            const statusClass = fileNode.has_layout ? 'has-layout' : 'no-layout';
-            const interfaceIcon = fileNode.interface === 'CICS' ? '🏦' : '📁';
+        fileOperations.forEach(fileOp => {
+            const statusClass = fileOp.has_layout_resolution || fileOp.has_layout ? 'has-layout' : 'no-layout';
+            const interfaceIcon = fileOp.interface_type === 'CICS' || fileOp.interface === 'CICS' ? '🏦' : '📁';
+            const operations = fileOp.operations || [];
+            const layoutConnections = fileOp.layout_connections || fileOp.layout_details || [];
+            const fieldsInvolved = fileOp.fields_involved || [];
             
             html += `
                 <div class="file-operation-card ${statusClass}">
                     <div class="file-header">
                         <div class="file-info">
                             <span class="file-icon">${interfaceIcon}</span>
-                            <span class="file-name">${fileNode.label}</span>
-                            <span class="io-direction-badge ${fileNode.io_direction.toLowerCase()}">${fileNode.io_direction}</span>
+                            <span class="file-name">${fileOp.file_name || fileOp.name}</span>
+                            <span class="io-direction-badge ${(fileOp.io_direction || 'unknown').toLowerCase()}">${fileOp.io_direction || 'UNKNOWN'}</span>
                         </div>
-                        ${fileNode.has_layout ? '<span class="layout-indicator">✅ Has Layout</span>' : '<span class="no-layout-indicator">⚠️ No Layout</span>'}
+                        ${fileOp.has_layout_resolution || fileOp.has_layout ? 
+                            '<span class="layout-indicator">✅ Has Layout</span>' : 
+                            '<span class="no-layout-indicator">⚠️ No Layout</span>'}
                     </div>
                     
                     <div class="file-details">
                         <div class="connected-program">
-                            <strong>Connected to:</strong> ${fileNode.connected_to_program}
+                            <strong>Connected to:</strong> 
+                            <span class="program-link" onclick="showProgramDetails('${fileOp.program_name || fileOp.connected_program}')">${fileOp.program_name || fileOp.connected_program || 'Unknown'}</span>
                         </div>
                         <div class="file-operations">
-                            <strong>Operations:</strong> ${fileNode.operations.join(', ') || 'READ/WRITE'}
+                            <strong>Operations:</strong> ${operations.join(', ') || 'READ/WRITE'}
                         </div>
                         <div class="interface-type">
-                            <strong>Interface:</strong> ${fileNode.interface}
+                            <strong>Interface:</strong> ${fileOp.interface_type || fileOp.interface || 'FILE'}
                         </div>
                         
-                        ${fileNode.associated_layouts && fileNode.associated_layouts.length > 0 ? `
-                            <div class="associated-layouts">
-                                <strong>Associated Layouts:</strong>
-                                <div class="layout-tags">
-                                    ${fileNode.associated_layouts.map(layout => 
-                                        `<span class="layout-tag" onclick="viewLayoutFields('${layout}')">${layout}</span>`
+                        ${layoutConnections.length > 0 ? `
+                            <div class="layout-connections">
+                                <strong>Layout Connections:</strong>
+                                <div class="layout-connection-list">
+                                    ${layoutConnections.map(layout => `
+                                        <div class="layout-connection-item">
+                                            <span class="layout-name" onclick="viewLayoutFieldDetails('${layout.layout_name}')">${layout.layout_name}</span>
+                                            <span class="layout-fields">(${layout.fields_count || layout.key_fields?.length || 0} fields)</span>
+                                            ${layout.business_purpose ? `<div class="layout-purpose-small">${layout.business_purpose}</div>` : ''}
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                        
+                        ${fieldsInvolved.length > 0 ? `
+                            <div class="fields-involved">
+                                <strong>Key Fields:</strong>
+                                <div class="field-tags-small">
+                                    ${fieldsInvolved.slice(0, 5).map(field => 
+                                        `<span class="field-tag-small">${field}</span>`
                                     ).join('')}
+                                    ${fieldsInvolved.length > 5 ? `<span class="more-fields-small">+${fieldsInvolved.length - 5} more</span>` : ''}
                                 </div>
                             </div>
                         ` : ''}
                     </div>
                     
                     <div class="file-actions">
-                        <button class="btn-sm" onclick="analyzeFileUsage('${fileNode.label}')">Analyze Usage</button>
-                        ${fileNode.has_layout ? 
-                            `<button class="btn-sm" onclick="viewFileLayout('${fileNode.label}')">View Layout</button>` : 
-                            `<button class="btn-sm" onclick="suggestLayoutCreation('${fileNode.label}')">Create Layout</button>`
+                        <button class="btn-sm" onclick="analyzeFileUsage('${fileOp.file_name || fileOp.name}')">Analyze Usage</button>
+                        ${fileOp.has_layout_resolution || fileOp.has_layout ? 
+                            `<button class="btn-sm" onclick="viewFileLayoutConnections('${fileOp.file_name || fileOp.name}')">View Layouts</button>` : 
+                            `<button class="btn-sm" onclick="suggestLayoutCreation('${fileOp.file_name || fileOp.name}')">Create Layout</button>`
                         }
+                        <button class="btn-sm" onclick="traceFileDataFlow('${fileOp.file_name || fileOp.name}')">Trace Data Flow</button>
                     </div>
                 </div>
             `;
@@ -8780,39 +8780,44 @@ function getSampleFlowData() {
         `;
     }
     
-    // Missing Programs with Impact Analysis
-    if (vizData.visualization_data.missing_programs && 
-        vizData.visualization_data.missing_programs.length > 0) {
+    // FIXED: Missing Programs with Impact Analysis - handle both data sources
+    const missingPrograms = flowAnalysis.missing_programs || vizData.missing_programs || [];
+    if (missingPrograms.length > 0) {
         html += `
             <div class="missing-programs-section">
-                <h3>⚠️ Missing Programs Impact (${vizData.visualization_data.missing_programs.length})</h3>
+                <h3>⚠️ Missing Programs Impact (${missingPrograms.length})</h3>
                 <div class="missing-programs-grid">
         `;
         
-        vizData.visualization_data.missing_programs.forEach(program => {
+        missingPrograms.forEach(program => {
+            const programName = program.program_name || program.name || program;
+            const calledBy = program.called_by || 'Unknown';
+            const sequence = program.sequence || 0;
+            const callType = program.call_type || 'CALL';
+            
             html += `
                 <div class="missing-program-card">
                     <div class="missing-header">
                         <span class="missing-icon">❌</span>
-                        <span class="program-name">${program.program_name}</span>
-                        <span class="call-type-badge">${program.call_type}</span>
+                        <span class="program-name">${programName}</span>
+                        <span class="call-type-badge">${callType}</span>
                     </div>
                     <div class="missing-details">
                         <div class="called-by">
-                            <strong>Called by:</strong> ${program.called_by}
+                            <strong>Called by:</strong> ${calledBy}
                         </div>
                         <div class="sequence-info">
-                            <strong>At step:</strong> #${program.sequence}
+                            <strong>At step:</strong> #${sequence}
                         </div>
                         <div class="impact-description">
-                            This missing program blocks further flow analysis and may prevent complete understanding of data transformations.
+                            This missing program blocks further flow analysis and may prevent complete understanding of data transformations and layout usage.
                         </div>
                     </div>
                     <div class="missing-actions">
-                        <button class="impact-btn" onclick="showMissingProgramImpact('${currentSessionId}', '${program.program_name}')">
+                        <button class="impact-btn" onclick="showMissingProgramImpact('${currentSessionId}', '${programName}')">
                             Analyze Impact
                         </button>
-                        <button class="upload-btn" onclick="promptProgramUpload('${program.program_name}')">
+                        <button class="upload-btn" onclick="promptProgramUpload('${programName}')">
                             Upload Program
                         </button>
                     </div>
@@ -8827,8 +8832,9 @@ function getSampleFlowData() {
                         <h4>🎯 Recommendations</h4>
                         <ul>
                             <li>Upload the missing programs to complete flow analysis</li>
-                            <li>Each missing program may contain additional calls and data transformations</li>
-                            <li>Layout associations may become available once programs are uploaded</li>
+                            <li>Each missing program may contain additional layout definitions and field transformations</li>
+                            <li>Layout associations become more accurate with complete program set</li>
+                            <li>Data flow tracing improves significantly with all programs available</li>
                         </ul>
                     </div>
                 </div>
@@ -8837,7 +8843,245 @@ function getSampleFlowData() {
     }
     
     detailsContainer.innerHTML = html;
+});
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    // FIXED: Layout Associations Section - properly handle the data structure
+    const layoutAssociations = flowAnalysis.layout_associations || vizData.layout_associations || [];
+    if (layoutAssociations.length > 0) {
+        html += `
+            <div class="layout-associations-section">
+                <h3>📋 Record Layout Flow & Data Structures</h3>
+                <div class="layout-flow-grid">
+        `;
+        
+        // Group layouts by program for better organization
+        const layoutsByProgram = {};
+        layoutAssociations.forEach(layout => {
+            const program = layout.program_name || 'Unknown';
+            if (!layoutsByProgram[program]) {
+                layoutsByProgram[program] = [];
+            }
+            layoutsByProgram[program].push(layout);
+        });
+        
+        Object.entries(layoutsByProgram).forEach(([program, layouts]) => {
+            html += `
+                <div class="program-layout-group">
+                    <h4 class="program-header">🏗️ ${program}</h4>
+                    <div class="layouts-list">
+            `;
+            
+            layouts.forEach(layout => {
+                const statusClass = layout.has_fields || layout.fields_count > 0 ? 'layout-complete' : 'layout-partial';
+                const fieldCount = layout.fields_count || layout.actual_field_count || 0;
+                const usageContext = layout.usage_context || 'Data structure processing';
+                const connectedPrograms = layout.connected_programs || [];
+                
+                html += `
+                    <div class="layout-item ${statusClass}">
+                        <div class="layout-header">
+                            <span class="layout-name">${layout.layout_name}</span>
+                            <span class="layout-type-badge">${layout.layout_type || layout.record_classification || 'RECORD'}</span>
+                            <span class="field-count">${fieldCount} fields</span>
+                        </div>
+                        <div class="layout-details">
+                            <div class="layout-purpose">${layout.business_purpose || layout.friendly_name || 'Data structure definition'}</div>
+                            <div class="usage-context">
+                                <strong>Usage:</strong> ${usageContext}
+                            </div>
+                            ${connectedPrograms.length > 0 ? `
+                                <div class="connected-programs">
+                                    <strong>Also used by:</strong> ${connectedPrograms.join(', ')}
+                                </div>
+                            ` : ''}
+                            ${layout.key_fields && layout.key_fields.length > 0 ? `
+                                <div class="key-fields">
+                                    <strong>Key fields:</strong> 
+                                    <div class="field-tags">
+                                        ${layout.key_fields.slice(0, 3).map(field => 
+                                            `<span class="field-tag" title="${field.business_purpose || ''}">${field.field_name}</span>`
+                                        ).join('')}
+                                        ${layout.key_fields.length > 3 ? `<span class="more-fields">+${layout.key_fields.length - 3} more</span>` : ''}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div class="layout-actions">
+                            <button class="btn-sm" onclick="viewLayoutFields('${layout.layout_name}')">View Fields</button>
+                            <button class="btn-sm" onclick="traceLayoutUsage('${layout.layout_name}')">Trace Usage</button>
+                            ${fieldCount > 0 ? 
+                                `<button class="btn-sm" onclick="viewLayoutFieldDetails('${layout.layout_name}')">Field Details</button>` : 
+                                ''}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+                function createHierarchicalLayout(vizData) {
+    const nodes = vizData.nodes || [];
+    const edges = vizData.edges || [];
+    
+    if (!nodes.length) {
+        throw new Error('No nodes provided for layout');
+    }
+    
+    const programNodes = nodes.filter(n => n.type === 'program');
+    const fileNodes = nodes.filter(n => n.type === 'file');
+    const db2Nodes = nodes.filter(n => n.type === 'db2_table');
+    
+    // Create SIMPLE vertical hierarchy - only 3 levels maximum
+    const layoutNodes = [];
+    const levelHeight = 180;
+    const svgWidth = 1400;
+    
+    // Level 0: Starting program only
+    const startingProgram = programNodes.find(n => n.is_starting_program) || programNodes[0];
+    if (startingProgram) {
+        layoutNodes.push({
+            ...startingProgram,
+            x: svgWidth / 2,
+            y: 80,
+            level: 0,
+            width: 120,
+            height: 60
+        });
+    }
+    
+    // Level 1: Direct called programs only (no deep nesting)
+    const directCalls = edges.filter(e => 
+        e.from === startingProgram.id && 
+        e.type === 'program_call'
+    );
+    
+    const calledPrograms = directCalls.map(edge => 
+        programNodes.find(n => n.id === edge.to)
+    ).filter(Boolean);
+    
+    // Position called programs horizontally on level 1
+    const level1Y = 80 + levelHeight;
+    const spacing = Math.min(250, (svgWidth - 200) / Math.max(calledPrograms.length, 1));
+    const startX = (svgWidth - (calledPrograms.length - 1) * spacing) / 2;
+    
+    calledPrograms.forEach((program, index) => {
+        layoutNodes.push({
+            ...program,
+            x: startX + (index * spacing),
+            y: level1Y,
+            level: 1,
+            width: 120,
+            height: 60
+        });
+    });
+    
+    // FIXED Level 2: Files and DB2 with proper connections based on EDGES, not metadata
+    const level2Y = level1Y + levelHeight;
+    const allDataNodes = [...fileNodes, ...db2Nodes];
+    
+    // FIXED: Group data nodes by their ACTUAL connections from edges
+    const nodeConnections = {};
+    edges.forEach(edge => {
+        if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
+            const sourceProgram = edge.from;
+            const targetData = edge.to;
+            
+            if (!nodeConnections[sourceProgram]) {
+                nodeConnections[sourceProgram] = [];
+            }
+            nodeConnections[sourceProgram].push(targetData);
+        }
+    });
+    
+    // Position data nodes under their connected programs
+    let unconnectedIndex = 0;
+    allDataNodes.forEach((node) => {
+        // Find which program connects to this node
+        let connectedProgram = null;
+        let programPosition = null;
+        
+        for (const [progName, connections] of Object.entries(nodeConnections)) {
+            if (connections.includes(node.id)) {
+                connectedProgram = progName;
+                programPosition = layoutNodes.find(n => n.id === progName);
+                break;
+            }
+        }
+        
+        let xPosition, yPosition;
+        if (programPosition) {
+            // Position under the connected program
+            const siblingsCount = nodeConnections[connectedProgram].length;
+            const siblingIndex = nodeConnections[connectedProgram].indexOf(node.id);
+            xPosition = programPosition.x - 50 + (siblingIndex * 120);
+            yPosition = level2Y;
+        } else {
+            // Position unconnected nodes to the side
+            xPosition = 100 + (unconnectedIndex * 120);
+            yPosition = level2Y + 60;
+            unconnectedIndex++;
+        }
+        
+        layoutNodes.push({
+            ...node,
+            x: xPosition,
+            y: yPosition,
+            level: 2,
+            width: 100,
+            height: 50,
+            connected_to_program: connectedProgram
+        });
+    });
+    
+    // Create CLEAN edges based on actual edge data
+    const layoutEdges = [];
+    
+    // Add program call edges
+    directCalls.forEach(edge => {
+        const source = layoutNodes.find(n => n.id === edge.from);
+        const target = layoutNodes.find(n => n.id === edge.to);
+        if (source && target) {
+            layoutEdges.push({
+                ...edge,
+                source,
+                target
+            });
+        }
+    });
+    
+    // FIXED: Add file/DB2 edges based on actual edge data
+    edges.forEach(edge => {
+        if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
+            const source = layoutNodes.find(n => n.id === edge.from);
+            const target = layoutNodes.find(n => n.id === edge.to);
+            
+            if (source && target) {
+                layoutEdges.push({
+                    ...edge,
+                    source,
+                    target
+                });
+            }
+        }
+    });
+    
+    return { layoutNodes, layoutEdges };
 }
+
 function getCallTypeIcon(callType) {
     const icons = {
         'CALL': '📞',
@@ -8938,29 +9182,211 @@ async function analyzeEnhancedFlow() {
     showLoadingSpinner('Analyzing enhanced program flow...');
     
     try {
-        // Use the correct endpoint
         const response = await fetch(`/api/program-flow-visualization/${currentSessionId}/${programName}`);
         const data = await response.json();
         
         if (!data.success) {
-            showError(data.error);
+            showError(data.error || 'Failed to analyze program flow');
             return;
         }
         
-        // FIX: Use the correct data structure
-        renderFlowVisualization(data.visualization_data);
+        // Render the flow visualization
+        if (data.flow_visualization) {
+            console.log('Rendering program flow visualization...');
+            renderFlowVisualization(data.flow_visualization);
+        } else {
+            console.error('No flow visualization data received');
+            showError('No visualization data received from server');
+            return;
+        }
         
-        // Clear or populate flow details
-        document.getElementById('flowDetails').innerHTML = `
-            <div class="flow-summary">
-                <h3>Program Flow: ${programName}</h3>
-                <p>Nodes: ${data.visualization_data.nodes.length}</p>
-                <p>Edges: ${data.visualization_data.edges.length}</p>
-            </div>
-        `;
+        // Display flow details with proper data structure
+        const flowDetails = document.getElementById('flowDetails');
+        if (data.statistics) {
+            let html = `
+                <div class="flow-summary-section">
+                    <h3>Program Flow: ${programName}</h3>
+                    <div class="flow-business-summary">
+                        Analysis complete for program ${programName}
+                    </div>
+                    <div class="flow-statistics">
+                        <div class="stat-item">
+                            <span class="stat-value">${data.statistics.total_programs_in_flow || 0}</span>
+                            <span class="stat-label">Programs</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${data.statistics.file_operations || 0}</span>
+                            <span class="stat-label">File Operations</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${data.statistics.db2_operations || 0}</span>
+                            <span class="stat-label">DB2 Operations</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value">${data.statistics.missing_programs || 0}</span>
+                            <span class="stat-label">Missing Programs</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Show program chain summary if available
+            const programNodes = data.flow_visualization.nodes?.filter(n => n.type === 'program') || [];
+            if (programNodes.length > 0) {
+                html += `
+                    <div class="program-chain-section">
+                        <h3>Program Call Chain</h3>
+                        <div class="program-chain-list">
+                `;
+                
+                // Sort by level to show proper call order
+                programNodes.sort((a, b) => (a.level || 0) - (b.level || 0));
+                
+                programNodes.forEach((program, index) => {
+                    const statusClass = program.status === 'missing' ? 'missing-program' : 'available-program';
+                    
+                    html += `
+                        <div class="program-chain-item ${statusClass}">
+                            <div class="chain-sequence">#${index + 1}</div>
+                            <div class="chain-flow-details">
+                                <div class="program-call-header">
+                                    <span class="source-program">${program.label}</span>
+                                    ${program.status === 'missing' ? 
+                                        '<span class="missing-indicator">MISSING</span>' : 
+                                        '<span class="available-indicator">AVAILABLE</span>'}
+                                </div>
+                                <div class="call-metadata">
+                                    <span class="confidence-badge">Level: ${program.level || 0}</span>
+                                    <span class="data-passed-count">${program.is_starting_program ? 'Starting Program' : 'Called Program'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Show file operations if available
+            const fileNodes = data.flow_visualization.nodes?.filter(n => n.type === 'file') || [];
+            if (fileNodes.length > 0) {
+                html += `
+                    <div class="file-operations-section">
+                        <h3>File Operations (${fileNodes.length})</h3>
+                        <div class="file-operations-grid">
+                `;
+                
+                fileNodes.forEach(fileNode => {
+                    const statusClass = fileNode.has_layout_resolution ? 'has-layout' : 'no-layout';
+                    const interfaceIcon = fileNode.interface_type === 'CICS' ? 'CICS' : 'FILE';
+                    
+                    html += `
+                        <div class="file-operation-card ${statusClass}">
+                            <div class="file-header">
+                                <div class="file-info">
+                                    <span class="file-icon">[${interfaceIcon}]</span>
+                                    <span class="file-name">${fileNode.label}</span>
+                                    <span class="io-direction-badge ${fileNode.io_direction?.toLowerCase() || 'unknown'}">${fileNode.io_direction || 'UNKNOWN'}</span>
+                                </div>
+                                ${fileNode.has_layout_resolution ? 
+                                    '<span class="layout-indicator">Has Layout</span>' : 
+                                    '<span class="no-layout-indicator">No Layout</span>'}
+                            </div>
+                            <div class="file-details">
+                                <div class="connected-program">
+                                    <strong>Connected to:</strong> ${fileNode.connected_to_program || 'Unknown'}
+                                </div>
+                                <div class="file-operations">
+                                    <strong>Operations:</strong> ${fileNode.operations?.join(', ') || 'READ/WRITE'}
+                                </div>
+                                <div class="interface-type">
+                                    <strong>Interface:</strong> ${fileNode.interface_type || 'FILE'}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Show DB2 operations if available
+            const db2Nodes = data.flow_visualization.nodes?.filter(n => n.type === 'db2_table') || [];
+            if (db2Nodes.length > 0) {
+                html += `
+                    <div class="db2-operations-section">
+                        <h3>DB2 Operations (${db2Nodes.length})</h3>
+                        <div class="file-operations-grid">
+                `;
+                
+                db2Nodes.forEach(db2Node => {
+                    html += `
+                        <div class="file-operation-card has-layout">
+                            <div class="file-header">
+                                <div class="file-info">
+                                    <span class="file-icon">[DB2]</span>
+                                    <span class="file-name">${db2Node.label}</span>
+                                    <span class="io-direction-badge ${db2Node.io_direction?.toLowerCase() || 'unknown'}">${db2Node.sql_operation || 'SQL'}</span>
+                                </div>
+                                <span class="layout-indicator">Database Table</span>
+                            </div>
+                            <div class="file-details">
+                                <div class="connected-program">
+                                    <strong>Connected to:</strong> ${db2Node.connected_to_program || 'Unknown'}
+                                </div>
+                                <div class="file-operations">
+                                    <strong>SQL Operation:</strong> ${db2Node.sql_operation || 'UNKNOWN'}
+                                </div>
+                                <div class="interface-type">
+                                    <strong>Interface:</strong> DB2
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Show missing programs summary
+            if (data.statistics.missing_programs > 0) {
+                html += `
+                    <div class="missing-programs-section">
+                        <h3>Missing Programs (${data.statistics.missing_programs})</h3>
+                        <div class="recommendation-box">
+                            <h4>Recommendations</h4>
+                            <ul>
+                                <li>Upload the missing programs to complete flow analysis</li>
+                                <li>Missing programs may contain additional file operations and data transformations</li>
+                                <li>Complete program set provides better understanding of the system architecture</li>
+                            </ul>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            flowDetails.innerHTML = html;
+        } else {
+            flowDetails.innerHTML = `
+                <div class="flow-summary">
+                    <h3>Program Flow: ${programName}</h3>
+                    <p>Flow analysis completed. Check the visualization above for program dependencies.</p>
+                </div>
+            `;
+        }
         
     } catch (error) {
         showError(`Error analyzing flow: ${error.message}`);
+        console.error('Flow analysis error:', error);
     } finally {
         hideLoadingSpinner();
     }
