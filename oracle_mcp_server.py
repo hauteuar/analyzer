@@ -129,7 +129,7 @@ async def sse_endpoint(request: Request):
                 await asyncio.sleep(1)
                 yield f"data: {json.dumps({'type': 'ping', 'timestamp': asyncio.get_event_loop().time()})}\n\n"
         except asyncio.CancelledError:
-            break
+            return
     
     return StreamingResponse(
         event_stream(),
