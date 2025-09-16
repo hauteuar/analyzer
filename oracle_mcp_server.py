@@ -113,6 +113,18 @@ async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent
         raise ValueError(f"Unknown tool: {name}")
 
 
+@server.list_resources()
+async def handle_list_resources() -> list[types.Resource]:
+    """List available resources (required by MCP protocol)"""
+    return []
+
+
+@server.list_prompts() 
+async def handle_list_prompts() -> list[types.Prompt]:
+    """List available prompts (required by MCP protocol)"""
+    return []
+
+
 # ----------------------
 # SSE Endpoint
 # ----------------------
@@ -150,25 +162,51 @@ async def sse_endpoint(request: Request):
 async def handle_mcp_request(request: Request):
     """Handle MCP JSON-RPC requests via HTTP"""
     try:
-        # Use the MCP server to handle the request
-        from mcp.server.session import ServerSession
-        from mcp.shared.session import RequestHandlers
-        
-        # Create a simple transport for HTTP
-        session = ServerSession(server, RequestHandlers())
-        
-        # Get the JSON-RPC message
         message = await request.json()
+        method = message.get("method", "")
         
-        # Process through MCP server
-        response = await session.handle_message(message)
+        # Handle initialize method
+        if method == "initialize":
+            return {
+                "jsonrpc": "2.0",
+                "id": message.get("id"),
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {},
+                        "resources": {},
+                        "prompts": {}
+                    },
+                    "serverInfo": {
+                        "name": "oracle-db",
+                        "version": "1.0.0"
+                    }
+                }
+            }
         
-        return response
+        # Handle initialized notification
+        elif method == "notifications/initialized":
+            return {
+                "jsonrpc": "2.0",
+                "result": {}
+            }
+        
+        # Handle other methods through MCP server
+        else:
+            from mcp.server.session import ServerSession
+            from mcp.shared.session import RequestHandlers
+            
+            # Create a simple transport for HTTP
+            session = ServerSession(server, RequestHandlers())
+            
+            # Process through MCP server
+            response = await session.handle_message(message)
+            return response
         
     except Exception as e:
         return {
             "jsonrpc": "2.0",
-            "id": None,
+            "id": message.get("id", None) if 'message' in locals() else None,
             "error": {"code": -32603, "message": str(e)}
         }
 
@@ -179,8 +217,9 @@ async def handle_mcp_request(request: Request):
 async def main() -> None:
     app = Starlette(
         routes=[
-            Route("/sse", endpoint=sse_endpoint, methods=["GET"]),
+            Route("/events", endpoint=sse_endpoint, methods=["GET"]),  # Changed to /events
             Route("/mcp", endpoint=handle_mcp_request, methods=["POST"]),
+            Route("/", endpoint=lambda request: {"status": "MCP Oracle Server Running"}, methods=["GET"]),  # Health check
         ]
     )
     
