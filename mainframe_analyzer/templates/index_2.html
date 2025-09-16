@@ -6859,154 +6859,7 @@ function createProgramFlowView(sessionId) {
         
     
 
-function createHierarchicalLayout(vizData) {
-    const nodes = vizData.nodes || [];
-    const edges = vizData.edges || [];
-    
-    if (!nodes.length) {
-        throw new Error('No nodes provided for layout');
-    }
-    
-    const programNodes = nodes.filter(n => n.type === 'program');
-    const fileNodes = nodes.filter(n => n.type === 'file');
-    const db2Nodes = nodes.filter(n => n.type === 'db2_table');
-    
-    // Create SIMPLE vertical hierarchy - only 3 levels maximum
-    const layoutNodes = [];
-    const levelHeight = 180;
-    const svgWidth = 1400;
-    
-    // Level 0: Starting program only
-    const startingProgram = programNodes.find(n => n.is_starting_program) || programNodes[0];
-    if (startingProgram) {
-        layoutNodes.push({
-            ...startingProgram,
-            x: svgWidth / 2,
-            y: 80,
-            level: 0,
-            width: 120,
-            height: 60
-        });
-    }
-    
-    // Level 1: Direct called programs only (no deep nesting)
-    const directCalls = edges.filter(e => 
-        e.from === startingProgram.id && 
-        e.type === 'program_call'
-    );
-    
-    const calledPrograms = directCalls.map(edge => 
-        programNodes.find(n => n.id === edge.to)
-    ).filter(Boolean);
-    
-    // Position called programs horizontally on level 1
-    const level1Y = 80 + levelHeight;
-    const spacing = Math.min(250, (svgWidth - 200) / Math.max(calledPrograms.length, 1));
-    const startX = (svgWidth - (calledPrograms.length - 1) * spacing) / 2;
-    
-    calledPrograms.forEach((program, index) => {
-        layoutNodes.push({
-            ...program,
-            x: startX + (index * spacing),
-            y: level1Y,
-            level: 1,
-            width: 120,
-            height: 60
-        });
-    });
-    
-    // FIXED Level 2: Files and DB2 with proper connections based on EDGES, not metadata
-    const level2Y = level1Y + levelHeight;
-    const allDataNodes = [...fileNodes, ...db2Nodes];
-    
-    // FIXED: Group data nodes by their ACTUAL connections from edges
-    const nodeConnections = {};
-    edges.forEach(edge => {
-        if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
-            const sourceProgram = edge.from;
-            const targetData = edge.to;
-            
-            if (!nodeConnections[sourceProgram]) {
-                nodeConnections[sourceProgram] = [];
-            }
-            nodeConnections[sourceProgram].push(targetData);
-        }
-    });
-    
-    // Position data nodes under their connected programs
-    let unconnectedIndex = 0;
-    allDataNodes.forEach((node) => {
-        // Find which program connects to this node
-        let connectedProgram = null;
-        let programPosition = null;
-        
-        for (const [progName, connections] of Object.entries(nodeConnections)) {
-            if (connections.includes(node.id)) {
-                connectedProgram = progName;
-                programPosition = layoutNodes.find(n => n.id === progName);
-                break;
-            }
-        }
-        
-        let xPosition, yPosition;
-        if (programPosition) {
-            // Position under the connected program
-            const siblingsCount = nodeConnections[connectedProgram].length;
-            const siblingIndex = nodeConnections[connectedProgram].indexOf(node.id);
-            xPosition = programPosition.x - 50 + (siblingIndex * 120);
-            yPosition = level2Y;
-        } else {
-            // Position unconnected nodes to the side
-            xPosition = 100 + (unconnectedIndex * 120);
-            yPosition = level2Y + 60;
-            unconnectedIndex++;
-        }
-        
-        layoutNodes.push({
-            ...node,
-            x: xPosition,
-            y: yPosition,
-            level: 2,
-            width: 100,
-            height: 50,
-            connected_to_program: connectedProgram
-        });
-    });
-    
-    // Create CLEAN edges based on actual edge data
-    const layoutEdges = [];
-    
-    // Add program call edges
-    directCalls.forEach(edge => {
-        const source = layoutNodes.find(n => n.id === edge.from);
-        const target = layoutNodes.find(n => n.id === edge.to);
-        if (source && target) {
-            layoutEdges.push({
-                ...edge,
-                source,
-                target
-            });
-        }
-    });
-    
-    // FIXED: Add file/DB2 edges based on actual edge data
-    edges.forEach(edge => {
-        if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
-            const source = layoutNodes.find(n => n.id === edge.from);
-            const target = layoutNodes.find(n => n.id === edge.to);
-            
-            if (source && target) {
-                layoutEdges.push({
-                    ...edge,
-                    source,
-                    target
-                });
-            }
-        }
-    });
-    
-    return { layoutNodes, layoutEdges };
-}
+
 
 
 function calculateEnhancedEdgePath(sourceNode, targetNode, edge) {
@@ -8550,56 +8403,42 @@ function createHierarchicalLayout(vizData) {
     const fileNodes = nodes.filter(n => n.type === 'file');
     const db2Nodes = nodes.filter(n => n.type === 'db2_table');
     
-    // Create SIMPLE vertical hierarchy - only 3 levels maximum
     const layoutNodes = [];
-    const levelHeight = 180;
+    const levelHeight = 160;
     const svgWidth = 1400;
     
-    // Level 0: Starting program only
+    // Build complete program hierarchy including missing programs
     const startingProgram = programNodes.find(n => n.is_starting_program) || programNodes[0];
-    if (startingProgram) {
-        layoutNodes.push({
-            ...startingProgram,
-            x: svgWidth / 2,
-            y: 80,
-            level: 0,
-            width: 120,
-            height: 60
-        });
-    }
+    const programLevels = buildProgramHierarchyWithMissing(programNodes, edges, startingProgram);
     
-    // Level 1: Direct called programs only (no deep nesting)
-    const directCalls = edges.filter(e => 
-        e.from === startingProgram.id && 
-        e.type === 'program_call'
-    );
-    
-    const calledPrograms = directCalls.map(edge => 
-        programNodes.find(n => n.id === edge.to)
-    ).filter(Boolean);
-    
-    // Position called programs horizontally on level 1
-    const level1Y = 80 + levelHeight;
-    const spacing = Math.min(250, (svgWidth - 200) / Math.max(calledPrograms.length, 1));
-    const startX = (svgWidth - (calledPrograms.length - 1) * spacing) / 2;
-    
-    calledPrograms.forEach((program, index) => {
-        layoutNodes.push({
-            ...program,
-            x: startX + (index * spacing),
-            y: level1Y,
-            level: 1,
-            width: 120,
-            height: 60
+    // Position programs at their correct levels
+    Object.entries(programLevels).forEach(([level, programs]) => {
+        const levelNum = parseInt(level);
+        const yPosition = 80 + (levelNum * levelHeight);
+        const spacing = Math.min(220, (svgWidth - 200) / Math.max(programs.length, 1));
+        const startX = (svgWidth - (programs.length - 1) * spacing) / 2;
+        
+        programs.forEach((program, index) => {
+            layoutNodes.push({
+                ...program,
+                x: startX + (index * spacing),
+                y: yPosition,
+                level: levelNum,
+                width: 120,
+                height: 60
+            });
         });
     });
     
-    // FIXED Level 2: Files and DB2 with proper connections based on EDGES, not metadata
-    const level2Y = level1Y + levelHeight;
-    const allDataNodes = [...fileNodes, ...db2Nodes];
+    // Position files and DB2 tables connected to programs
+    const maxProgramLevel = Math.max(...Object.keys(programLevels).map(Number));
+    const dataLevel = maxProgramLevel + 1;
+    const dataY = 80 + (dataLevel * levelHeight);
     
-    // FIXED: Group data nodes by their ACTUAL connections from edges
+    const allDataNodes = [...fileNodes, ...db2Nodes];
     const nodeConnections = {};
+    
+    // Group data nodes by their program connections
     edges.forEach(edge => {
         if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
             const sourceProgram = edge.from;
@@ -8615,10 +8454,10 @@ function createHierarchicalLayout(vizData) {
     // Position data nodes under their connected programs
     let unconnectedIndex = 0;
     allDataNodes.forEach((node) => {
-        // Find which program connects to this node
         let connectedProgram = null;
         let programPosition = null;
         
+        // Find which program connects to this node
         for (const [progName, connections] of Object.entries(nodeConnections)) {
             if (connections.includes(node.id)) {
                 connectedProgram = progName;
@@ -8632,12 +8471,13 @@ function createHierarchicalLayout(vizData) {
             // Position under the connected program
             const siblingsCount = nodeConnections[connectedProgram].length;
             const siblingIndex = nodeConnections[connectedProgram].indexOf(node.id);
-            xPosition = programPosition.x - 50 + (siblingIndex * 120);
-            yPosition = level2Y;
+            const offsetX = siblingsCount > 1 ? (siblingIndex - (siblingsCount - 1) / 2) * 110 : 0;
+            xPosition = programPosition.x + offsetX;
+            yPosition = dataY;
         } else {
-            // Position unconnected nodes to the side
-            xPosition = 100 + (unconnectedIndex * 120);
-            yPosition = level2Y + 60;
+            // Position unconnected nodes to the right side
+            xPosition = svgWidth - 150 - (unconnectedIndex * 110);
+            yPosition = dataY;
             unconnectedIndex++;
         }
         
@@ -8645,30 +8485,32 @@ function createHierarchicalLayout(vizData) {
             ...node,
             x: xPosition,
             y: yPosition,
-            level: 2,
+            level: dataLevel,
             width: 100,
             height: 50,
             connected_to_program: connectedProgram
         });
     });
     
-    // Create CLEAN edges based on actual edge data
+    // Create all edges including those to missing programs
     const layoutEdges = [];
     
-    // Add program call edges
-    directCalls.forEach(edge => {
-        const source = layoutNodes.find(n => n.id === edge.from);
-        const target = layoutNodes.find(n => n.id === edge.to);
-        if (source && target) {
-            layoutEdges.push({
-                ...edge,
-                source,
-                target
-            });
+    // Add ALL program call edges (including to missing programs)
+    edges.forEach(edge => {
+        if (edge.type === 'program_call') {
+            const source = layoutNodes.find(n => n.id === edge.from);
+            const target = layoutNodes.find(n => n.id === edge.to);
+            if (source && target) {
+                layoutEdges.push({
+                    ...edge,
+                    source,
+                    target
+                });
+            }
         }
     });
     
-    // FIXED: Add file/DB2 edges based on actual edge data
+    // Add file/DB2 edges
     edges.forEach(edge => {
         if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
             const source = layoutNodes.find(n => n.id === edge.from);
@@ -8685,6 +8527,194 @@ function createHierarchicalLayout(vizData) {
     });
     
     return { layoutNodes, layoutEdges };
+}
+function buildProgramHierarchyWithMissing(programNodes, edges, startingProgram) {
+    const hierarchy = {};
+    const visited = new Set();
+    const queue = [{ program: startingProgram, level: 0 }];
+    
+    // Level 0: Starting program
+    hierarchy[0] = [startingProgram];
+    visited.add(startingProgram.id);
+    
+    while (queue.length > 0) {
+        const { program: currentProgram, level } = queue.shift();
+        
+        // Find all programs called by current program
+        const outgoingCalls = edges.filter(e => 
+            e.from === currentProgram.id && 
+            e.type === 'program_call'
+        );
+        
+        outgoingCalls.forEach(call => {
+            let targetProgram = programNodes.find(p => p.id === call.to);
+            
+            // If program not found, create a missing program node
+            if (!targetProgram) {
+                targetProgram = {
+                    id: call.to,
+                    label: call.to,
+                    type: 'program',
+                    status: 'missing',
+                    is_starting_program: false
+                };
+                programNodes.push(targetProgram);
+            }
+            
+            if (!visited.has(targetProgram.id)) {
+                const nextLevel = level + 1;
+                
+                if (!hierarchy[nextLevel]) {
+                    hierarchy[nextLevel] = [];
+                }
+                
+                hierarchy[nextLevel].push(targetProgram);
+                visited.add(targetProgram.id);
+                queue.push({ program: targetProgram, level: nextLevel });
+            }
+        });
+    }
+    
+    // Add any orphaned programs to the last level
+    programNodes.forEach(program => {
+        if (!visited.has(program.id)) {
+            const lastLevel = Math.max(...Object.keys(hierarchy).map(Number)) + 1;
+            if (!hierarchy[lastLevel]) hierarchy[lastLevel] = [];
+            hierarchy[lastLevel].push(program);
+        }
+    });
+    
+    return hierarchy;
+}
+function buildProgramCallChain(programNodes, edges) {
+    const chainSteps = [];
+    const processedEdges = new Set();
+    
+    edges.forEach(edge => {
+        if (edge.type !== 'program_call' || processedEdges.has(`${edge.from}-${edge.to}`)) return;
+        
+        const sourceProgram = programNodes.find(p => p.id === edge.from);
+        let targetProgram = programNodes.find(p => p.id === edge.to);
+        
+        // Handle missing programs
+        if (!targetProgram) {
+            targetProgram = {
+                id: edge.to,
+                label: edge.to,
+                status: 'missing',
+                level: 999 // High level for missing programs
+            };
+        }
+        
+        if (sourceProgram) {
+            chainSteps.push({
+                source: edge.from,
+                target: edge.to,
+                call_type: edge.call_type || 'CALL',
+                source_level: sourceProgram.level || 0,
+                target_level: targetProgram.level || 999,
+                target_status: targetProgram.status || 'missing',
+                variable_name: edge.variable_name,
+                business_context: edge.business_context,
+                confidence: edge.confidence_score || 0.9
+            });
+            processedEdges.add(`${edge.from}-${edge.to}`);
+        }
+    });
+    
+    // Sort by source level to show proper hierarchy
+    return chainSteps.sort((a, b) => a.source_level - b.source_level);
+}
+
+function buildProgramHierarchy(programNodes, edges, startingProgram) {
+    const hierarchy = {};
+    const visited = new Set();
+    const queue = [{ program: startingProgram, level: 0 }];
+    
+    // Level 0: Starting program
+    hierarchy[0] = [startingProgram];
+    visited.add(startingProgram.id);
+    
+    while (queue.length > 0) {
+        const { program: currentProgram, level } = queue.shift();
+        
+        // Find all programs called by current program
+        const outgoingCalls = edges.filter(e => 
+            e.from === currentProgram.id && 
+            e.type === 'program_call'
+        );
+        
+        outgoingCalls.forEach(call => {
+            const targetProgram = programNodes.find(p => p.id === call.to);
+            if (targetProgram && !visited.has(targetProgram.id)) {
+                const nextLevel = level + 1;
+                
+                if (!hierarchy[nextLevel]) {
+                    hierarchy[nextLevel] = [];
+                }
+                
+                hierarchy[nextLevel].push(targetProgram);
+                visited.add(targetProgram.id);
+                queue.push({ program: targetProgram, level: nextLevel });
+            }
+        });
+    }
+    
+    // Add any orphaned programs to the last level
+    programNodes.forEach(program => {
+        if (!visited.has(program.id)) {
+            const lastLevel = Math.max(...Object.keys(hierarchy).map(Number)) + 1;
+            if (!hierarchy[lastLevel]) hierarchy[lastLevel] = [];
+            hierarchy[lastLevel].push(program);
+        }
+    });
+    
+    return hierarchy;
+}
+function buildProgramHierarchy(programNodes, edges, startingProgram) {
+    const hierarchy = {};
+    const visited = new Set();
+    const queue = [{ program: startingProgram, level: 0 }];
+    
+    // Level 0: Starting program
+    hierarchy[0] = [startingProgram];
+    visited.add(startingProgram.id);
+    
+    while (queue.length > 0) {
+        const { program: currentProgram, level } = queue.shift();
+        
+        // Find all programs called by current program
+        const outgoingCalls = edges.filter(e => 
+            e.from === currentProgram.id && 
+            e.type === 'program_call'
+        );
+        
+        outgoingCalls.forEach(call => {
+            const targetProgram = programNodes.find(p => p.id === call.to);
+            if (targetProgram && !visited.has(targetProgram.id)) {
+                const nextLevel = level + 1;
+                
+                if (!hierarchy[nextLevel]) {
+                    hierarchy[nextLevel] = [];
+                }
+                
+                hierarchy[nextLevel].push(targetProgram);
+                visited.add(targetProgram.id);
+                queue.push({ program: targetProgram, level: nextLevel });
+            }
+        });
+    }
+    
+    // Add any orphaned programs to the last level
+    programNodes.forEach(program => {
+        if (!visited.has(program.id)) {
+            const lastLevel = Math.max(...Object.keys(hierarchy).map(Number)) + 1;
+            if (!hierarchy[lastLevel]) hierarchy[lastLevel] = [];
+            hierarchy[lastLevel].push(program);
+        }
+    });
+    
+    return hierarchy;
 }
 
 function getCallTypeIcon(callType) {
@@ -8836,44 +8866,65 @@ async function analyzeEnhancedFlow() {
             `;
             
             // Show program chain summary if available
-            const programNodes = data.flow_visualization.nodes?.filter(n => n.type === 'program') || [];
-            if (programNodes.length > 0) {
-                html += `
-                    <div class="program-chain-section">
-                        <h3>Program Call Chain</h3>
-                        <div class="program-chain-list">
-                `;
-                
-                // Sort by level to show proper call order
-                programNodes.sort((a, b) => (a.level || 0) - (b.level || 0));
-                
-                programNodes.forEach((program, index) => {
-                    const statusClass = program.status === 'missing' ? 'missing-program' : 'available-program';
-                    
-                    html += `
-                        <div class="program-chain-item ${statusClass}">
-                            <div class="chain-sequence">#${index + 1}</div>
-                            <div class="chain-flow-details">
-                                <div class="program-call-header">
-                                    <span class="source-program">${program.label}</span>
-                                    ${program.status === 'missing' ? 
-                                        '<span class="missing-indicator">MISSING</span>' : 
-                                        '<span class="available-indicator">AVAILABLE</span>'}
-                                </div>
-                                <div class="call-metadata">
-                                    <span class="confidence-badge">Level: ${program.level || 0}</span>
-                                    <span class="data-passed-count">${program.is_starting_program ? 'Starting Program' : 'Called Program'}</span>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                html += `
-                        </div>
+            // Show program chain summary if available
+const programNodes = data.flow_visualization.nodes?.filter(n => n.type === 'program') || [];
+if (programNodes.length > 0) {
+    html += `
+        <div class="program-chain-section">
+            <h3>Program Call Chain</h3>
+            <div class="program-chain-list">
+    `;
+    
+    // Sort by level to show proper call hierarchy
+    programNodes.sort((a, b) => (a.level || 0) - (b.level || 0));
+    
+    // Build the actual call chain from edges
+    const edges = data.flow_visualization.edges?.filter(e => e.type === 'program_call') || [];
+    const chainSteps = buildProgramCallChain(programNodes, edges);
+    
+    chainSteps.forEach((step, index) => {
+        const statusClass = step.target_status === 'missing' ? 'missing-program' : 'available-program';
+        const callIcon = getCallTypeIcon(step.call_type);
+        
+        html += `
+            <div class="program-chain-item ${statusClass}">
+                <div class="chain-sequence">#${index + 1}</div>
+                <div class="chain-flow-details">
+                    <div class="program-call-header">
+                        <span class="source-program">${step.source}</span>
+                        <span class="call-arrow">${callIcon} ${step.call_type}</span>
+                        <span class="target-program">${step.target}</span>
+                        ${step.target_status === 'missing' ? 
+                            '<span class="missing-indicator">❌ MISSING</span>' : 
+                            '<span class="available-indicator">✅ AVAILABLE</span>'}
                     </div>
-                `;
-            }
+                    
+                    ${step.variable_name ? `
+                        <div class="dynamic-call-info">
+                            <strong>Dynamic Call:</strong> Variable <code>${step.variable_name}</code>
+                            <div class="resolution-details">Resolved at runtime based on business logic</div>
+                        </div>
+                    ` : ''}
+                    
+                    <div class="business-context">
+                        <strong>Level:</strong> ${step.source_level} → ${step.target_level}
+                        ${step.business_context ? `<br><strong>Context:</strong> ${step.business_context}` : ''}
+                    </div>
+                    
+                    <div class="call-metadata">
+                        <span class="confidence-badge">Confidence: ${Math.round((step.confidence || 0.9) * 100)}%</span>
+                        <span class="data-passed-count">Level: ${step.target_level}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += `
+            </div>
+        </div>
+    `;
+}
             
             // Show file operations if available
             const fileNodes = data.flow_visualization.nodes?.filter(n => n.type === 'file') || [];
@@ -8961,7 +9012,93 @@ async function analyzeEnhancedFlow() {
                     </div>
                 `;
             }
-            
+            // Show missing programs summary with impact
+const missingPrograms = programNodes.filter(p => p.status === 'missing');
+if (missingPrograms.length > 0) {
+    html += `
+        <div class="missing-programs-section">
+            <h3>⚠️ Missing Programs Impact (${missingPrograms.length})</h3>
+            <div class="alert alert-warning">
+                <strong>Analysis Incomplete:</strong> ${missingPrograms.length} programs are called but not uploaded, 
+                which limits the complete flow analysis.
+            </div>
+            <div class="missing-programs-grid">
+    `;
+    
+    // Group missing programs by their calling programs
+    const missingByCallers = {};
+    edges.filter(e => e.type === 'program_call').forEach(edge => {
+        const targetProgram = programNodes.find(p => p.id === edge.to);
+        if (targetProgram && targetProgram.status === 'missing') {
+            if (!missingByCallers[edge.from]) {
+                missingByCallers[edge.from] = [];
+            }
+            missingByCallers[edge.from].push({
+                program: edge.to,
+                call_type: edge.call_type || 'CALL',
+                variable_name: edge.variable_name
+            });
+        }
+    });
+    
+    Object.entries(missingByCallers).forEach(([caller, missingList]) => {
+        missingList.forEach(missing => {
+            html += `
+                <div class="missing-program-card">
+                    <div class="missing-header">
+                        <span class="missing-icon">❌</span>
+                        <span class="program-name">${missing.program}</span>
+                        <span class="call-type-badge">${missing.call_type}</span>
+                    </div>
+                    <div class="missing-details">
+                        <div class="called-by">
+                            <strong>Called by:</strong> ${caller}
+                        </div>
+                        ${missing.variable_name ? `
+                            <div class="dynamic-call-info">
+                                <strong>Dynamic Call via:</strong> <code>${missing.variable_name}</code>
+                            </div>
+                        ` : ''}
+                        <div class="impact-description">
+                            This missing program blocks complete flow analysis. File operations and data 
+                            transformations in ${missing.program} cannot be analyzed.
+                        </div>
+                    </div>
+                    <div class="missing-actions">
+                        <button class="impact-btn" onclick="showMissingProgramImpact('${currentSessionId}', '${missing.program}')">
+                            Analyze Impact
+                        </button>
+                        <button class="upload-btn" onclick="promptProgramUpload('${missing.program}')">
+                            Upload Program
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+    });
+    
+    html += `
+            </div>
+            <div class="missing-summary">
+                <div class="recommendation-box">
+                    <h4>🎯 Recommendations to Complete Analysis</h4>
+                    <ul>
+                        <li>Upload the missing programs to see complete call chains</li>
+                        <li>Missing programs may contain additional file operations and DB2 access</li>
+                        <li>Data flow analysis becomes more accurate with complete program set</li>
+                        <li>Layout associations and field transformations may be incomplete</li>
+                    </ul>
+                    <div style="margin-top: 15px;">
+                        <strong>Priority Upload Order:</strong>
+                        <ol>
+                            ${Object.values(missingByCallers).flat().map(m => `<li>${m.program}</li>`).join('')}
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
             // Show missing programs summary
             if (data.statistics.missing_programs > 0) {
                 html += `
