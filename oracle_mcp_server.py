@@ -2,6 +2,7 @@ import asyncio
 import json
 from typing import Optional, List, Dict, Any
 import oracledb
+from mcp import types
 from mcp.server import Server
 from starlette.applications import Starlette
 from starlette.responses import StreamingResponse
@@ -19,9 +20,8 @@ server = Server("oracle-db")
 
 
 # ----------------------
-# Tool 1: Run SQL Query
+# Tool Functions
 # ----------------------
-@server.tool()
 async def run_query(sql: str) -> List[Dict[str, Any]]:
     """
     Execute a SQL query against Oracle DB.
@@ -38,10 +38,6 @@ async def run_query(sql: str) -> List[Dict[str, Any]]:
         return [{"error": str(e)}]
 
 
-# ----------------------
-# Tool 2: Get Schema Info
-# ----------------------
-@server.tool()
 async def get_schema(owner: Optional[str] = None) -> List[Dict[str, str]]:
     """
     Retrieve schema information: tables, columns, and data types.
@@ -67,6 +63,54 @@ async def get_schema(owner: Optional[str] = None) -> List[Dict[str, str]]:
                 return rows
     except Exception as e:
         return [{"error": str(e)}]
+
+
+# ----------------------
+# MCP Server Handlers
+# ----------------------
+@server.list_tools()
+async def handle_list_tools() -> list[types.Tool]:
+    """List available tools"""
+    return [
+        types.Tool(
+            name="run_query",
+            description="Execute a SQL query against Oracle DB",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sql": {"type": "string", "description": "SQL query to execute"}
+                },
+                "required": ["sql"]
+            }
+        ),
+        types.Tool(
+            name="get_schema",
+            description="Retrieve schema information: tables, columns, and data types",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string", "description": "Schema owner (optional)"}
+                }
+            }
+        )
+    ]
+
+
+@server.call_tool()
+async def handle_call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    """Handle tool calls"""
+    if name == "run_query":
+        sql = arguments.get("sql", "")
+        result = await run_query(sql)
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+    
+    elif name == "get_schema":
+        owner = arguments.get("owner")
+        result = await get_schema(owner)
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+    
+    else:
+        raise ValueError(f"Unknown tool: {name}")
 
 
 # ----------------------
@@ -104,66 +148,27 @@ async def sse_endpoint(request: Request):
 # HTTP POST endpoint for MCP messages
 # ----------------------
 async def handle_mcp_request(request: Request):
-    """Handle MCP JSON-RPC requests"""
+    """Handle MCP JSON-RPC requests via HTTP"""
     try:
-        data = await request.json()
+        # Use the MCP server to handle the request
+        from mcp.server.session import ServerSession
+        from mcp.shared.session import RequestHandlers
         
-        # Simple routing based on method
-        method = data.get("method", "")
-        params = data.get("params", {})
+        # Create a simple transport for HTTP
+        session = ServerSession(server, RequestHandlers())
         
-        if method == "tools/list":
-            # Return available tools
-            result = {
-                "tools": [
-                    {
-                        "name": "run_query",
-                        "description": "Execute a SQL query against Oracle DB",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "sql": {"type": "string", "description": "SQL query to execute"}
-                            },
-                            "required": ["sql"]
-                        }
-                    },
-                    {
-                        "name": "get_schema",
-                        "description": "Retrieve schema information",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "owner": {"type": "string", "description": "Schema owner (optional)"}
-                            }
-                        }
-                    }
-                ]
-            }
-        elif method == "tools/call":
-            tool_name = params.get("name", "")
-            tool_args = params.get("arguments", {})
-            
-            if tool_name == "run_query":
-                result = await run_query(tool_args.get("sql", ""))
-            elif tool_name == "get_schema":
-                result = await get_schema(tool_args.get("owner"))
-            else:
-                result = {"error": f"Unknown tool: {tool_name}"}
-        else:
-            result = {"error": f"Unknown method: {method}"}
+        # Get the JSON-RPC message
+        message = await request.json()
         
-        response = {
-            "jsonrpc": "2.0",
-            "id": data.get("id"),
-            "result": result
-        }
+        # Process through MCP server
+        response = await session.handle_message(message)
         
-        return {"jsonrpc": "2.0", "id": data.get("id"), "result": result}
+        return response
         
     except Exception as e:
         return {
             "jsonrpc": "2.0",
-            "id": data.get("id", None),
+            "id": None,
             "error": {"code": -32603, "message": str(e)}
         }
 
