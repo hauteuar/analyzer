@@ -5,7 +5,7 @@ import oracledb
 from mcp import types
 from mcp.server import Server
 from starlette.applications import Starlette
-from starlette.responses import StreamingResponse
+from starlette.responses import StreamingResponse, JSONResponse
 from starlette.requests import Request
 from starlette.routing import Route
 import uvicorn
@@ -167,7 +167,7 @@ async def handle_mcp_request(request: Request):
         
         # Handle initialize method
         if method == "initialize":
-            return {
+            response_data = {
                 "jsonrpc": "2.0",
                 "id": message.get("id"),
                 "result": {
@@ -183,13 +183,15 @@ async def handle_mcp_request(request: Request):
                     }
                 }
             }
+            return JSONResponse(content=response_data)
         
         # Handle initialized notification
         elif method == "notifications/initialized":
-            return {
+            response_data = {
                 "jsonrpc": "2.0",
                 "result": {}
             }
+            return JSONResponse(content=response_data)
         
         # Handle other methods through MCP server
         else:
@@ -201,14 +203,15 @@ async def handle_mcp_request(request: Request):
             
             # Process through MCP server
             response = await session.handle_message(message)
-            return response
+            return JSONResponse(content=response)
         
     except Exception as e:
-        return {
+        error_response = {
             "jsonrpc": "2.0",
             "id": message.get("id", None) if 'message' in locals() else None,
             "error": {"code": -32603, "message": str(e)}
         }
+        return JSONResponse(content=error_response, status_code=500)
 
 
 # ----------------------
