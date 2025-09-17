@@ -6926,15 +6926,12 @@ function createProgramFlowView(sessionId) {
     const container = document.getElementById('flowVisualization');
     container.innerHTML = '';
     
-    // Create larger SVG dimensions to accommodate separated files
-    const svgWidth = 1400;
-    const svgHeight = 1400;  // Increased height for top/bottom files
-    
+    // Increased height to accommodate top/bottom positioning
     const svg = d3.select(container)
         .append('svg')
-        .attr('width', '100%')
-        .attr('height', '100%')
-        .attr('viewBox', `0 0 ${svgWidth} ${svgHeight}`)
+        .attr('width', '1400px')
+        .attr('height', '1400px')  // Increased from 1200px
+        .attr('viewBox', '0 0 1400 1400')
         .style('border', '1px solid #ddd')
         .style('background', '#fafafa');
 
@@ -7695,54 +7692,25 @@ function drawEnhancedProgramShape(g, node) {
 }
 
 function drawEnhancedFileShape(g, node) {
-    const width = node.width || 100;
-    const height = node.height || 50;
+     const width = node.width;
+    const height = node.height;
     
-    // Enhanced cylinder shape
-    const ellipseHeight = height * 0.25;
-    const fillColor = '#4caf50';
-    const strokeColor = '#2e7d32';
-    
-    // Cylinder body with gradient
+    // Use RECTANGLE for files (standard flowchart symbol)
     g.append('rect')
+        .attr('class', 'node-file')
         .attr('x', -width/2)
-        .attr('y', -height/2 + ellipseHeight/2)
+        .attr('y', -height/2)
         .attr('width', width)
-        .attr('height', height - ellipseHeight)
-        .attr('fill', fillColor)
-        .attr('stroke', strokeColor)
+        .attr('height', height)
+        .attr('rx', 4)
+        .attr('ry', 4)
         .attr('stroke-width', 2);
     
-    // Top and bottom ellipses
-    ['top', 'bottom'].forEach((pos, i) => {
-        g.append('ellipse')
-            .attr('cx', 0)
-            .attr('cy', pos === 'top' ? -height/2 + ellipseHeight/2 : height/2 - ellipseHeight/2)
-            .attr('rx', width/2)
-            .attr('ry', ellipseHeight/2)
-            .attr('fill', i === 0 ? fillColor : '#66bb6a')
-            .attr('stroke', strokeColor)
-            .attr('stroke-width', 2);
-    });
-    
-    // Interface type indicator
-    if (node.interface === 'CICS') {
-        g.append('rect')
-            .attr('x', -width/2 + 3)
-            .attr('y', -height/2 + 3)
-            .attr('width', 25)
-            .attr('height', 12)
-            .attr('fill', '#9c27b0')
-            .attr('rx', 2);
-        
-        g.append('text')
-            .attr('x', -width/2 + 15)
-            .attr('y', -height/2 + 9)
-            .attr('text-anchor', 'middle')
-            .attr('font-size', '7px')
-            .attr('fill', 'white')
-            .text('CICS');
-    }
+    // Add file icon (folded corner)
+    g.append('path')
+        .attr('d', `M${width/2-15},${-height/2} L${width/2-15},${-height/2+10} L${width/2-5},${-height/2+10} L${width/2-5},${-height/2} Z`)
+        .attr('fill', '#4caf50')
+               .attr('stroke', '#2e7d32');
 }
 
 function drawEnhancedDB2Shape(g, node) {
@@ -8114,6 +8082,7 @@ function drawProgramShape(g, node) {
 function drawFileShape(g, node) {
     const width = node.width;
     const height = node.height;
+    const ellipseHeight = height * 0.25;
     
     // Use simple rectangle with document icon styling instead of cylinder
     g.append('rect')
@@ -8905,10 +8874,10 @@ function createHierarchicalLayout(vizData) {
     const startingProgram = programNodes.find(n => n.is_starting_program) || programNodes[0];
     const programLevels = buildProgramHierarchyWithMissing(programNodes, edges, startingProgram);
     
-    // Position programs at their correct levels
+    // Position programs at their correct levels (start lower to make room for input files)
     Object.entries(programLevels).forEach(([level, programs]) => {
         const levelNum = parseInt(level);
-        const yPosition = 120 + (levelNum * levelHeight);  // Start programs lower
+        const yPosition = 200 + (levelNum * levelHeight);  // Start at 200 instead of 120
         const spacing = Math.min(220, (svgWidth - 200) / Math.max(programs.length, 1));
         const startX = (svgWidth - (programs.length - 1) * spacing) / 2;
         
@@ -8924,70 +8893,96 @@ function createHierarchicalLayout(vizData) {
         });
     });
     
-    // SEPARATE INPUT AND OUTPUT FILES BY POSITION
+    // FIXED: Proper file categorization and positioning
     const inputFiles = [];
     const outputFiles = [];
     const ioFiles = [];
     
-    // Categorize files by their I/O direction
+    // Analyze edges to determine file I/O direction
     fileNodes.forEach(file => {
-        const fileEdges = edges.filter(e => e.to === file.id && e.type === 'file_operation');
+        // Find edges connected to this file
+        const connectedEdges = edges.filter(e => e.to === file.id || e.from === file.id);
         let ioDirection = 'unknown';
         
-        fileEdges.forEach(edge => {
-            const analysis = edge.analysis_details || {};
-            if (analysis.io_direction) {
-                ioDirection = analysis.io_direction;
+        connectedEdges.forEach(edge => {
+            if (edge.type === 'file_operation') {
+                // Check analysis details first
+                if (edge.analysis_details && edge.analysis_details.io_direction) {
+                    ioDirection = edge.analysis_details.io_direction;
+                }
+                // Check edge properties
+                else if (edge.io_direction) {
+                    ioDirection = edge.io_direction;
+                }
+                // Check node properties
+                else if (file.io_direction) {
+                    ioDirection = file.io_direction;
+                }
+                // Fallback - check edge labels or operations
+                else if (edge.label && (edge.label.includes('read') || edge.label.includes('READ'))) {
+                    ioDirection = 'INPUT';
+                }
+                else if (edge.label && (edge.label.includes('write') || edge.label.includes('WRITE'))) {
+                    ioDirection = 'OUTPUT';
+                }
             }
         });
         
-        if (ioDirection === 'INPUT' || ioDirection.includes('read')) {
+        // Categorize files
+        console.log(`File ${file.id}: direction = ${ioDirection}`); // Debug log
+        
+        if (ioDirection === 'INPUT' || ioDirection.includes('INPUT') || ioDirection.includes('read')) {
             inputFiles.push(file);
-        } else if (ioDirection === 'OUTPUT' || ioDirection.includes('write')) {
+        } else if (ioDirection === 'OUTPUT' || ioDirection.includes('OUTPUT') || ioDirection.includes('write')) {
             outputFiles.push(file);
         } else {
-            ioFiles.push(file);
+            ioFiles.push(file); // Unknown or bidirectional
         }
     });
     
-    // Position INPUT files at the TOP (above programs)
-    const inputY = 40;  // Above programs
+    console.log(`Categorized files: Input=${inputFiles.length}, Output=${outputFiles.length}, IO=${ioFiles.length}`); // Debug
+    
+    // Position INPUT files at the TOP
+    const inputY = 80; // At the very top
     inputFiles.forEach((file, index) => {
-        const xPos = 100 + (index * 150);
+        const xPos = 200 + (index * 150);
         layoutNodes.push({
             ...file,
             x: xPos,
             y: inputY,
             level: -1,
             width: 100,
-            height: 50
+            height: 50,
+            file_category: 'input'
         });
     });
     
-    // Position OUTPUT files at the BOTTOM (below programs)
+    // Position OUTPUT files at the BOTTOM
     const maxProgramLevel = Math.max(...Object.keys(programLevels).map(Number));
-    const outputY = 120 + ((maxProgramLevel + 1) * levelHeight) + 80;
+    const outputY = 200 + ((maxProgramLevel + 1) * levelHeight) + 100;
     outputFiles.forEach((file, index) => {
-        const xPos = 100 + (index * 150);
+        const xPos = 200 + (index * 150);
         layoutNodes.push({
             ...file,
             x: xPos,
             y: outputY,
             level: maxProgramLevel + 2,
             width: 100,
-            height: 50
+            height: 50,
+            file_category: 'output'
         });
     });
     
-    // Position I/O files on the right side to avoid overlap
+    // Position I/O files on the right side
     ioFiles.forEach((file, index) => {
         layoutNodes.push({
             ...file,
             x: svgWidth - 150,
-            y: 120 + (index * 80),
+            y: 200 + (index * 80),
             level: 1,
             width: 100,
-            height: 50
+            height: 50,
+            file_category: 'io'
         });
     });
     
@@ -8995,8 +8990,8 @@ function createHierarchicalLayout(vizData) {
     db2Nodes.forEach((node, index) => {
         layoutNodes.push({
             ...node,
-            x: 80,
-            y: 120 + (index * 80),
+            x: 100,
+            y: 200 + (index * 80),
             level: 1,
             width: 110,
             height: 50
