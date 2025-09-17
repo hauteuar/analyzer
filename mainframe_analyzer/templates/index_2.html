@@ -2279,6 +2279,158 @@
     padding: 0 10px;
 }
 
+.modal-flow-details {
+    height: 100%;
+    overflow-y: auto;
+}
+
+.flow-summary-header {
+    padding-bottom: 15px;
+    border-bottom: 1px solid #e9ecef;
+    margin-bottom: 20px;
+}
+
+.flow-overview-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.overview-stat {
+    text-align: center;
+    padding: 8px;
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+.stat-value {
+    display: block;
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #667eea;
+}
+
+.stat-label {
+    font-size: 0.8em;
+    color: #6c757d;
+}
+
+.modal-section {
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #f1f1f1;
+}
+
+.modal-section h4 {
+    color: #667eea;
+    margin-bottom: 10px;
+    font-size: 1.1em;
+}
+
+.call-chain-item, .file-operation-item, .db2-operation-item, .missing-program-item {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    margin: 5px 0;
+    border-radius: 4px;
+    border: 1px solid #e9ecef;
+}
+
+.missing-call {
+    background: #fff3cd;
+    border-color: #ffeaa7;
+}
+
+.available-call {
+    background: #d4edda;
+    border-color: #c3e6cb;
+}
+
+.chain-step {
+    background: #667eea;
+    color: white;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8em;
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+.call-flow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.caller, .target {
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: #f8f9fa;
+}
+
+.target.missing {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.dynamic-info, .missing-warning {
+    font-size: 0.8em;
+    margin-top: 4px;
+}
+
+.dynamic-info {
+    color: #9c27b0;
+    font-style: italic;
+}
+
+.missing-warning {
+    color: #856404;
+    font-weight: bold;
+}
+
+.flow-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.action-btn {
+    padding: 8px 16px;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+}
+
+.action-btn:hover {
+    background: #5a6fd8;
+}
+
+.missing-section {
+    background: #fff8f0;
+    padding: 15px;
+    border-radius: 6px;
+    border-left: 4px solid #ff6b35;
+}
+
+.alert.alert-warning {
+    background: #fff3cd;
+    color: #856404;
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 15px;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .layouts-list, .field-flows-grid, .file-operations-grid, .missing-programs-grid {
@@ -6864,6 +7016,276 @@ function createProgramFlowView(sessionId) {
     createEnhancedVisualizationLegend(legend);
 }    
     
+function renderModalFlowDetails(vizData, containerId, programName) {
+    const container = document.getElementById(containerId);
+    
+    if (!container) {
+        console.error('Modal details container not found');
+        return;
+    }
+    
+    // Extract data from visualization
+    const nodes = vizData.nodes || [];
+    const edges = vizData.edges || [];
+    const statistics = vizData.statistics || {};
+    
+    const programNodes = nodes.filter(n => n.type === 'program');
+    const fileNodes = nodes.filter(n => n.type === 'file');
+    const db2Nodes = nodes.filter(n => n.type === 'db2_table');
+    const missingPrograms = programNodes.filter(p => p.status === 'missing');
+    
+    let html = `
+        <div class="modal-flow-details">
+            <div class="flow-summary-header">
+                <h3>Program Flow Analysis: ${programName}</h3>
+                <div class="flow-overview-stats">
+                    <div class="overview-stat">
+                        <span class="stat-value">${programNodes.length}</span>
+                        <span class="stat-label">Programs</span>
+                    </div>
+                    <div class="overview-stat">
+                        <span class="stat-value">${fileNodes.length}</span>
+                        <span class="stat-label">Files</span>
+                    </div>
+                    <div class="overview-stat">
+                        <span class="stat-value">${db2Nodes.length}</span>
+                        <span class="stat-label">DB2 Tables</span>
+                    </div>
+                    <div class="overview-stat">
+                        <span class="stat-value">${missingPrograms.length}</span>
+                        <span class="stat-label">Missing</span>
+                    </div>
+                </div>
+            </div>
+    `;
+    
+    // Program Call Chain Section
+    const programCallEdges = edges.filter(e => e.type === 'program_call');
+    if (programCallEdges.length > 0) {
+        html += `
+            <div class="modal-section">
+                <h4>Program Call Chain (${programCallEdges.length})</h4>
+                <div class="call-chain-list">
+        `;
+        
+        programCallEdges.forEach((edge, index) => {
+            const sourceNode = nodes.find(n => n.id === edge.from);
+            const targetNode = nodes.find(n => n.id === edge.to);
+            const isTargetMissing = !targetNode || targetNode.status === 'missing';
+            
+            html += `
+                <div class="call-chain-item ${isTargetMissing ? 'missing-call' : 'available-call'}">
+                    <div class="chain-step">${index + 1}</div>
+                    <div class="call-details">
+                        <div class="call-flow">
+                            <span class="caller">${edge.from}</span>
+                            <span class="call-arrow">${getCallTypeIcon(edge.call_type || 'CALL')} ${edge.call_type || 'CALL'}</span>
+                            <span class="target ${isTargetMissing ? 'missing' : 'available'}">${edge.to}</span>
+                        </div>
+                        ${edge.variable_name ? `
+                            <div class="dynamic-info">Dynamic via: <code>${edge.variable_name}</code></div>
+                        ` : ''}
+                        ${isTargetMissing ? `
+                            <div class="missing-warning">Program not uploaded - analysis incomplete</div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    // File Operations Section
+    if (fileNodes.length > 0) {
+        html += `
+            <div class="modal-section">
+                <h4>File Operations (${fileNodes.length})</h4>
+                <div class="file-operations-list">
+        `;
+        
+        fileNodes.forEach(file => {
+            const fileEdges = edges.filter(e => e.to === file.id && e.type === 'file_operation');
+            const connectedPrograms = fileEdges.map(e => e.from);
+            
+            html += `
+                <div class="file-operation-item">
+                    <div class="file-header">
+                        <span class="file-icon">${file.interface === 'CICS' ? '🏦' : '📁'}</span>
+                        <span class="file-name">${file.label}</span>
+                        <span class="interface-badge">${file.interface || 'FILE'}</span>
+                    </div>
+                    <div class="file-details">
+                        <div class="connected-programs">
+                            <strong>Used by:</strong> ${connectedPrograms.join(', ')}
+                        </div>
+                        <div class="operations">
+                            <strong>Operations:</strong> ${file.operations ? file.operations.join(', ') : 'READ/WRITE'}
+                        </div>
+                        ${file.io_direction ? `
+                            <div class="io-direction">
+                                <strong>Direction:</strong> ${file.io_direction}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    // DB2 Operations Section
+    if (db2Nodes.length > 0) {
+        html += `
+            <div class="modal-section">
+                <h4>DB2 Operations (${db2Nodes.length})</h4>
+                <div class="db2-operations-list">
+        `;
+        
+        db2Nodes.forEach(db2 => {
+            const db2Edges = edges.filter(e => e.to === db2.id && e.type === 'db2_operation');
+            const connectedPrograms = db2Edges.map(e => e.from);
+            
+            html += `
+                <div class="db2-operation-item">
+                    <div class="db2-header">
+                        <span class="db2-icon">🗃️</span>
+                        <span class="table-name">${db2.label}</span>
+                        <span class="sql-badge">${db2.sql_operation || 'SQL'}</span>
+                    </div>
+                    <div class="db2-details">
+                        <div class="connected-programs">
+                            <strong>Accessed by:</strong> ${connectedPrograms.join(', ')}
+                        </div>
+                        <div class="sql-operations">
+                            <strong>SQL Type:</strong> ${db2.sql_operation || 'Database Operations'}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    }
+    
+    // Missing Programs Section
+    if (missingPrograms.length > 0) {
+        html += `
+            <div class="modal-section missing-section">
+                <h4>Missing Programs (${missingPrograms.length})</h4>
+                <div class="alert alert-warning">
+                    <strong>Analysis Incomplete:</strong> These programs are called but not uploaded.
+                </div>
+                <div class="missing-programs-list">
+        `;
+        
+        missingPrograms.forEach(program => {
+            const callingEdges = edges.filter(e => e.to === program.id && e.type === 'program_call');
+            const callers = callingEdges.map(e => e.from);
+            
+            html += `
+                <div class="missing-program-item">
+                    <div class="missing-header">
+                        <span class="missing-icon">❌</span>
+                        <span class="program-name">${program.label}</span>
+                    </div>
+                    <div class="missing-details">
+                        <div class="called-by">Called by: ${callers.join(', ')}</div>
+                        <div class="impact">Upload this program to complete the flow analysis</div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+                <div class="recommendations">
+                    <h5>Recommendations:</h5>
+                    <ul>
+                        <li>Upload missing programs to see complete call chains</li>
+                        <li>Missing programs may contain additional file and DB2 operations</li>
+                        <li>Complete program set provides better architecture understanding</li>
+                    </ul>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Flow Actions
+    html += `
+        <div class="modal-section">
+            <h4>Analysis Actions</h4>
+            <div class="flow-actions">
+                <button class="action-btn" onclick="askAboutFlow('${programName}')">
+                    Ask AI About This Flow
+                </button>
+                <button class="action-btn" onclick="exportFlowData('${programName}')">
+                    Export Flow Data
+                </button>
+                <button class="action-btn" onclick="refreshFlowAnalysis('${programName}')">
+                    Refresh Analysis
+                </button>
+            </div>
+        </div>
+    `;
+    
+    html += `</div>`; // Close modal-flow-details
+    
+    container.innerHTML = html;
+}
+
+// Helper functions for the modal details
+function getCallTypeIcon(callType) {
+    const icons = {
+        'CALL': '📞',
+        'XCTL': '🔄',
+        'LINK': '🔗',
+        'DYNAMIC': '⚡'
+    };
+    return icons[callType] || '📞';
+}
+
+function askAboutFlow(programName) {
+    closeFlowModal();
+    const chatInput = document.getElementById('chatInput');
+    if (chatInput) {
+        chatInput.value = `Explain the program flow starting from ${programName}. What business processes does this flow support?`;
+        chatInput.focus();
+    }
+}
+
+function exportFlowData(programName) {
+    // Create export data
+    const flowData = {
+        program: programName,
+        timestamp: new Date().toISOString(),
+        visualization: window.currentFlowData
+    };
+    
+    const dataStr = JSON.stringify(flowData, null, 2);
+    const dataBlob = new Blob([dataStr], {type: 'application/json'});
+    
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(dataBlob);
+    link.download = `${programName}_flow_analysis.json`;
+    link.click();
+}
+
+function refreshFlowAnalysis(programName) {
+    closeFlowModal();
+    document.getElementById('startingProgram').value = programName;
+    analyzeEnhancedFlow();
+}
         function addZoomAndPan(svg) {
     const zoom = d3.zoom()
         .scaleExtent([0.2, 3])
