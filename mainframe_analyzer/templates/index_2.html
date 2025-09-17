@@ -6772,11 +6772,29 @@ function createProgramFlowView(sessionId) {
         }
         function renderFlowVisualization(vizData) {
     const container = document.getElementById('flowVisualization');
-    
-    // Clear previous content
     container.innerHTML = '';
     
-    // Create hierarchical layout first
+    // Create larger SVG dimensions to accommodate separated files
+    const svgWidth = 1400;
+    const svgHeight = 1400;  // Increased height for top/bottom files
+    
+    const svg = d3.select(container)
+        .append('svg')
+        .attr('width', '100%')
+        .attr('height', '100%')
+        .attr('viewBox', `0 0 ${svgWidth} ${svgHeight}`)
+        .style('border', '1px solid #ddd')
+        .style('background', '#fafafa');
+
+    // Create zoom container with proper bounds
+    const zoomContainer = svg.append('g').attr('class', 'zoom-container');
+    
+    // Create legend
+    const legend = d3.select(container)
+        .append('div')
+        .attr('class', 'flow-legend');
+    
+    // Create hierarchical layout
     let layoutNodes, layoutEdges;
     try {
         const layoutResult = createHierarchicalLayout(vizData);
@@ -6790,33 +6808,11 @@ function createProgramFlowView(sessionId) {
     
     console.log(`Rendering VERTICAL TREE: ${layoutNodes.length} nodes, ${layoutEdges.length} edges`);
     
-    console.log('=== DEBUGGING NODE POSITIONS ===');
-    layoutNodes.forEach(node => {
-        console.log(`${node.id}: x=${node.x}, y=${node.y}, level=${node.level}`);
-    });
-    console.log('=== END DEBUG ===');
-    const legend = d3.select(container)
-    .append('div')
-    .attr('class', 'flow-legend');
-    // Create SVG with proper vertical tree dimensions
-     const svg = d3.select(container)
-    .append('svg')
-    .attr('width', '1400px')
-    .attr('height', '1200px')
-    .attr('viewBox', '0 0 1400 1200')
-    .style('border', '1px solid #ddd')
-    .style('background', '#fafafa');
-
-// Add zoom container
-const zoomContainer = svg.append('g').attr('class', 'zoom-container');
-
-// Add zoom functionality
-addZoomAndPan(svg);
-
-// Move all drawing operations to zoomContainer instead of svg
-const defs = zoomContainer.append('defs');
-// ... rest of the drawing code uses zoomContainer instead of svg
-
+    // Store edges globally for interaction
+    window.currentFlowEdges = layoutEdges;
+    
+    // Add zoom functionality
+    addZoomAndPan(svg);
     
     // Verify SVG was created
     if (svg.empty()) {
@@ -6824,53 +6820,53 @@ const defs = zoomContainer.append('defs');
         container.innerHTML = '<p style="color: red;">Failed to create SVG visualization.</p>';
         return;
     }
-            // Add arrow markers
-            //const defs = svg.append('defs');
-            createArrowMarkers(defs);
-            
-            // Draw edges first
-            const edges = svg.selectAll('.flow-edge')
-                .data(layoutEdges)
-                .enter()
-                .append('g')
-                .attr('class', 'flow-edge');
-            
-            edges.each(function(d, i) {
-                try {
-                    drawEnhancedEdge(d3.select(this), d);
-                } catch (error) {
-                    console.error(`Error drawing edge ${i}:`, error, d);
-                }
-            });
-            
-            // Draw nodes
-            const nodes = svg.selectAll('.flow-node')
-                .data(layoutNodes)
-                .enter()
-                .append('g')
-                .attr('class', 'flow-node')
-                .attr('transform', d => `translate(${d.x},${d.y})`);
-            
-            // Draw shapes for each node type
-            nodes.each(function(d, i) {
-                try {
-                    drawCustomShape(d3.select(this), d);
-                } catch (error) {
-                    console.error(`Error drawing node ${i}:`, error, d);
-                }
-            });
-            
-            // Add interactivity
-            addEnhancedInteractivity(nodes, layoutEdges);
-            
-            // Create legend
-            createEnhancedVisualizationLegend(legend);
-        }
     
+    // Add arrow markers
+    const defs = zoomContainer.append('defs');
+    createArrowMarkers(defs);
+    
+    // Draw edges first
+    const edges = zoomContainer.selectAll('.flow-edge')
+        .data(layoutEdges)
+        .enter()
+        .append('g')
+        .attr('class', 'flow-edge');
+    
+    edges.each(function(d, i) {
+        try {
+            drawEnhancedEdge(d3.select(this), d);
+        } catch (error) {
+            console.error(`Error drawing edge ${i}:`, error, d);
+        }
+    });
+    
+    // Draw nodes
+    const nodes = zoomContainer.selectAll('.flow-node')
+        .data(layoutNodes)
+        .enter()
+        .append('g')
+        .attr('class', 'flow-node')
+        .attr('transform', d => `translate(${d.x},${d.y})`);
+    
+    // Draw shapes for each node type
+    nodes.each(function(d, i) {
+        try {
+            drawCustomShape(d3.select(this), d);
+        } catch (error) {
+            console.error(`Error drawing node ${i}:`, error, d);
+        }
+    });
+    
+    // Add interactivity
+    addEnhancedInteractivity(nodes, layoutEdges);
+    
+    // Create legend
+    createEnhancedVisualizationLegend(legend);
+}    
     
         function addZoomAndPan(svg) {
     const zoom = d3.zoom()
-        .scaleExtent([0.5, 3])
+        .scaleExtent([0.2, 3])
         .on('zoom', function(event) {
             const { transform } = event;
             svg.select('g.zoom-container').attr('transform', transform);
@@ -6878,7 +6874,6 @@ const defs = zoomContainer.append('defs');
     
     svg.call(zoom);
     
-    // Add zoom controls
     const controls = d3.select(svg.node().parentNode)
         .append('div')
         .attr('class', 'zoom-controls')
@@ -6887,43 +6882,43 @@ const defs = zoomContainer.append('defs');
         .style('left', '10px')
         .style('z-index', '100');
     
+    const buttonStyle = 'margin: 2px; padding: 5px 10px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;';
+    
     controls.append('button')
-        .attr('class', 'zoom-btn')
-        .style('margin', '2px')
-        .style('padding', '5px 10px')
-        .style('background', '#667eea')
-        .style('color', 'white')
-        .style('border', 'none')
-        .style('border-radius', '4px')
-        .style('cursor', 'pointer')
+        .attr('style', buttonStyle)
         .text('Zoom In')
         .on('click', function() {
             svg.transition().call(zoom.scaleBy, 1.2);
         });
     
     controls.append('button')
-        .attr('class', 'zoom-btn')
-        .style('margin', '2px')
-        .style('padding', '5px 10px')
-        .style('background', '#667eea')
-        .style('color', 'white')
-        .style('border', 'none')
-        .style('border-radius', '4px')
-        .style('cursor', 'pointer')
+        .attr('style', buttonStyle)
         .text('Zoom Out')
         .on('click', function() {
             svg.transition().call(zoom.scaleBy, 0.8);
         });
     
     controls.append('button')
-        .attr('class', 'zoom-btn')
-        .style('margin', '2px')
-        .style('padding', '5px 10px')
-        .style('background', '#667eea')
-        .style('color', 'white')
-        .style('border', 'none')
-        .style('border-radius', '4px')
-        .style('cursor', 'pointer')
+        .attr('style', buttonStyle)
+        .text('Fit All')
+        .on('click', function() {
+            const bounds = svg.select('.zoom-container').node().getBBox();
+            const parent = svg.node().parentNode;
+            const fullWidth = parent.clientWidth;
+            const fullHeight = parent.clientHeight;
+            const width = bounds.width;
+            const height = bounds.height;
+            const midX = bounds.x + width / 2;
+            const midY = bounds.y + height / 2;
+            const scale = Math.min(fullWidth / width, fullHeight / height) * 0.8;
+            const translate = [fullWidth / 2 - scale * midX, fullHeight / 2 - scale * midY];
+            
+            svg.transition().duration(750).call(zoom.transform, 
+                d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
+        });
+    
+    controls.append('button')
+        .attr('style', buttonStyle)
         .text('Reset')
         .on('click', function() {
             svg.transition().call(zoom.transform, d3.zoomIdentity);
@@ -7698,7 +7693,7 @@ function drawFileShape(g, node) {
     const width = node.width;
     const height = node.height;
     
-    // Use RECTANGLE for files (standard flowchart symbol)
+    // Use simple rectangle with document icon styling instead of cylinder
     g.append('rect')
         .attr('class', 'node-file')
         .attr('x', -width/2)
@@ -7708,8 +7703,13 @@ function drawFileShape(g, node) {
         .attr('rx', 4)
         .attr('ry', 4)
         .attr('stroke-width', 2);
+    
+    // Add file icon indicator (folded corner)
+    g.append('path')
+        .attr('d', `M${width/2-15},${-height/2} L${width/2-15},${-height/2+10} L${width/2-5},${-height/2+10} L${width/2-5},${-height/2} Z`)
+        .attr('fill', '#2e7d32')
+        .attr('stroke', '#1b5e20');
 }
-
 
 function drawDB2Shape(g, node) {
             const width = node.width;
@@ -8479,14 +8479,14 @@ function createHierarchicalLayout(vizData) {
     const levelHeight = 160;
     const svgWidth = 1400;
     
-    // Build complete program hierarchy including missing programs
+    // Build program hierarchy
     const startingProgram = programNodes.find(n => n.is_starting_program) || programNodes[0];
     const programLevels = buildProgramHierarchyWithMissing(programNodes, edges, startingProgram);
     
     // Position programs at their correct levels
     Object.entries(programLevels).forEach(([level, programs]) => {
         const levelNum = parseInt(level);
-        const yPosition = 80 + (levelNum * levelHeight);
+        const yPosition = 120 + (levelNum * levelHeight);  // Start programs lower
         const spacing = Math.min(220, (svgWidth - 200) / Math.max(programs.length, 1));
         const startX = (svgWidth - (programs.length - 1) * spacing) / 2;
         
@@ -8502,123 +8502,98 @@ function createHierarchicalLayout(vizData) {
         });
     });
     
-    // Position files and DB2 tables connected to programs
-    const maxProgramLevel = Math.max(...Object.keys(programLevels).map(Number));
-    const dataLevel = maxProgramLevel + 1;
-    const dataY = 80 + (dataLevel * levelHeight);
+    // SEPARATE INPUT AND OUTPUT FILES BY POSITION
+    const inputFiles = [];
+    const outputFiles = [];
+    const ioFiles = [];
     
-    const allDataNodes = [...fileNodes, ...db2Nodes];
-    const nodeConnections = {};
-    
-    // Group data nodes by their program connections
-    edges.forEach(edge => {
-        if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
-            const sourceProgram = edge.from;
-            const targetData = edge.to;
-            
-            if (!nodeConnections[sourceProgram]) {
-                nodeConnections[sourceProgram] = [];
-            }
-            nodeConnections[sourceProgram].push(targetData);
-        }
-    });
-    
-    // Position data nodes under their connected programs
-    // Position data nodes under their connected programs with better spacing
-let unconnectedIndex = 0;
-const usedPositions = new Set(); // Track used positions to avoid overlap
-
-allDataNodes.forEach((node) => {
-    let connectedProgram = null;
-    let programPosition = null;
-    
-    // Find which program connects to this node
-    for (const [progName, connections] of Object.entries(nodeConnections)) {
-        if (connections.includes(node.id)) {
-            connectedProgram = progName;
-            programPosition = layoutNodes.find(n => n.id === progName);
-            break;
-        }
-    }
-    
-    let xPosition, yPosition;
-    if (programPosition) {
-        // Better spacing for files under programs
-        const siblingsCount = nodeConnections[connectedProgram].length;
-        const siblingIndex = nodeConnections[connectedProgram].indexOf(node.id);
+    // Categorize files by their I/O direction
+    fileNodes.forEach(file => {
+        const fileEdges = edges.filter(e => e.to === file.id && e.type === 'file_operation');
+        let ioDirection = 'unknown';
         
-        if (siblingsCount === 1) {
-            xPosition = programPosition.x;
-        } else if (siblingsCount === 2) {
-            xPosition = programPosition.x + (siblingIndex === 0 ? -80 : 80);
+        fileEdges.forEach(edge => {
+            const analysis = edge.analysis_details || {};
+            if (analysis.io_direction) {
+                ioDirection = analysis.io_direction;
+            }
+        });
+        
+        if (ioDirection === 'INPUT' || ioDirection.includes('read')) {
+            inputFiles.push(file);
+        } else if (ioDirection === 'OUTPUT' || ioDirection.includes('write')) {
+            outputFiles.push(file);
         } else {
-            // For multiple files, spread them wider
-            const spacing = Math.min(120, 300 / siblingsCount);
-            const startX = programPosition.x - ((siblingsCount - 1) * spacing) / 2;
-            xPosition = startX + (siblingIndex * spacing);
+            ioFiles.push(file);
         }
-        yPosition = dataY;
-    } else {
-        // Position unconnected nodes in a separate column
-        xPosition = svgWidth - 200 - (unconnectedIndex % 2) * 120;
-        yPosition = dataY + Math.floor(unconnectedIndex / 2) * 60;
-        unconnectedIndex++;
-    }
-    
-    // Ensure no overlap by checking used positions
-    const posKey = `${Math.round(xPosition/10)*10}-${Math.round(yPosition/10)*10}`;
-    if (usedPositions.has(posKey)) {
-        xPosition += (usedPositions.size % 3) * 40; // Offset overlapping items
-    }
-    usedPositions.add(posKey);
-    
-    layoutNodes.push({
-        ...node,
-        x: xPosition,
-        y: yPosition,
-        level: dataLevel,
-        width: 100,
-        height: 50,
-        connected_to_program: connectedProgram
     });
-});
     
-    // Create all edges including those to missing programs
+    // Position INPUT files at the TOP (above programs)
+    const inputY = 40;  // Above programs
+    inputFiles.forEach((file, index) => {
+        const xPos = 100 + (index * 150);
+        layoutNodes.push({
+            ...file,
+            x: xPos,
+            y: inputY,
+            level: -1,
+            width: 100,
+            height: 50
+        });
+    });
+    
+    // Position OUTPUT files at the BOTTOM (below programs)
+    const maxProgramLevel = Math.max(...Object.keys(programLevels).map(Number));
+    const outputY = 120 + ((maxProgramLevel + 1) * levelHeight) + 80;
+    outputFiles.forEach((file, index) => {
+        const xPos = 100 + (index * 150);
+        layoutNodes.push({
+            ...file,
+            x: xPos,
+            y: outputY,
+            level: maxProgramLevel + 2,
+            width: 100,
+            height: 50
+        });
+    });
+    
+    // Position I/O files on the right side to avoid overlap
+    ioFiles.forEach((file, index) => {
+        layoutNodes.push({
+            ...file,
+            x: svgWidth - 150,
+            y: 120 + (index * 80),
+            level: 1,
+            width: 100,
+            height: 50
+        });
+    });
+    
+    // Position DB2 nodes on the left side
+    db2Nodes.forEach((node, index) => {
+        layoutNodes.push({
+            ...node,
+            x: 80,
+            y: 120 + (index * 80),
+            level: 1,
+            width: 110,
+            height: 50
+        });
+    });
+    
+    // Create edges
     const layoutEdges = [];
-    
-    // Add ALL program call edges (including to missing programs)
     edges.forEach(edge => {
-        if (edge.type === 'program_call') {
-            const source = layoutNodes.find(n => n.id === edge.from);
-            const target = layoutNodes.find(n => n.id === edge.to);
-            if (source && target) {
-                layoutEdges.push({
-                    ...edge,
-                    source,
-                    target
-                });
-            }
-        }
-    });
-    
-    // Add file/DB2 edges
-    edges.forEach(edge => {
-        if (edge.type === 'file_operation' || edge.type === 'db2_operation') {
-            const source = layoutNodes.find(n => n.id === edge.from);
-            const target = layoutNodes.find(n => n.id === edge.to);
-            
-            if (source && target) {
-                layoutEdges.push({
-                    ...edge,
-                    source,
-                    target
-                });
-            }
+        const source = layoutNodes.find(n => n.id === edge.from);
+        const target = layoutNodes.find(n => n.id === edge.to);
+        if (source && target) {
+            layoutEdges.push({ ...edge, source, target });
         }
     });
     
     return { layoutNodes, layoutEdges };
 }
+
 function buildProgramHierarchyWithMissing(programNodes, edges, startingProgram) {
     const hierarchy = {};
     const visited = new Set();
