@@ -1,31 +1,3 @@
-flowchart TD
-```mermaid
-%%{init: {"themeVariables": {"diagramPadding": 50}}}%%
-flowchart TD
-    ```mermaid
-    %%{init: {"themeVariables": {"diagramPadding": 50}}}%%
-    flowchart TD
-    
-    
-        %% --- Users ---
-        subgraph Users
-            U1[Business Teams]
-            U2[Developers & Data Engineers]
-            U3[Analysts & Executives]
-        end
-
-        %% --- Copilot Layer ---
-        subgraph CopilotLayer
-            GH[GitHub Copilot]
-            M365[MS Copilot Studio]
-        end
-
-        %% --- Orchestration ---
-        subgraph Orchestration
-            WFUI[Workflow Builder UI]
-            REG["Registry & Auth - SSO + Vault"]
-            SRV["MCP Servers - Python / Unix Hosted"]
-        end
 ```mermaid
 %%{init: {"themeVariables": {"diagramPadding": 50}}}%%
 flowchart TD
@@ -52,6 +24,9 @@ flowchart TD
 
     %% --- Connectors ---
     subgraph Connectors
+        ORA[Oracle DB]
+        DB2[DB2]
+        HIVE[Hive / Hadoop]
         ```mermaid
         %%{init: {"themeVariables": {"diagramPadding": 50}}}%%
         flowchart TD

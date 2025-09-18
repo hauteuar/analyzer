@@ -1,0 +1,80 @@
+# MCP Architecture Diagram
+
+The diagram below is a Mermaid flowchart. To render it in VS Code, use a Markdown preview extension that supports Mermaid (for example: 'Markdown Preview Enhanced' or the built-in VS Code markdown preview with Mermaid enabled).
+
+```mermaid
+%%{init: {"themeVariables": {"diagramPadding": 50}}}%%
+flowchart TD
+
+    %% --- Users ---
+    subgraph Users
+        U1[Business Teams]
+        U2[Developers & Data Engineers]
+        U3[Analysts & Executives]
+    end
+
+    %% --- Copilot Layer ---
+    subgraph CopilotLayer
+        GH[GitHub Copilot]
+        M365[MS Copilot Studio]
+    end
+
+    %% --- Orchestration ---
+    subgraph Orchestration
+        WFUI[Workflow Builder UI]
+        REG["Registry & Auth - SSO + Vault"]
+        SRV["MCP Servers - Python / Unix Hosted"]
+    end
+
+    %% --- Connectors ---
+    subgraph Connectors
+        ORA[Oracle DB]
+        DB2[DB2]
+        HIVE[Hive / Hadoop]
+        IMS[IMS API]
+        CICS[CICS API]
+        VSAM[VSAM Files]
+        UNIX[Unix Server Logs]
+        SP[SharePoint / OneDrive]
+    end
+
+    %% --- Tools ---
+    subgraph Tools
+        CLEAN[data_clean_tool]
+        RAG[Agentic RAG + Vector DB]
+        GREP[unix_grep_tool]
+        VIZ[Visualization Agent]
+        DIAG[Diagram Generator]
+    end
+
+    %% --- Outputs ---
+    subgraph Outputs
+        TBL[Tableau Dashboards]
+        MRD[Mermaid Charts]
+        DIO[Draw.io Diagrams]
+        RPT[Analytical Reports]
+    end
+
+    %% --- Connections ---
+    Users --> CopilotLayer
+    CopilotLayer --> Orchestration
+    Orchestration --> Connectors
+    Orchestration --> Tools
+    Tools --> Outputs
+
+    %% --- Styling ---
+    classDef users fill:#f4f9ff,stroke:#004080,stroke-width:2px
+    classDef copilot fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef orchestration fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef connectors fill:#ede7f6,stroke:#5e35b1,stroke-width:2px
+    classDef tools fill:#e0f7fa,stroke:#00838f,stroke-width:2px
+    classDef outputs fill:#fce4ec,stroke:#ad1457,stroke-width:2px
+
+    class U1,U2,U3 users
+    class GH,M365 copilot
+    class WFUI,REG,SRV orchestration
+    class ORA,DB2,HIVE,IMS,CICS,VSAM,UNIX,SP connectors
+    class CLEAN,RAG,GREP,VIZ,DIAG tools
+    class TBL,MRD,DIO,RPT outputs
+
+```
