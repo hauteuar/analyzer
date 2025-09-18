@@ -1,53 +1,56 @@
 flowchart TD
-    subgraph Users[End Users]
+    %% --- Users ---
+    subgraph Users
         U1[Business Teams]
-        U2[Developers / Data Engineers]
-        U3[Analysts / Executives]
+        U2[Developers and Data Engineers]
+        U3[Analysts and Executives]
     end
 
-    subgraph Copilot[Chat & Copilot Layer]
+    %% --- Copilot Layer ---
+    subgraph CopilotLayer
         GH[GitHub Copilot]
-        M365[MS Copilot Studio (M365)]
+        M365[MS Copilot Studio]
     end
 
-    U1 --> GH
-
-    subgraph Orchestration[MCP Workflow Orchestrator]
-        WFUI[Drag-and-Drop Workflow Builder (React UI)]
-        REG[Registry & Auth (SSO + Vault)]
-        SRV[MCP Servers (Python, Unix-hosted)]
+    %% --- Orchestration ---
+    subgraph Orchestration
+        WFUI[Workflow Builder UI]
+        REG[Registry and Auth (SSO + Vault)]
+        SRV[MCP Servers - Python / Unix Hosted]
     end
 
-    GH --> WFUI
-
-    subgraph Connectors[Data & System Connectors]
+    %% --- Connectors ---
+    subgraph Connectors
         ORA[Oracle DB]
         DB2[DB2]
         HIVE[Hive / Hadoop]
         IMS[IMS API]
         CICS[CICS API]
         VSAM[VSAM Files]
-        UNIX[Unix Server (Grep/File Ops)]
+        UNIX[Unix Server Logs]
         SP[SharePoint / OneDrive]
     end
 
-    SRV --> ORA
-
-    subgraph Tools[MCP Tools & Agents]
+    %% --- Tools ---
+    subgraph Tools
         CLEAN[data_clean_tool]
-        RAG[Agentic RAG + VectorDB]
+        RAG[Agentic RAG + Vector DB]
         GREP[unix_grep_tool]
         VIZ[Visualization Agent]
-        DIAG[Diagram Generator (Mermaid / Draw.io)]
+        DIAG[Diagram Generator]
     end
 
-    SRV --> CLEAN
-
-    subgraph Outputs[Outputs & Visualization]
-        TBL[Tableau Server Dashboards]
+    %% --- Outputs ---
+    subgraph Outputs
+        TBL[Tableau Dashboards]
         MRD[Mermaid Charts]
         DIO[Draw.io Diagrams]
         RPT[Analytical Reports]
     end
 
-    VIZ --> MRD
+    %% --- Connections ---
+    Users --> CopilotLayer
+    CopilotLayer --> Orchestration
+    Orchestration --> Connectors
+    Orchestration --> Tools
+    Tools --> Outputs
