@@ -1,46 +1,25 @@
 flowchart TD
-    %% ========================
-    %% STYLING
-    %% ========================
-    classDef users fill:#f9f9f9,stroke:#333,stroke-width:1px,color:#111,rx:8,ry:8;
-    classDef copilot fill:#e0f7fa,stroke:#00838f,stroke-width:2px,color:#004d40,rx:10,ry:10;
-    classDef orch fill:#ede7f6,stroke:#4527a0,stroke-width:2px,color:#1a237e,rx:10,ry:10;
-    classDef conn fill:#fff3e0,stroke:#ef6c00,stroke-width:2px,color:#e65100,rx:8,ry:8;
-    classDef tools fill:#f1f8e9,stroke:#33691e,stroke-width:2px,color:#1b5e20,rx:8,ry:8;
-    classDef outputs fill:#fce4ec,stroke:#ad1457,stroke-width:2px,color:#880e4f,rx:10,ry:10;
-
-    %% ========================
-    %% USERS
-    %% ========================
+    %% --- Users ---
     subgraph Users
         U1[Business Teams]
         U2[Developers & Data Engineers]
         U3[Analysts & Executives]
     end
-    class U1,U2,U3 users;
 
-    %% ========================
-    %% COPILOT LAYER
-    %% ========================
+    %% --- Copilot Layer ---
     subgraph CopilotLayer
         GH[GitHub Copilot]
         M365[MS Copilot Studio]
     end
-    class GH,M365 copilot;
 
-    %% ========================
-    %% ORCHESTRATION
-    %% ========================
+    %% --- Orchestration ---
     subgraph Orchestration
         WFUI[Workflow Builder UI]
-        REG["Registry & Auth: SSO + Vault"]
-        SRV[MCP Servers (Python / Unix)]
+        REG["Registry & Auth - SSO + Vault"]
+        SRV["MCP Servers - Python / Unix Hosted"]
     end
-    class WFUI,REG,SRV orch;
 
-    %% ========================
-    %% CONNECTORS
-    %% ========================
+    %% --- Connectors ---
     subgraph Connectors
         ORA[Oracle DB]
         DB2[DB2]
@@ -48,39 +27,45 @@ flowchart TD
         IMS[IMS API]
         CICS[CICS API]
         VSAM[VSAM Files]
-        UNIX[Unix Logs]
+        UNIX[Unix Server Logs]
         SP[SharePoint / OneDrive]
     end
-    class ORA,DB2,HIVE,IMS,CICS,VSAM,UNIX,SP conn;
 
-    %% ========================
-    %% TOOLS
-    %% ========================
+    %% --- Tools ---
     subgraph Tools
-        CLEAN[Data Cleaning Tool]
+        CLEAN[data_clean_tool]
         RAG[Agentic RAG + Vector DB]
-        GREP[Unix Grep Tool]
+        GREP[unix_grep_tool]
         VIZ[Visualization Agent]
         DIAG[Diagram Generator]
     end
-    class CLEAN,RAG,GREP,VIZ,DIAG tools;
 
-    %% ========================
-    %% OUTPUTS
-    %% ========================
+    %% --- Outputs ---
     subgraph Outputs
         TBL[Tableau Dashboards]
         MRD[Mermaid Charts]
         DIO[Draw.io Diagrams]
         RPT[Analytical Reports]
     end
-    class TBL,MRD,DIO,RPT outputs;
 
-    %% ========================
-    %% CONNECTIONS
-    %% ========================
+    %% --- Connections ---
     Users --> CopilotLayer
     CopilotLayer --> Orchestration
     Orchestration --> Connectors
     Orchestration --> Tools
     Tools --> Outputs
+
+    %% --- Styling ---
+    classDef users fill:#f4f9ff,stroke:#004080,stroke-width:2px
+    classDef copilot fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef orchestration fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef connectors fill:#ede7f6,stroke:#5e35b1,stroke-width:2px
+    classDef tools fill:#e0f7fa,stroke:#00838f,stroke-width:2px
+    classDef outputs fill:#fce4ec,stroke:#ad1457,stroke-width:2px
+
+    class U1,U2,U3 users
+    class GH,M365 copilot
+    class WFUI,REG,SRV orchestration
+    class ORA,DB2,HIVE,IMS,CICS,VSAM,UNIX,SP connectors
+    class CLEAN,RAG,GREP,VIZ,DIAG tools
+    class TBL,MRD,DIO,RPT outputs
