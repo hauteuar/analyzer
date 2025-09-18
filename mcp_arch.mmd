@@ -1,0 +1,53 @@
+flowchart TD
+    subgraph Users[End Users]
+        U1[Business Teams]
+        U2[Developers / Data Engineers]
+        U3[Analysts / Executives]
+    end
+
+    subgraph Copilot[Chat & Copilot Layer]
+        GH[GitHub Copilot]
+        M365[MS Copilot Studio (M365)]
+    end
+
+    U1 --> GH
+
+    subgraph Orchestration[MCP Workflow Orchestrator]
+        WFUI[Drag-and-Drop Workflow Builder (React UI)]
+        REG[Registry & Auth (SSO + Vault)]
+        SRV[MCP Servers (Python, Unix-hosted)]
+    end
+
+    GH --> WFUI
+
+    subgraph Connectors[Data & System Connectors]
+        ORA[Oracle DB]
+        DB2[DB2]
+        HIVE[Hive / Hadoop]
+        IMS[IMS API]
+        CICS[CICS API]
+        VSAM[VSAM Files]
+        UNIX[Unix Server (Grep/File Ops)]
+        SP[SharePoint / OneDrive]
+    end
+
+    SRV --> ORA
+
+    subgraph Tools[MCP Tools & Agents]
+        CLEAN[data_clean_tool]
+        RAG[Agentic RAG + VectorDB]
+        GREP[unix_grep_tool]
+        VIZ[Visualization Agent]
+        DIAG[Diagram Generator (Mermaid / Draw.io)]
+    end
+
+    SRV --> CLEAN
+
+    subgraph Outputs[Outputs & Visualization]
+        TBL[Tableau Server Dashboards]
+        MRD[Mermaid Charts]
+        DIO[Draw.io Diagrams]
+        RPT[Analytical Reports]
+    end
+
+    VIZ --> MRD

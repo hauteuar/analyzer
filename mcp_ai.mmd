@@ -1,0 +1,44 @@
+flowchart TD
+    subgraph Data_Sources["Data Sources"]
+        ORA[Oracle DB]
+        DB2[DB2 Database]
+        HIVE[Hive Big Data]
+        IMS[IMS API]
+        CICS[CICS API]
+        VSAM[VSAM API]
+        UNIX[Unix Logs/Files]
+        SP[SharePoint/OneDrive Docs]
+    end
+
+    subgraph MCP_Layer["MCP Workflow Orchestrator"]
+        CLEAN[data_clean_tool]
+        RAG[doc_rag_tool / agentic_rag_tool]
+        GREP[unix_grep_tool]
+    end
+
+    subgraph Visualization["Visualization & Reporting"]
+        TBL[Tableau Dashboards]
+        MRD[Mermaid Quick Diagrams]
+        DIO[Draw.io Editable Diagrams]
+    end
+
+    ORA --> CLEAN
+    DB2 --> CLEAN
+    HIVE --> CLEAN
+    IMS --> CLEAN
+    CICS --> CLEAN
+    VSAM --> CLEAN
+    UNIX --> GREP
+    SP --> RAG
+
+    CLEAN --> TBL
+    RAG --> MRD
+    RAG --> DIO
+    GREP --> TBL
+
+    subgraph Chat["Copilot / Chat Interface"]
+        USER[User Query]
+    end
+
+    USER --> MCP_Layer
+    MCP_Layer --> Visualization
