@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
