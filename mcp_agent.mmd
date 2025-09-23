@@ -1,0 +1,23 @@
+flowchart TD
+    subgraph User["🧑 User"]
+        UI["Web UI / Copilot"]
+    end
+
+    subgraph Agent["🤖 Agent Layer"]
+        Planner["Agent Orchestrator"]
+        Memory["Context & History Store"]
+    end
+
+    subgraph MCP["🔌 MCP Servers"]
+        DB["Oracle / DB2 / SQL Tools"]
+        DataLake["Data Lake / Hive / S3 Tools"]
+        Tableau["Tableau / Viz Tools"]
+        Docs["SharePoint / RAG Tools"]
+        Mainframe["Mainframe / Legacy Tools"]
+    end
+
+    UI -->|"Goal (Natural Language)"| Planner
+    Planner -->|"Decide Tools + Sequence"| MCP
+    MCP -->|"Results / Data"| Planner
+    Planner -->|"Final Answer / Workflow"| UI
+    Planner <--> Memory
