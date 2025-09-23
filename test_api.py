@@ -1,11 +1,12 @@
 import os
+import asyncio
 from vllm.entrypoints.openai.api_server import run_server
 from argparse import Namespace
 
 # Pick GPU(s) here
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"   # use GPU ID 2 only
 
-def main():
+async def main():
     # Create args as a Namespace object with all required parameters
     args = Namespace(
         model="/models/gemma-3",
@@ -34,7 +35,7 @@ def main():
         max_log_len=None,
     )
     
-    run_server(args)
+    await run_server(args)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
