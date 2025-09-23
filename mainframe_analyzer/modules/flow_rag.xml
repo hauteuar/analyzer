@@ -1,0 +1,137 @@
+<?xml version="1.0" ?>
+<mxfile host="app.diagrams.net">
+  <diagram id="AIFlow" name="AI Flowchart">
+    <mxGraphModel dx="1000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="U" value="User&lt;br/&gt;Ops Team / FAs" style="shape=rectangle;fillColor=#e3f2fd;strokeColor=#1565c0;" vertex="1">
+          <mxGeometry x="40" y="200" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="A" value="Opulence AI Agent" style="shape=rectangle;fillColor=#ede7f6;strokeColor=#512da8;" vertex="1">
+          <mxGeometry x="220" y="200" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="B" value="Check Cache?" style="shape=rhombus;fillColor=#fff3e0;strokeColor=#ef6c00;" vertex="1">
+          <mxGeometry x="400" y="200" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="C" value="Retrieve Answer&lt;br/&gt;from Cache" style="shape=rectangle;fillColor=#f1f8e9;strokeColor=#33691e;" vertex="1">
+          <mxGeometry x="600" y="100" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="S" value="Summarizer" style="shape=rectangle;fillColor=#f1f8e9;strokeColor=#33691e;" vertex="1">
+          <mxGeometry x="800" y="100" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="R" value="Response Generator" style="shape=rectangle;fillColor=#f1f8e9;strokeColor=#33691e;" vertex="1">
+          <mxGeometry x="1000" y="100" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="M" value="Check Chat Session Memory" style="shape=rectangle;fillColor=#fce4ec;strokeColor=#ad1457;" vertex="1">
+          <mxGeometry x="600" y="300" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="EN" value="Enriched Query" style="shape=rectangle;fillColor=#f1f8e9;strokeColor=#33691e;" vertex="1">
+          <mxGeometry x="800" y="300" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="SEL" value="LLM / SLM Selector" style="shape=rhombus;fillColor=#fff3e0;strokeColor=#ef6c00;" vertex="1">
+          <mxGeometry x="1000" y="300" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="SLM" value="Small Language Model" style="shape=rectangle;fillColor=#f9fbe7;strokeColor=#827717;" vertex="1">
+          <mxGeometry x="1200" y="200" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="LLM" value="Large Language Model" style="shape=rectangle;fillColor=#ede7f6;strokeColor=#4527a0;" vertex="1">
+          <mxGeometry x="1200" y="400" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="ROUTE" value="Query Type?" style="shape=rhombus;fillColor=#fff3e0;strokeColor=#ef6c00;" vertex="1">
+          <mxGeometry x="1400" y="300" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="DB" value="Oracle DB&lt;br/&gt;Pricing Data" style="shape=ellipse;fillColor=#e0f7fa;strokeColor=#00838f;" vertex="1">
+          <mxGeometry x="1600" y="200" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="DOCS" value="Document Knowledge Base" style="shape=ellipse;fillColor=#e0f7fa;strokeColor=#00838f;" vertex="1">
+          <mxGeometry x="1600" y="400" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="RET" value="Retrieve Results" style="shape=rectangle;fillColor=#f1f8e9;strokeColor=#33691e;" vertex="1">
+          <mxGeometry x="1800" y="200" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="RET2" value="Retrieve Results via RAG" style="shape=rectangle;fillColor=#f1f8e9;strokeColor=#33691e;" vertex="1">
+          <mxGeometry x="1800" y="400" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="S2" value="Summarizer" style="shape=rectangle;fillColor=#f1f8e9;strokeColor=#33691e;" vertex="1">
+          <mxGeometry x="2000" y="300" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="R2" value="Response Generator" style="shape=rectangle;fillColor=#f1f8e9;strokeColor=#33691e;" vertex="1">
+          <mxGeometry x="2200" y="300" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="CACHE" value="Store in Cache for Reuse" style="shape=ellipse;fillColor=#eeeeee;strokeColor=#424242;" vertex="1">
+          <mxGeometry x="2400" y="300" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="100" style="endArrow=block;" edge="1" source="U" target="A">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="101" style="endArrow=block;" edge="1" source="A" target="B">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="102" style="endArrow=block;" edge="1" source="B" target="C">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="103" style="endArrow=block;" edge="1" source="C" target="S">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="104" style="endArrow=block;" edge="1" source="S" target="R">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="105" style="endArrow=block;" edge="1" source="R" target="U">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="106" style="endArrow=block;" edge="1" source="B" target="M">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="107" style="endArrow=block;" edge="1" source="M" target="EN">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="108" style="endArrow=block;" edge="1" source="EN" target="SEL">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="109" style="endArrow=block;" edge="1" source="SEL" target="SLM">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="110" style="endArrow=block;" edge="1" source="SEL" target="LLM">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="111" style="endArrow=block;" edge="1" source="SLM" target="ROUTE">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="112" style="endArrow=block;" edge="1" source="LLM" target="ROUTE">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="113" style="endArrow=block;" edge="1" source="ROUTE" target="DB">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="114" style="endArrow=block;" edge="1" source="ROUTE" target="DOCS">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="115" style="endArrow=block;" edge="1" source="DB" target="RET">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="116" style="endArrow=block;" edge="1" source="DOCS" target="RET2">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="117" style="endArrow=block;" edge="1" source="RET" target="S2">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="118" style="endArrow=block;" edge="1" source="RET2" target="S2">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="119" style="endArrow=block;" edge="1" source="S2" target="R2">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="120" style="endArrow=block;" edge="1" source="R2" target="U">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="121" style="endArrow=block;" edge="1" source="R2" target="CACHE">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="122" style="endArrow=block;" edge="1" source="CACHE" target="B">
+          <mxGeometry x="0" y="0" width="80" height="40" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
