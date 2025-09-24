@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-MCP File Operations Server - Python Version
-Single file MCP server for GitHub Copilot stdio connection.
+MCP File Operations Server - Remote SSH Version
+Single file MCP server with SSH support for remote Linux servers
 """
 
 import json
@@ -9,15 +9,50 @@ import os
 import sys
 import re
 import signal
+import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+import tempfile
 
 
-class MCPFileServer:
+class RemoteMCPFileServer:
     def __init__(self):
+        # Load configuration from environment variables or config file
+        self.load_config()
         self.setup_signal_handlers()
         self.run()
+
+    def load_config(self):
+        """Load SSH configuration from environment or config file"""
+        # Try to load from environment variables first
+        self.ssh_host = os.getenv('MCP_SSH_HOST')
+        self.ssh_user = os.getenv('MCP_SSH_USER')
+        self.ssh_password = os.getenv('MCP_SSH_PASSWORD')
+        self.ssh_key_file = os.getenv('MCP_SSH_KEY_FILE')
+        self.ssh_port = int(os.getenv('MCP_SSH_PORT', '22'))
+
+        # Try to load from config file if env vars not set
+        config_file = os.getenv('MCP_CONFIG_FILE', 'mcp_config.json')
+        if not self.ssh_host and os.path.exists(config_file):
+            try:
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    self.ssh_host = config.get('ssh_host')
+                    self.ssh_user = config.get('ssh_user')
+                    self.ssh_password = config.get('ssh_password')
+                    self.ssh_key_file = config.get('ssh_key_file')
+                    self.ssh_port = config.get('ssh_port', 22)
+            except Exception as e:
+                self.log_error(f"Error loading config file: {e}")
+
+        # Default to local if no SSH config provided
+        self.use_ssh = bool(self.ssh_host and self.ssh_user)
+        
+        if self.use_ssh:
+            self.log_error(f"Configured for SSH: {self.ssh_user}@{self.ssh_host}:{self.ssh_port}")
+        else:
+            self.log_error("Running in local mode (no SSH configuration found)")
 
     def setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown"""
@@ -31,6 +66,81 @@ class MCPFileServer:
     def log_error(self, message: str):
         """Log error messages to stderr"""
         print(f"MCP Error: {message}", file=sys.stderr)
+
+    def execute_command(self, command: str, input_data: str = None) -> tuple:
+        """Execute command locally or via SSH"""
+        if not self.use_ssh:
+            # Local execution
+            try:
+                result = subprocess.run(
+                    command, 
+                    shell=True, 
+                    capture_output=True, 
+                    text=True, 
+                    input=input_data,
+                    timeout=30
+                )
+                return result.stdout, result.stderr, result.returncode
+            except Exception as e:
+                return "", str(e), 1
+        else:
+            # SSH execution
+            return self.execute_ssh_command(command, input_data)
+
+    def execute_ssh_command(self, command: str, input_data: str = None) -> tuple:
+        """Execute command via SSH"""
+        try:
+            # Build SSH command
+            ssh_cmd = ['ssh']
+            
+            # Add port if specified
+            if self.ssh_port != 22:
+                ssh_cmd.extend(['-p', str(self.ssh_port)])
+            
+            # Add key file if specified
+            if self.ssh_key_file and os.path.exists(self.ssh_key_file):
+                ssh_cmd.extend(['-i', self.ssh_key_file])
+            
+            # SSH options for automation
+            ssh_cmd.extend([
+                '-o', 'StrictHostKeyChecking=no',
+                '-o', 'UserKnownHostsFile=/dev/null',
+                '-o', 'LogLevel=ERROR'
+            ])
+            
+            # Add user@host
+            ssh_cmd.append(f"{self.ssh_user}@{self.ssh_host}")
+            
+            # Add the command
+            ssh_cmd.append(command)
+            
+            # Handle password authentication with sshpass if available
+            if self.ssh_password and not self.ssh_key_file:
+                # Try to use sshpass for password authentication
+                try:
+                    result = subprocess.run(['which', 'sshpass'], capture_output=True)
+                    if result.returncode == 0:
+                        ssh_cmd = ['sshpass', '-p', self.ssh_password] + ssh_cmd
+                    else:
+                        self.log_error("Warning: sshpass not available, password authentication may not work")
+                except:
+                    pass
+            
+            # Execute SSH command
+            result = subprocess.run(
+                ssh_cmd,
+                capture_output=True,
+                text=True,
+                input=input_data,
+                timeout=60
+            )
+            
+            return result.stdout, result.stderr, result.returncode
+            
+        except subprocess.TimeoutExpired:
+            return "", "SSH command timed out", 1
+        except Exception as e:
+            return "", f"SSH execution error: {e}", 1
 
     def send_response(self, response: Dict[str, Any]):
         """Send JSON-RPC response to stdout"""
@@ -50,6 +160,16 @@ class MCPFileServer:
 
     def handle_initialize(self, request_id: str) -> Dict[str, Any]:
         """Handle MCP initialize request"""
+        server_info = {
+            "name": "remote-file-operations-server",
+            "version": "1.0.0"
+        }
+        
+        if self.use_ssh:
+            server_info["description"] = f"Remote file operations via SSH ({self.ssh_user}@{self.ssh_host})"
+        else:
+            server_info["description"] = "Local file operations"
+            
         return {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -58,10 +178,7 @@ class MCPFileServer:
                 "capabilities": {
                     "tools": {}
                 },
-                "serverInfo": {
-                    "name": "file-operations-server",
-                    "version": "1.0.0"
-                }
+                "serverInfo": server_info
             }
         }
 
@@ -74,7 +191,7 @@ class MCPFileServer:
                 "tools": [
                     {
                         "name": "find_files",
-                        "description": "Find files matching a pattern in a directory and return their names",
+                        "description": f"Find files matching a pattern in a directory {'on remote server' if self.use_ssh else 'locally'}",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -107,7 +224,7 @@ class MCPFileServer:
                     },
                     {
                         "name": "search_in_file",
-                        "description": "Search for a string pattern in a file and return matching lines with line numbers",
+                        "description": f"Search for a string pattern in a file {'on remote server' if self.use_ssh else 'locally'}",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -170,58 +287,8 @@ class MCPFileServer:
                 }
             }
 
-    def matches_pattern(self, filename: str, pattern: str, case_sensitive: bool = False) -> bool:
-        """Check if filename matches the given pattern with wildcards"""
-        if not case_sensitive:
-            filename = filename.lower()
-            pattern = pattern.lower()
-
-        # Convert shell-style wildcards to regex
-        regex_pattern = pattern.replace('*', '.*').replace('?', '.')
-        # Escape other regex special characters
-        regex_pattern = re.escape(regex_pattern).replace(r'\.\*', '.*').replace(r'\.', '.')
-        
-        return bool(re.match(f'^{regex_pattern}$', filename))
-
-    def search_directory(self, directory: str, pattern: str, recursive: bool, 
-                        case_sensitive: bool, max_results: int) -> List[Dict[str, Any]]:
-        """Recursively search for files matching pattern"""
-        found_files = []
-        
-        try:
-            path_obj = Path(directory)
-            if not path_obj.is_dir():
-                raise ValueError(f"Path is not a directory: {directory}")
-
-            # Use rglob for recursive search, glob for non-recursive
-            if recursive:
-                paths = path_obj.rglob('*')
-            else:
-                paths = path_obj.glob('*')
-
-            for file_path in paths:
-                if len(found_files) >= max_results:
-                    break
-
-                if file_path.is_file():
-                    if self.matches_pattern(file_path.name, pattern, case_sensitive):
-                        stat = file_path.stat()
-                        found_files.append({
-                            "name": file_path.name,
-                            "path": str(file_path.absolute()),
-                            "size": stat.st_size,
-                            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
-                        })
-
-        except PermissionError as e:
-            self.log_error(f"Permission denied accessing {directory}: {e}")
-        except Exception as e:
-            raise ValueError(f"Error searching directory: {e}")
-
-        return found_files
-
     def find_files(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Find files matching pattern in directory"""
+        """Find files matching pattern using find command"""
         directory = args.get("directory")
         pattern = args.get("pattern")
         recursive = args.get("recursive", False)
@@ -232,10 +299,52 @@ class MCPFileServer:
             raise ValueError("Directory and pattern are required")
 
         try:
-            found_files = self.search_directory(directory, pattern, recursive, case_sensitive, max_results)
+            # Build find command
+            find_cmd = f"find '{directory}'"
             
-            result_text = f"File Pattern Search Results\n"
-            result_text += f"Directory: {Path(directory).absolute()}\n"
+            # Add recursive flag
+            if not recursive:
+                find_cmd += " -maxdepth 1"
+            
+            # Add file type
+            find_cmd += " -type f"
+            
+            # Add name pattern
+            if case_sensitive:
+                find_cmd += f" -name '{pattern}'"
+            else:
+                find_cmd += f" -iname '{pattern}'"
+            
+            # Add stat info and limit results
+            find_cmd += f" -printf '%p|%s|%T@\\n' | head -n {max_results}"
+            
+            stdout, stderr, returncode = self.execute_command(find_cmd)
+            
+            if returncode != 0:
+                raise ValueError(f"Find command failed: {stderr}")
+            
+            # Parse results
+            found_files = []
+            for line in stdout.strip().split('\n'):
+                if line:
+                    try:
+                        path, size, mtime = line.split('|')
+                        found_files.append({
+                            "name": os.path.basename(path),
+                            "path": path,
+                            "size": int(float(size)),
+                            "modified": datetime.fromtimestamp(float(mtime)).isoformat()
+                        })
+                    except ValueError:
+                        continue
+            
+            # Format response
+            location = f"{'Remote' if self.use_ssh else 'Local'} server"
+            if self.use_ssh:
+                location += f" ({self.ssh_user}@{self.ssh_host})"
+                
+            result_text = f"File Pattern Search Results - {location}\n"
+            result_text += f"Directory: {directory}\n"
             result_text += f"Pattern: {pattern}\n"
             result_text += f"Recursive: {recursive}\n"
             result_text += f"Case Sensitive: {case_sensitive}\n"
@@ -249,7 +358,7 @@ class MCPFileServer:
                 result_text += "No files found matching the pattern."
             else:
                 result_text += "Matching files:\n"
-                for i, file_info in enumerate(found_files[:max_results], 1):
+                for i, file_info in enumerate(found_files, 1):
                     result_text += f"{i}. {file_info['name']}\n"
                     result_text += f"   Path: {file_info['path']}\n"
                     result_text += f"   Size: {file_info['size']} bytes\n"
@@ -268,7 +377,7 @@ class MCPFileServer:
             raise ValueError(f"Failed to find files: {e}")
 
     def search_in_file(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Search for string in file"""
+        """Search for string in file using grep"""
         filepath = args.get("filepath")
         search_string = args.get("search_string")
         case_sensitive = args.get("case_sensitive", False)
@@ -279,85 +388,62 @@ class MCPFileServer:
             raise ValueError("Filepath and search_string are required")
 
         try:
-            file_path = Path(filepath)
-            if not file_path.exists():
-                raise ValueError(f"File does not exist: {filepath}")
+            # Build grep command
+            grep_cmd = "grep"
             
-            if not file_path.is_file():
-                raise ValueError(f"Path is not a file: {filepath}")
-
-            # Read file content
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-            except UnicodeDecodeError:
-                # Try with different encoding if UTF-8 fails
-                with open(file_path, 'r', encoding='latin1') as f:
-                    lines = f.readlines()
-
-            # Search for matches
-            search_term = search_string if case_sensitive else search_string.lower()
-            matches = []
-
-            for i, line in enumerate(lines):
-                if len(matches) >= max_results:
-                    break
-
-                search_line = line if case_sensitive else line.lower()
+            # Case sensitivity
+            if not case_sensitive:
+                grep_cmd += " -i"
+            
+            # Line numbers
+            grep_cmd += " -n"
+            
+            # Context lines
+            if context_lines > 0:
+                grep_cmd += f" -C {context_lines}"
+            
+            # Max results (using head)
+            grep_cmd += f" '{search_string}' '{filepath}' | head -n {max_results * (1 + 2 * context_lines)}"
+            
+            stdout, stderr, returncode = self.execute_command(grep_cmd)
+            
+            # grep returns 1 if no matches found, which is not an error
+            if returncode not in [0, 1]:
+                raise ValueError(f"Grep command failed: {stderr}")
+            
+            # Parse results
+            lines = stdout.strip().split('\n') if stdout.strip() else []
+            
+            location = f"{'Remote' if self.use_ssh else 'Local'} server"
+            if self.use_ssh:
+                location += f" ({self.ssh_user}@{self.ssh_host})"
                 
-                if search_term in search_line:
-                    match = {
-                        "line_number": i + 1,
-                        "content": line.rstrip('\n\r'),
-                        "context_before": [],
-                        "context_after": []
-                    }
-
-                    # Add context lines if requested
-                    if context_lines > 0:
-                        # Context before
-                        start_before = max(0, i - context_lines)
-                        for j in range(start_before, i):
-                            match["context_before"].append({
-                                "line_number": j + 1,
-                                "content": lines[j].rstrip('\n\r')
-                            })
-
-                        # Context after
-                        end_after = min(len(lines), i + context_lines + 1)
-                        for j in range(i + 1, end_after):
-                            match["context_after"].append({
-                                "line_number": j + 1,
-                                "content": lines[j].rstrip('\n\r')
-                            })
-
-                    matches.append(match)
-
-            # Format results
-            result_text = f'Search Results for "{search_string}" in {file_path.absolute()}\n'
-            result_text += f"Found {len(matches)} matches"
-            if len(matches) >= max_results:
-                result_text += f" (limited to {max_results})"
+            result_text = f'Search Results for "{search_string}" - {location}\n'
+            result_text += f"File: {filepath}\n"
+            result_text += f"Found {len([l for l in lines if l and not l.startswith('--')])} matches"
             result_text += f"\nCase sensitive: {case_sensitive}\n\n"
 
-            if not matches:
+            if not lines or not any(line.strip() for line in lines):
                 result_text += "No matches found."
             else:
-                for i, match in enumerate(matches, 1):
-                    result_text += f"--- Match {i} ---\n"
-                    
-                    # Context before
-                    for ctx in match["context_before"]:
-                        result_text += f"{ctx['line_number']}: {ctx['content']}\n"
-                    
-                    # The matching line (highlighted)
-                    result_text += f"{match['line_number']}: >>> {match['content']} <<<\n"
-                    
-                    # Context after
-                    for ctx in match["context_after"]:
-                        result_text += f"{ctx['line_number']}: {ctx['content']}\n"
-                    
-                    result_text += "\n"
+                result_text += "Matches:\n"
+                for line in lines:
+                    if line.strip():
+                        if line.startswith('--'):
+                            result_text += "\n"
+                        else:
+                            # Parse line number and content
+                            try:
+                                if ':' in line:
+                                    line_num, content = line.split(':', 1)
+                                    if search_string.lower() in content.lower() or case_sensitive and search_string in content:
+                                        result_text += f"{line_num}: >>> {content} <<<\n"
+                                    else:
+                                        result_text += f"{line_num}: {content}\n"
+                                else:
+                                    result_text += f"{line}\n"
+                            except:
+                                result_text += f"{line}\n"
 
             return {
                 "content": [
@@ -385,7 +471,6 @@ class MCPFileServer:
             elif method == "tools/call":
                 return self.handle_tools_call(request_id, params)
             elif method == "notifications/initialized":
-                # No response needed for notifications
                 return None
             else:
                 self.send_error(request_id, f"Unknown method: {method}", -32601)
@@ -397,20 +482,18 @@ class MCPFileServer:
 
     def run(self):
         """Main server loop"""
-        self.log_error("MCP File Operations Server ready on stdio")
+        self.log_error("Remote MCP File Operations Server ready on stdio")
         
         buffer = ""
         
         try:
             while True:
-                # Read from stdin
                 chunk = sys.stdin.read(1)
                 if not chunk:
                     break
                 
                 buffer += chunk
                 
-                # Process complete JSON messages (line-separated)
                 while '\n' in buffer:
                     line, buffer = buffer.split('\n', 1)
                     line = line.strip()
@@ -437,4 +520,4 @@ class MCPFileServer:
 
 
 if __name__ == "__main__":
-    MCPFileServer()
+    RemoteMCPFileServer()
