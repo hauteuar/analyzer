@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-MCP File Operations Server - Remote SSH Version
-Single file MCP server with SSH support for remote Linux servers
+MCP File Operations Server - Paramiko SSH Version
+Single file MCP server with paramiko SSH support for remote Linux servers
 """
 
 import json
@@ -9,18 +9,36 @@ import os
 import sys
 import re
 import signal
-import subprocess
+import stat
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import tempfile
+import time
+
+try:
+    import paramiko
+    PARAMIKO_AVAILABLE = True
+except ImportError:
+    PARAMIKO_AVAILABLE = False
 
 
-class RemoteMCPFileServer:
+class ParamikoMCPFileServer:
     def __init__(self):
-        # Load configuration from environment variables or config file
+        if not PARAMIKO_AVAILABLE:
+            print("Error: paramiko library is required for SSH functionality", file=sys.stderr)
+            print("Install with: pip install paramiko", file=sys.stderr)
+            sys.exit(1)
+            
+        self.ssh_client = None
+        self.sftp_client = None
         self.load_config()
         self.setup_signal_handlers()
+        
+        # Initialize SSH connection if configured
+        if self.use_ssh:
+            self.connect_ssh()
+            
         self.run()
 
     def load_config(self):
@@ -31,6 +49,7 @@ class RemoteMCPFileServer:
         self.ssh_password = os.getenv('MCP_SSH_PASSWORD')
         self.ssh_key_file = os.getenv('MCP_SSH_KEY_FILE')
         self.ssh_port = int(os.getenv('MCP_SSH_PORT', '22'))
+        self.ssh_timeout = int(os.getenv('MCP_SSH_TIMEOUT', '10'))
 
         # Try to load from config file if env vars not set
         config_file = os.getenv('MCP_CONFIG_FILE', 'mcp_config.json')
@@ -43,6 +62,7 @@ class RemoteMCPFileServer:
                     self.ssh_password = config.get('ssh_password')
                     self.ssh_key_file = config.get('ssh_key_file')
                     self.ssh_port = config.get('ssh_port', 22)
+                    self.ssh_timeout = config.get('ssh_timeout', 10)
             except Exception as e:
                 self.log_error(f"Error loading config file: {e}")
 
@@ -54,6 +74,52 @@ class RemoteMCPFileServer:
         else:
             self.log_error("Running in local mode (no SSH configuration found)")
 
+    def connect_ssh(self):
+        """Establish SSH connection using paramiko"""
+        try:
+            self.ssh_client = paramiko.SSHClient()
+            self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Prepare connection parameters
+            connect_kwargs = {
+                'hostname': self.ssh_host,
+                'port': self.ssh_port,
+                'username': self.ssh_user,
+                'timeout': self.ssh_timeout,
+                'banner_timeout': self.ssh_timeout,
+                'auth_timeout': self.ssh_timeout,
+            }
+            
+            # Use key file if provided, otherwise password
+            if self.ssh_key_file and os.path.exists(self.ssh_key_file):
+                self.log_error(f"Using SSH key: {self.ssh_key_file}")
+                connect_kwargs['key_filename'] = self.ssh_key_file
+            elif self.ssh_password:
+                self.log_error("Using SSH password authentication")
+                connect_kwargs['password'] = self.ssh_password
+            else:
+                # Try default SSH keys
+                self.log_error("Trying default SSH keys")
+                connect_kwargs['look_for_keys'] = True
+            
+            # Connect
+            self.ssh_client.connect(**connect_kwargs)
+            
+            # Initialize SFTP client for file operations
+            self.sftp_client = self.ssh_client.open_sftp()
+            
+            self.log_error(f"Successfully connected to {self.ssh_user}@{self.ssh_host}")
+            
+        except paramiko.AuthenticationException as e:
+            self.log_error(f"SSH authentication failed: {e}")
+            raise Exception(f"SSH authentication failed: {e}")
+        except paramiko.SSHException as e:
+            self.log_error(f"SSH connection error: {e}")
+            raise Exception(f"SSH connection error: {e}")
+        except Exception as e:
+            self.log_error(f"Failed to connect via SSH: {e}")
+            raise Exception(f"Failed to connect via SSH: {e}")
+
     def setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown"""
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -61,86 +127,131 @@ class RemoteMCPFileServer:
 
     def signal_handler(self, signum, frame):
         """Handle shutdown signals"""
+        self.cleanup()
         sys.exit(0)
+
+    def cleanup(self):
+        """Clean up SSH connections"""
+        try:
+            if self.sftp_client:
+                self.sftp_client.close()
+            if self.ssh_client:
+                self.ssh_client.close()
+        except:
+            pass
 
     def log_error(self, message: str):
         """Log error messages to stderr"""
         print(f"MCP Error: {message}", file=sys.stderr)
 
-    def execute_command(self, command: str, input_data: str = None) -> tuple:
+    def execute_command(self, command: str) -> tuple:
         """Execute command locally or via SSH"""
         if not self.use_ssh:
             # Local execution
             try:
+                import subprocess
                 result = subprocess.run(
                     command, 
                     shell=True, 
                     capture_output=True, 
                     text=True, 
-                    input=input_data,
                     timeout=30
                 )
                 return result.stdout, result.stderr, result.returncode
             except Exception as e:
                 return "", str(e), 1
         else:
-            # SSH execution
-            return self.execute_ssh_command(command, input_data)
+            # SSH execution using paramiko
+            return self.execute_ssh_command(command)
 
-    def execute_ssh_command(self, command: str, input_data: str = None) -> tuple:
-        """Execute command via SSH"""
+    def execute_ssh_command(self, command: str) -> tuple:
+        """Execute command via SSH using paramiko"""
         try:
-            # Build SSH command
-            ssh_cmd = ['ssh']
+            if not self.ssh_client:
+                raise Exception("SSH client not connected")
             
-            # Add port if specified
-            if self.ssh_port != 22:
-                ssh_cmd.extend(['-p', str(self.ssh_port)])
-            
-            # Add key file if specified
-            if self.ssh_key_file and os.path.exists(self.ssh_key_file):
-                ssh_cmd.extend(['-i', self.ssh_key_file])
-            
-            # SSH options for automation
-            ssh_cmd.extend([
-                '-o', 'StrictHostKeyChecking=no',
-                '-o', 'UserKnownHostsFile=/dev/null',
-                '-o', 'LogLevel=ERROR'
-            ])
-            
-            # Add user@host
-            ssh_cmd.append(f"{self.ssh_user}@{self.ssh_host}")
-            
-            # Add the command
-            ssh_cmd.append(command)
-            
-            # Handle password authentication with sshpass if available
-            if self.ssh_password and not self.ssh_key_file:
-                # Try to use sshpass for password authentication
-                try:
-                    result = subprocess.run(['which', 'sshpass'], capture_output=True)
-                    if result.returncode == 0:
-                        ssh_cmd = ['sshpass', '-p', self.ssh_password] + ssh_cmd
-                    else:
-                        self.log_error("Warning: sshpass not available, password authentication may not work")
-                except:
-                    pass
-            
-            # Execute SSH command
-            result = subprocess.run(
-                ssh_cmd,
-                capture_output=True,
-                text=True,
-                input=input_data,
-                timeout=60
+            # Execute command
+            stdin, stdout, stderr = self.ssh_client.exec_command(
+                command, 
+                timeout=30,
+                get_pty=False
             )
             
-            return result.stdout, result.stderr, result.returncode
+            # Read output
+            stdout_data = stdout.read().decode('utf-8', errors='replace')
+            stderr_data = stderr.read().decode('utf-8', errors='replace')
+            exit_status = stdout.channel.recv_exit_status()
             
-        except subprocess.TimeoutExpired:
-            return "", "SSH command timed out", 1
-        except Exception as e:
+            # Close channels
+            stdin.close()
+            stdout.close()
+            stderr.close()
+            
+            return stdout_data, stderr_data, exit_status
+            
+        except paramiko.SSHException as e:
             return "", f"SSH execution error: {e}", 1
+        except Exception as e:
+            return "", f"Command execution error: {e}", 1
+
+    def get_file_info(self, filepath: str) -> Dict[str, Any]:
+        """Get file information locally or via SFTP"""
+        try:
+            if not self.use_ssh:
+                # Local file info
+                path_obj = Path(filepath)
+                if not path_obj.exists():
+                    return None
+                
+                stat_info = path_obj.stat()
+                return {
+                    'name': path_obj.name,
+                    'path': str(path_obj.absolute()),
+                    'size': stat_info.st_size,
+                    'modified': datetime.fromtimestamp(stat_info.st_mtime).isoformat(),
+                    'is_file': path_obj.is_file()
+                }
+            else:
+                # Remote file info via SFTP
+                if not self.sftp_client:
+                    return None
+                
+                try:
+                    stat_info = self.sftp_client.stat(filepath)
+                    return {
+                        'name': os.path.basename(filepath),
+                        'path': filepath,
+                        'size': stat_info.st_size,
+                        'modified': datetime.fromtimestamp(stat_info.st_mtime).isoformat(),
+                        'is_file': stat.S_ISREG(stat_info.st_mode)
+                    }
+                except FileNotFoundError:
+                    return None
+                    
+        except Exception as e:
+            self.log_error(f"Error getting file info for {filepath}: {e}")
+            return None
+
+    def read_file_content(self, filepath: str, max_size: int = 10*1024*1024) -> str:
+        """Read file content locally or via SFTP"""
+        try:
+            if not self.use_ssh:
+                # Local file reading
+                with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                    return f.read(max_size)
+            else:
+                # Remote file reading via SFTP
+                if not self.sftp_client:
+                    raise Exception("SFTP client not available")
+                
+                with self.sftp_client.open(filepath, 'r') as f:
+                    content = f.read(max_size)
+                    if isinstance(content, bytes):
+                        content = content.decode('utf-8', errors='replace')
+                    return content
+                    
+        except Exception as e:
+            raise Exception(f"Error reading file {filepath}: {e}")
 
     def send_response(self, response: Dict[str, Any]):
         """Send JSON-RPC response to stdout"""
@@ -161,12 +272,12 @@ class RemoteMCPFileServer:
     def handle_initialize(self, request_id: str) -> Dict[str, Any]:
         """Handle MCP initialize request"""
         server_info = {
-            "name": "remote-file-operations-server",
+            "name": "paramiko-file-operations-server",
             "version": "1.0.0"
         }
         
         if self.use_ssh:
-            server_info["description"] = f"Remote file operations via SSH ({self.ssh_user}@{self.ssh_host})"
+            server_info["description"] = f"Remote file operations via Paramiko SSH ({self.ssh_user}@{self.ssh_host})"
         else:
             server_info["description"] = "Local file operations"
             
@@ -191,7 +302,7 @@ class RemoteMCPFileServer:
                 "tools": [
                     {
                         "name": "find_files",
-                        "description": f"Find files matching a pattern in a directory {'on remote server' if self.use_ssh else 'locally'}",
+                        "description": f"Find files matching a pattern in a directory {'on remote server via Paramiko SSH' if self.use_ssh else 'locally'}",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -224,7 +335,7 @@ class RemoteMCPFileServer:
                     },
                     {
                         "name": "search_in_file",
-                        "description": f"Search for a string pattern in a file {'on remote server' if self.use_ssh else 'locally'}",
+                        "description": f"Search for a string pattern in a file {'on remote server via Paramiko SSH' if self.use_ssh else 'locally'}",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -316,26 +427,28 @@ class RemoteMCPFileServer:
                 find_cmd += f" -iname '{pattern}'"
             
             # Add stat info and limit results
-            find_cmd += f" -printf '%p|%s|%T@\\n' | head -n {max_results}"
+            find_cmd += f" -printf '%p|%s|%T@\\n' 2>/dev/null | head -n {max_results}"
             
             stdout, stderr, returncode = self.execute_command(find_cmd)
-            
-            if returncode != 0:
-                raise ValueError(f"Find command failed: {stderr}")
             
             # Parse results
             found_files = []
             for line in stdout.strip().split('\n'):
-                if line:
+                if line and '|' in line:
                     try:
-                        path, size, mtime = line.split('|')
-                        found_files.append({
-                            "name": os.path.basename(path),
-                            "path": path,
-                            "size": int(float(size)),
-                            "modified": datetime.fromtimestamp(float(mtime)).isoformat()
-                        })
-                    except ValueError:
+                        parts = line.split('|')
+                        if len(parts) >= 3:
+                            path = parts[0]
+                            size = int(float(parts[1]))
+                            mtime = float(parts[2])
+                            
+                            found_files.append({
+                                "name": os.path.basename(path),
+                                "path": path,
+                                "size": size,
+                                "modified": datetime.fromtimestamp(mtime).isoformat()
+                            })
+                    except (ValueError, IndexError):
                         continue
             
             # Format response
@@ -377,7 +490,7 @@ class RemoteMCPFileServer:
             raise ValueError(f"Failed to find files: {e}")
 
     def search_in_file(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Search for string in file using grep"""
+        """Search for string in file"""
         filepath = args.get("filepath")
         search_string = args.get("search_string")
         case_sensitive = args.get("case_sensitive", False)
@@ -388,62 +501,79 @@ class RemoteMCPFileServer:
             raise ValueError("Filepath and search_string are required")
 
         try:
-            # Build grep command
-            grep_cmd = "grep"
+            # Read file content
+            content = self.read_file_content(filepath)
+            lines = content.splitlines()
             
-            # Case sensitivity
-            if not case_sensitive:
-                grep_cmd += " -i"
-            
-            # Line numbers
-            grep_cmd += " -n"
-            
-            # Context lines
-            if context_lines > 0:
-                grep_cmd += f" -C {context_lines}"
-            
-            # Max results (using head)
-            grep_cmd += f" '{search_string}' '{filepath}' | head -n {max_results * (1 + 2 * context_lines)}"
-            
-            stdout, stderr, returncode = self.execute_command(grep_cmd)
-            
-            # grep returns 1 if no matches found, which is not an error
-            if returncode not in [0, 1]:
-                raise ValueError(f"Grep command failed: {stderr}")
-            
-            # Parse results
-            lines = stdout.strip().split('\n') if stdout.strip() else []
-            
+            # Search for matches
+            search_term = search_string if case_sensitive else search_string.lower()
+            matches = []
+
+            for i, line in enumerate(lines):
+                if len(matches) >= max_results:
+                    break
+
+                search_line = line if case_sensitive else line.lower()
+                
+                if search_term in search_line:
+                    match = {
+                        "line_number": i + 1,
+                        "content": line,
+                        "context_before": [],
+                        "context_after": []
+                    }
+
+                    # Add context lines if requested
+                    if context_lines > 0:
+                        # Context before
+                        start_before = max(0, i - context_lines)
+                        for j in range(start_before, i):
+                            match["context_before"].append({
+                                "line_number": j + 1,
+                                "content": lines[j]
+                            })
+
+                        # Context after
+                        end_after = min(len(lines), i + context_lines + 1)
+                        for j in range(i + 1, end_after):
+                            match["context_after"].append({
+                                "line_number": j + 1,
+                                "content": lines[j]
+                            })
+
+                    matches.append(match)
+
+            # Format results
             location = f"{'Remote' if self.use_ssh else 'Local'} server"
             if self.use_ssh:
                 location += f" ({self.ssh_user}@{self.ssh_host})"
                 
             result_text = f'Search Results for "{search_string}" - {location}\n'
             result_text += f"File: {filepath}\n"
-            result_text += f"Found {len([l for l in lines if l and not l.startswith('--')])} matches"
+            result_text += f"Found {len(matches)} matches"
+            if len(matches) >= max_results:
+                result_text += f" (limited to {max_results})"
             result_text += f"\nCase sensitive: {case_sensitive}\n\n"
 
-            if not lines or not any(line.strip() for line in lines):
+            if not matches:
                 result_text += "No matches found."
             else:
                 result_text += "Matches:\n"
-                for line in lines:
-                    if line.strip():
-                        if line.startswith('--'):
-                            result_text += "\n"
-                        else:
-                            # Parse line number and content
-                            try:
-                                if ':' in line:
-                                    line_num, content = line.split(':', 1)
-                                    if search_string.lower() in content.lower() or case_sensitive and search_string in content:
-                                        result_text += f"{line_num}: >>> {content} <<<\n"
-                                    else:
-                                        result_text += f"{line_num}: {content}\n"
-                                else:
-                                    result_text += f"{line}\n"
-                            except:
-                                result_text += f"{line}\n"
+                for i, match in enumerate(matches, 1):
+                    result_text += f"--- Match {i} ---\n"
+                    
+                    # Context before
+                    for ctx in match["context_before"]:
+                        result_text += f"{ctx['line_number']}: {ctx['content']}\n"
+                    
+                    # The matching line (highlighted)
+                    result_text += f"{match['line_number']}: >>> {match['content']} <<<\n"
+                    
+                    # Context after
+                    for ctx in match["context_after"]:
+                        result_text += f"{ctx['line_number']}: {ctx['content']}\n"
+                    
+                    result_text += "\n"
 
             return {
                 "content": [
@@ -482,7 +612,7 @@ class RemoteMCPFileServer:
 
     def run(self):
         """Main server loop"""
-        self.log_error("Remote MCP File Operations Server ready on stdio")
+        self.log_error("Paramiko MCP File Operations Server ready on stdio")
         
         buffer = ""
         
@@ -516,8 +646,9 @@ class RemoteMCPFileServer:
         except Exception as e:
             self.log_error(f"Fatal error: {e}")
         finally:
+            self.cleanup()
             sys.exit(0)
 
 
 if __name__ == "__main__":
-    RemoteMCPFileServer()
+    ParamikoMCPFileServer()
