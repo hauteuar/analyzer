@@ -458,3 +458,8 @@ PRAGMA journal_mode = WAL;
 PRAGMA temp_store = MEMORY;
 ```
 
+# Set build flags and install
+CMAKE_ARGS="-DLLAMA_CUBLAS=ON -DCMAKE_CUDA_ARCHITECTURES=all-major" pip install llama-cpp-python --verbose
+
+# If no CUDA, use CPU version
+CMAKE_ARGS="-DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS" pip install llama-cpp-python --verbose
