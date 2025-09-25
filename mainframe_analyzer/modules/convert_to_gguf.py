@@ -25,12 +25,29 @@ def convert_hf_to_gguf(model_path, output_path):
     # Add model metadata
     print("Adding metadata...")
     config = model.config
-    gguf_writer.add_architecture("llama")
+    
+    # Handle different model architectures
+    model_type = getattr(config, 'model_type', 'unknown')
+    print(f"Detected model type: {model_type}")
+    
+    if model_type == 'gemma':
+        gguf_writer.add_architecture("gemma")
+        hidden_size = getattr(config, 'hidden_size', getattr(config, 'dim', 0))
+        num_layers = getattr(config, 'num_hidden_layers', getattr(config, 'n_layers', 0))
+        intermediate_size = getattr(config, 'intermediate_size', getattr(config, 'hidden_dim', 0))
+        num_heads = getattr(config, 'num_attention_heads', getattr(config, 'n_heads', 0))
+    else:
+        gguf_writer.add_architecture("llama")
+        hidden_size = config.hidden_size
+        num_layers = config.num_hidden_layers
+        intermediate_size = config.intermediate_size
+        num_heads = config.num_attention_heads
+    
     gguf_writer.add_context_length(getattr(config, 'max_position_embeddings', 2048))
-    gguf_writer.add_embedding_length(config.hidden_size)
-    gguf_writer.add_block_count(config.num_hidden_layers)
-    gguf_writer.add_feed_forward_length(config.intermediate_size)
-    gguf_writer.add_head_count(config.num_attention_heads)
+    gguf_writer.add_embedding_length(hidden_size)
+    gguf_writer.add_block_count(num_layers)
+    gguf_writer.add_feed_forward_length(intermediate_size)
+    gguf_writer.add_head_count(num_heads)
     
     # Add model weights
     print("Converting model weights...")
