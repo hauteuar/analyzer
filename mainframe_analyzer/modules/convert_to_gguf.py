@@ -10,7 +10,7 @@ def convert_hf_to_gguf(model_path, output_path):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     
     # Create GGUF writer
-    gguf_writer = gguf.GGUFWriter(output_path, "llama")
+    gguf_writer = gguf.GGUFWriter(output_path, "converted_model")
     
     # Add tokenizer
     print("Adding tokenizer...")
@@ -25,8 +25,6 @@ def convert_hf_to_gguf(model_path, output_path):
     # Add model metadata
     print("Adding metadata...")
     config = model.config
-    gguf_writer.add_name("converted_model")
-    gguf_writer.add_description("Model converted from HuggingFace")
     gguf_writer.add_architecture("llama")
     gguf_writer.add_context_length(getattr(config, 'max_position_embeddings', 2048))
     gguf_writer.add_embedding_length(config.hidden_size)
