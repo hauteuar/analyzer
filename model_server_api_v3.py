@@ -62,13 +62,16 @@ llm_kwargs = {
     "tensor_parallel_size": TENSOR_PARALLEL_SIZE,
     "max_model_len": MAX_MODEL_LEN,
     "gpu_memory_utilization": 0.9,
-    "trust_remote_code": True
+    "trust_remote_code": True,
+    "tokenizer_mode": "auto"  # Important for Gemma 3
 }
 
 # Add multimodal-specific parameters
 if IS_MULTIMODAL:
     llm_kwargs["max_num_seqs"] = 5  # Reduce batch size for multimodal
     llm_kwargs["limit_mm_per_prompt"] = {"image": 10}  # Max images per prompt
+    # For Gemma 3, we need to ensure the tokenizer is loaded correctly
+    llm_kwargs["tokenizer"] = MODEL_NAME
 
 llm = LLM(**llm_kwargs)
 
