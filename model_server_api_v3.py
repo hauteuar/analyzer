@@ -28,19 +28,17 @@ def get_available_gpus(num_gpus_needed=4):
     return len(available_gpus)
 
 # Configuration - Choose your model
-# Gemma 3 models (MULTIMODAL - text + images):
-MODEL_NAME = "google/gemma-3-12b-it"  # 12B instruction-tuned (recommended)
-# MODEL_NAME = "google/gemma-3-4b-it"   # 4B instruction-tuned (smaller, faster)
-# MODEL_NAME = "google/gemma-3-27b-it"  # 27B instruction-tuned (best quality)
+# OpenAI GPT-OSS models (TEXT-ONLY, Apache 2.0 license):
+MODEL_NAME = "openai/gpt-oss-20b"  # 21B params, 16GB memory, RECOMMENDED
+# MODEL_NAME = "openai/gpt-oss-120b"  # 117B params, 80GB memory, more powerful
 
-# Other multimodal models:
-# MODEL_NAME = "google/paligemma-3b-mix-448"
+# Other text-only models:
+# MODEL_NAME = "google/gemma-2-9b-it"
+# MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
+
+# Multimodal models (if needed):
 # MODEL_NAME = "llava-hf/llava-1.5-7b-hf"
 # MODEL_NAME = "Qwen/Qwen2-VL-7B-Instruct"
-
-# Text-only models:
-# MODEL_NAME = "google/gemma-2-9b-it"
-# MODEL_NAME = "google/gemma-3-1b-it"  # Text-only 1B variant
 
 MAX_MODEL_LEN = 4096
 TENSOR_PARALLEL_SIZE = get_available_gpus(num_gpus_needed=4)
@@ -63,15 +61,18 @@ llm_kwargs = {
     "max_model_len": MAX_MODEL_LEN,
     "gpu_memory_utilization": 0.9,
     "trust_remote_code": True,
-    "tokenizer_mode": "auto"  # Important for Gemma 3
+    "tokenizer_mode": "auto"
 }
+
+# Special handling for GPT-OSS models
+if "gpt-oss" in MODEL_NAME.lower():
+    print("Note: GPT-OSS models require harmony response format")
+    # GPT-OSS works best with vLLM's native support
 
 # Add multimodal-specific parameters
 if IS_MULTIMODAL:
-    llm_kwargs["max_num_seqs"] = 5  # Reduce batch size for multimodal
-    llm_kwargs["limit_mm_per_prompt"] = {"image": 10}  # Max images per prompt
-    # For Gemma 3, we need to ensure the tokenizer is loaded correctly
-    llm_kwargs["tokenizer"] = MODEL_NAME
+    llm_kwargs["max_num_seqs"] = 5
+    llm_kwargs["limit_mm_per_prompt"] = {"image": 10}
 
 llm = LLM(**llm_kwargs)
 
