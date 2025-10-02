@@ -39,7 +39,7 @@ class DB2MCPServer:
                 self.conn_string = f"DSN={dsn};UID={db_user};PWD={db_pass}"
             else:
                 # Option 2: Use connection string without DSN
-                driver = os.getenv("DB2_DRIVER", "{IBM DB2 ODBC DRIVER}")
+                driver = os.getenv("DB2_DRIVER", "IBM DB2 ODBC DRIVER - DB2COPY1")
                 db_host = os.getenv("DB2_HOST", "localhost")
                 db_port = os.getenv("DB2_PORT", "50000")
                 db_name = os.getenv("DB2_DATABASE")
