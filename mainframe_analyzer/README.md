@@ -463,3 +463,12 @@ CMAKE_ARGS="-DLLAMA_CUBLAS=ON -DCMAKE_CUDA_ARCHITECTURES=all-major" pip install 
 
 # If no CUDA, use CPU version
 CMAKE_ARGS="-DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS" pip install llama-cpp-python --verbose
+
+
+pip install --pre vllm==0.10.1+gptoss \
+  --extra-index-url https://wheels.vllm.ai/gpt-oss/ \
+  --extra-index-url https://download.pytorch.org/whl/nightly/cu128 \
+  --index-strategy unsafe-best
+
+# Install LiteLLM
+pip install litellm
