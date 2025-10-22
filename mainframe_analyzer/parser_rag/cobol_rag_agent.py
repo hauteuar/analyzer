@@ -506,12 +506,15 @@ class ProgramGraphBuilder:
     
     def save_graph(self, filepath: str):
         """Save graph to file"""
-        nx.write_gpickle(self.graph, filepath)
-    
+        import pickle
+        with open(filepath, 'wb') as f:
+            pickle.dump(self.graph, f)
+
     def load_graph(self, filepath: str):
         """Load graph from file"""
-        self.graph = nx.read_gpickle(filepath)
-
+        import pickle
+        with open(filepath, 'rb') as f:
+            self.graph = pickle.load(f)
 
 # ============================================================================
 # VECTOR INDEX BUILDER
