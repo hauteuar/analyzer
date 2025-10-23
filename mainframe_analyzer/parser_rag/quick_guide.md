@@ -349,3 +349,20 @@ python cobol_rag_agent.py serve --index-dir ./index
 ```
 
 That's it! 🎉
+
+{
+  "mcp.servers": {
+    "cobol-rag": {
+      "command": "python3",
+      "args": [
+        "-u",
+        "/home/username/cobol-project/mcp_server_rag.py"
+      ],
+      "cwd": "/home/username/cobol-project",
+      "env": {
+        "INDEX_DIR": "/home/username/cobol-project/index",
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
