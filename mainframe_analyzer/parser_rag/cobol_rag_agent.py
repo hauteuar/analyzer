@@ -971,20 +971,28 @@ class COBOLIndexer:
     
     def load_all(self):
         """Load all indexes from disk"""
+        # Load code index (required)
         self.code_index.load_index(
             str(self.output_dir / 'code_index.faiss'),
             str(self.output_dir / 'code_chunks.json')
         )
         
-        self.doc_index.load_index(
-            str(self.output_dir / 'doc_index.faiss'),
-            str(self.output_dir / 'doc_chunks.json')
-        )
+        # Load doc index (optional)
+        doc_index_path = self.output_dir / 'doc_index.faiss'
+        doc_chunks_path = self.output_dir / 'doc_chunks.json'
+        if doc_index_path.exists() and doc_chunks_path.exists():
+            self.doc_index.load_index(
+                str(doc_index_path),
+                str(doc_chunks_path)
+            )
+            logger.info("Loaded doc index")
+        else:
+            logger.info("No doc index found (optional)")
         
+        # Load graph (required)
         self.graph.load_graph(str(self.output_dir / 'program_graph.gpickle'))
         
         logger.info(f"All indexes loaded from {self.output_dir}")
-
 
 # ============================================================================
 # CLI INTERFACE
