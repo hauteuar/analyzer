@@ -246,7 +246,8 @@ def patch_mcp_server():
             from enhanced_flow_diagram_generator import EnhancedFlowDiagramGenerator
             
             generator = EnhancedFlowDiagramGenerator(self.graph)
-            result = generator.generate_complete_flow(program, max_depth)
+            # Use generate_flow() which is the main entry point
+            result = generator.generate_flow(program, max_depth)
             
             return result
         

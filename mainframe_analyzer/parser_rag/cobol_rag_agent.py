@@ -1173,6 +1173,18 @@ Generates comprehensive Mermaid diagrams showing:
 
 
 
+"""
+EnhancedFlowDiagramGenerator - Complete Flow Visualization
+===========================================================
+Generates comprehensive Mermaid diagrams showing:
+- Program call chains (static, dynamic, CICS)
+- Input/Output files
+- Database operations
+- MQ operations
+- Full execution flow
+"""
+
+
 class EnhancedFlowDiagramGenerator:
     """
     Enhanced flow diagram generator that shows complete program execution flow
@@ -1191,6 +1203,20 @@ class EnhancedFlowDiagramGenerator:
             'mq_queue': '#FFA500',
             'cics': '#E74C3C'
         }
+    
+    def generate_flow(self, program_name: str, max_depth: int = 3) -> Dict[str, Any]:
+        """
+        Generate flow diagram for a program (main entry point).
+        Alias for generate_complete_flow() for backward compatibility.
+        
+        Args:
+            program_name: Name of the program to analyze
+            max_depth: Maximum depth for call chain traversal (default: 3)
+        
+        Returns:
+            Dictionary with flow information and Mermaid diagram
+        """
+        return self.generate_complete_flow(program_name, max_depth)
     
     def generate_complete_flow(self, program_name: str, max_depth: int = 3) -> Dict[str, Any]:
         """
@@ -1540,7 +1566,7 @@ class EnhancedFlowDiagramGenerator:
                 lines.append(f"    {root_id} -->|{call_type}| {succ_id}")
         
         return '\n'.join(lines)
-
+    
 class ProgramChainAnalyzer:
     """Analyze complete program call chains with file/data flow"""
     
