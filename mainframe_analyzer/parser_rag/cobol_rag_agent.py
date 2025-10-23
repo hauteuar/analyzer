@@ -1264,23 +1264,26 @@ class EnhancedFlowDiagramGenerator:
                     # Simplify labels
                     if edge_label == 'db2_access':
                         operation = edge_data.get('operation', '')
-                        edge_label = operation
+                        edge_label = operation if operation else 'DB2'
+                        
                     elif edge_label == 'calls':
+                        # Get call type
                         call_type = edge_data.get('call_type', 'static')
+                        
+                        # Map call types to display icons and labels
+                        call_display = {
+                            'static': ('📞', 'CALL'),
+                            'dynamic': ('🔄', 'CALL (dynamic)'),
+                            'cics_link': ('🔗', 'CICS LINK'),
+                            'cics_link_dynamic': ('🔗🔄', 'CICS LINK (dynamic)'),
+                            'cics_xctl': ('⚡', 'CICS XCTL'),
+                            'cics_xctl_dynamic': ('⚡🔄', 'CICS XCTL (dynamic)')
+                        }
+                        
+                        icon, label = call_display.get(call_type, ('📞', 'CALL'))
+                        edge_label = f"{icon} {label}"
                     
-                    # Map call types to display icons and labels
-                    call_display = {
-                        'static': ('📞', 'CALL'),
-                        'dynamic': ('🔄', 'CALL (dynamic)'),
-                        'cics_link': ('🔗', 'CICS LINK'),
-                        'cics_link_dynamic': ('🔗🔄', 'CICS LINK (dynamic)'),
-                        'cics_xctl': ('⚡', 'CICS XCTL'),
-                        'cics_xctl_dynamic': ('⚡🔄', 'CICS XCTL (dynamic)')
-                    }
-                    
-                    icon, label = call_display.get(call_type, ('📞', 'CALL'))
-                    edge_label = f"{icon} {label}"
-                    
+                    # Add the edge
                     edge_str = f"  {self._safe_id(source)} -->|{edge_label}| {self._safe_id(target)}"
                     mermaid_lines.append(edge_str)
                     edges_list.append((source, target, edge_label))
@@ -1688,7 +1691,7 @@ class COBOLIndexer:
         self.cobol_parser = COBOLParser()
         self.jcl_parser = JCLParser()
         self.doc_parser = DocumentParser()
-        self.flow_generator = EnhancedFlowDiagramGenerator(self.db_manager)
+        #self.flow_generator = EnhancedFlowDiagramGenerator(self.db_manager)
         self.code_index = VectorIndexBuilder()
         self.doc_index = VectorIndexBuilder()
         self.graph = ProgramGraphBuilder()
