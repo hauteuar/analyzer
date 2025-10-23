@@ -1185,6 +1185,19 @@ Generates comprehensive Mermaid diagrams showing:
 """
 
 
+"""
+EnhancedFlowDiagramGenerator - Complete Flow Visualization
+===========================================================
+Generates comprehensive Mermaid diagrams showing:
+- Program call chains (static, dynamic, CICS)
+- Input/Output files
+- Database operations
+- MQ operations
+- Full execution flow
+"""
+
+
+
 class EnhancedFlowDiagramGenerator:
     """
     Enhanced flow diagram generator that shows complete program execution flow
@@ -1192,8 +1205,44 @@ class EnhancedFlowDiagramGenerator:
     """
     
     def __init__(self, graph_builder):
-        """Initialize with a ProgramGraphBuilder instance"""
-        self.graph = graph_builder
+        """
+        Initialize with a ProgramGraphBuilder instance or NetworkX graph
+        
+        Handles different input types:
+        - ProgramGraphBuilder: extracts the .graph attribute
+        - NetworkX Graph: uses directly
+        - Dict or other: attempts to use as-is
+        """
+        import networkx as nx
+        
+        # Check if it's a NetworkX graph (must check this FIRST)
+        if isinstance(graph_builder, (nx.Graph, nx.DiGraph, nx.MultiGraph, nx.MultiDiGraph)):
+            # It's already a NetworkX graph - use it directly
+            self.graph_builder = None
+            self.graph = graph_builder
+            logger.debug("Initialized with NetworkX graph directly")
+        
+        # Check if it has a .graph attribute (ProgramGraphBuilder)
+        elif hasattr(graph_builder, 'graph'):
+            # Extract the actual NetworkX graph
+            self.graph_builder = graph_builder
+            self.graph = graph_builder.graph
+            logger.debug(f"Initialized with ProgramGraphBuilder, extracted graph type: {type(self.graph)}")
+        
+        # Fallback: treat as unknown type
+        else:
+            logger.warning(f"Unknown graph type: {type(graph_builder)}, attempting to use as-is")
+            self.graph_builder = graph_builder
+            self.graph = getattr(graph_builder, 'graph', graph_builder)
+        
+        # Verify we have a valid graph
+        if not hasattr(self.graph, 'has_node'):
+            raise TypeError(
+                f"Invalid graph type: {type(self.graph)}. "
+                f"Expected NetworkX graph but got {type(self.graph).__name__}. "
+                f"Make sure you're passing either a ProgramGraphBuilder or NetworkX graph."
+            )
+        
         self.colors = {
             'program': '#4A90E2',
             'called_program': '#5BA3F5',
@@ -1240,7 +1289,7 @@ class EnhancedFlowDiagramGenerator:
         """
         logger.info(f"Generating complete flow for {program_name} (max depth: {max_depth})")
         
-        if not self.graph.graph.has_node(program_name):
+        if not self.graph.has_node(program_name):
             logger.warning(f"Program {program_name} not found in graph")
             return self._empty_result()
         
@@ -1276,10 +1325,10 @@ class EnhancedFlowDiagramGenerator:
         
         visited.add(program)
         
-        if not self.graph.graph.has_node(program):
+        if not self.graph.has_node(program):
             return
         
-        node_data = self.graph.graph.nodes[program]
+        node_data = self.graph.nodes[program]
         
         # Create execution flow entry
         flow_entry = {
@@ -1293,11 +1342,11 @@ class EnhancedFlowDiagramGenerator:
         }
         
         # Collect calls from this program
-        for successor in self.graph.graph.successors(program):
-            edge_data = self.graph.graph.edges[program, successor]
+        for successor in self.graph.successors(program):
+            edge_data = self.graph.edges[program, successor]
             edge_type = edge_data.get('type', 'unknown')
             
-            successor_node_data = self.graph.graph.nodes[successor]
+            successor_node_data = self.graph.nodes[successor]
             successor_type = successor_node_data.get('type', 'program')
             
             if successor_type == 'program':
@@ -1525,7 +1574,7 @@ class EnhancedFlowDiagramGenerator:
         Generate a simple Mermaid diagram for a single program.
         Shows only direct neighbors (calls, files, tables).
         """
-        if not self.graph.graph.has_node(program_name):
+        if not self.graph.has_node(program_name):
             return "graph TB\n    A[Program Not Found]"
         
         lines = [
@@ -1544,11 +1593,11 @@ class EnhancedFlowDiagramGenerator:
         lines.append(f"    class {root_id} programStyle")
         
         # Add all successors
-        for successor in self.graph.graph.successors(program_name):
+        for successor in self.graph.successors(program_name):
             succ_id = clean_id(successor)
-            node_data = self.graph.graph.nodes[successor]
+            node_data = self.graph.nodes[successor]
             node_type = node_data.get('type', 'program')
-            edge_data = self.graph.graph.edges[program_name, successor]
+            edge_data = self.graph.edges[program_name, successor]
             
             if node_type == 'file':
                 lines.append(f"    {succ_id}[\"{successor}\"]")
@@ -1566,7 +1615,7 @@ class EnhancedFlowDiagramGenerator:
                 lines.append(f"    {root_id} -->|{call_type}| {succ_id}")
         
         return '\n'.join(lines)
-    
+        
 class ProgramChainAnalyzer:
     """Analyze complete program call chains with file/data flow"""
     
