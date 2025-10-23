@@ -1267,7 +1267,19 @@ class EnhancedFlowDiagramGenerator:
                         edge_label = operation
                     elif edge_label == 'calls':
                         call_type = edge_data.get('call_type', 'static')
-                        edge_label = f"CALL ({call_type})"
+                    
+                    # Map call types to display icons and labels
+                    call_display = {
+                        'static': ('📞', 'CALL'),
+                        'dynamic': ('🔄', 'CALL (dynamic)'),
+                        'cics_link': ('🔗', 'CICS LINK'),
+                        'cics_link_dynamic': ('🔗🔄', 'CICS LINK (dynamic)'),
+                        'cics_xctl': ('⚡', 'CICS XCTL'),
+                        'cics_xctl_dynamic': ('⚡🔄', 'CICS XCTL (dynamic)')
+                    }
+                    
+                    icon, label = call_display.get(call_type, ('📞', 'CALL'))
+                    edge_label = f"{icon} {label}"
                     
                     edge_str = f"  {self._safe_id(source)} -->|{edge_label}| {self._safe_id(target)}"
                     mermaid_lines.append(edge_str)
@@ -1399,7 +1411,8 @@ class ProgramChainAnalyzer:
             if succ_type == 'program':
                 step['calls'].append({
                     'program': succ_name,
-                    'call_type': edge_data.get('call_type', 'static') if edge_data else 'unknown'
+                    'call_type': edge_data.get('call_type', 'static') if edge_data else 'unknown',
+                    'call_mechanism': edge_data.get('call_type', 'static') if edge_data else 'unknown'
                 })
                 chain['programs_called'].append(succ_name)
                 
@@ -1704,17 +1717,43 @@ class COBOLIndexer:
             program_id = self._extract_program_id_from_chunks(chunks)
             self.graph.add_program(program_id, str(filepath))
             calls = self.cobol_parser.extract_calls(source_code)
+            logger.info(f"Processing {len(calls)} calls from {program_id}")
+
             for call in calls:
-                target = call['target']
-                call_mechanism = call.get('call_mechanism', 'STATIC_CALL')
+                target = call.get('target')
                 
-                # Add the call with mechanism
-                self.graph.add_call(program_id, target, call_mechanism)
+                # Get call type/mechanism - handle both old and new format
+                call_mechanism = call.get('call_mechanism', call.get('type', 'static'))
                 
-                # If dynamic and resolved, add resolved targets too
-                if call.get('possible_targets'):
+                # Convert call_mechanism to call_type format expected by graph
+                call_type_map = {
+                    'STATIC_CALL': 'static',
+                    'DYNAMIC_CALL': 'dynamic',
+                    'CICS_LINK': 'cics_link',
+                    'CICS_LINK_DYNAMIC': 'cics_link_dynamic',
+                    'CICS_XCTL': 'cics_xctl',
+                    'CICS_XCTL_DYNAMIC': 'cics_xctl_dynamic',
+                    # Legacy format support
+                    'static': 'static',
+                    'dynamic': 'dynamic',
+                    'cics_link': 'cics_link',
+                    'cics_xctl': 'cics_xctl'
+                }
+                
+                # Get the simplified call type
+                simple_call_type = call_type_map.get(call_mechanism, 'static')
+                
+                # Add primary call
+                if target:
+                    logger.info(f"  → Adding call: {program_id} -> {target} ({simple_call_type})")
+                    self.graph.add_call(program_id, target, simple_call_type)
+                
+                # For dynamic calls with resolved targets, add each resolved target
+                if call.get('is_dynamic') and call.get('possible_targets'):
+                    logger.info(f"  → Dynamic call resolved to {len(call['possible_targets'])} targets")
                     for resolved_target in call['possible_targets']:
-                        self.graph.add_call(program_id, resolved_target, call_mechanism)
+                        logger.info(f"    → {program_id} -> {resolved_target} ({simple_call_type})")
+                        self.graph.add_call(program_id, resolved_target, simple_call_type)
             
             db2_ops = self.cobol_parser.extract_db2_operations(source_code)
             for op in db2_ops:
