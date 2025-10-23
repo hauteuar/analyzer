@@ -571,7 +571,7 @@ class MCPServerWrapper:
             },
             {
                 "name": "graph_neighbors",
-                "description": "Get program relationships, dependencies, and interfaces (DB2 tables, CICS commands, MQ operations). Shows what a program calls and what calls it.",
+                "description": "Get program relationships, dependencies, and interfaces (DB2 tables, files, MQ operations). Shows what a program calls and what calls it.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -590,13 +590,13 @@ class MCPServerWrapper:
             },
             {
                 "name": "flow_mermaid",
-                "description": "Generate Mermaid flow diagram code showing program flow, calls, DB2 tables, CICS commands, and MQ operations. Returns diagram code in Mermaid format.",
+                "description": "Generate Mermaid flow diagram showing program flow with inputs at top, outputs at bottom, and processing in middle. Shows only I/O interfaces (files, DB2, MQ), not all CICS commands. Includes dynamic call resolution.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "node": {
                             "type": "string",
-                            "description": "Program to visualize in format 'prog:PROGRAMNAME' (e.g., 'prog:CUSTUPDT')"
+                            "description": "Program to visualize in format 'prog:PROGRAMNAME' (e.g., 'prog:TMST9JE')"
                         },
                         "depth": {
                             "type": "integer",
@@ -609,13 +609,13 @@ class MCPServerWrapper:
             },
             {
                 "name": "flow_html",
-                "description": "Generate interactive HTML visualization of program flow with Mermaid diagram. Creates an HTML file and opens it automatically in your browser with zoom, pan, download as SVG/PNG, and print capabilities.",
+                "description": "Generate interactive HTML visualization of program flow. Creates an HTML file and opens it in browser with zoom, pan, download as SVG/PNG. Shows inputs/outputs/processing layout.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "node": {
                             "type": "string",
-                            "description": "Program to visualize in format 'prog:PROGRAMNAME' (e.g., 'prog:CUSTUPDT')"
+                            "description": "Program to visualize in format 'prog:PROGRAMNAME' (e.g., 'prog:TMST9JE')"
                         },
                         "depth": {
                             "type": "integer",
@@ -631,18 +631,37 @@ class MCPServerWrapper:
                 }
             },
             {
+                "name": "full_program_chain",
+                "description": "Analyze complete program execution chain. Shows full flow from entry program through all called programs with files, databases, and MQ operations. Example: TMST9JE calls TMST9JF with input files, DB2 operations, and outputs.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "program": {
+                            "type": "string",
+                            "description": "Starting program name (e.g., 'TMST9JE')"
+                        },
+                        "max_depth": {
+                            "type": "integer",
+                            "description": "Maximum depth to traverse (default: 5)",
+                            "default": 5
+                        }
+                    },
+                    "required": ["program"]
+                }
+            },
+            {
                 "name": "resolve_dynamic_call",
-                "description": "Resolve dynamic CALL statements (CALL WS-VARIABLE) by analyzing the code context to determine possible target programs.",
+                "description": "Resolve dynamic CALL statements by analyzing data structures. Handles VALUE clauses in group items (e.g., 01 group with FILLER VALUE 'TMS', variable PIC X(5)) and conditional logic.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "variable": {
                             "type": "string",
-                            "description": "Variable name used in dynamic CALL (e.g., 'WS-PROGRAM-NAME')"
+                            "description": "Variable name used in dynamic CALL (e.g., 'WS-PROGRAM-NAME', 'DYN-VAR')"
                         },
                         "context": {
                             "type": "string",
-                            "description": "COBOL source code context containing the CALL statement and preceding MOVE statements"
+                            "description": "COBOL source code context with data definitions and CALL statement"
                         }
                     },
                     "required": ["variable", "context"]
@@ -650,7 +669,7 @@ class MCPServerWrapper:
             },
             {
                 "name": "combined_search",
-                "description": "Comprehensive search that combines code search, documentation search, and graph analysis. Provides the most complete context about a topic.",
+                "description": "Comprehensive search across code, docs, and graph. Provides complete context about a topic.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -718,12 +737,92 @@ class MCPServerWrapper:
 - 📱 Responsive design
 
 📋 **The diagram shows:**
-- Program structure and calls
-- DB2 table access (green cylinders)
-- CICS commands (purple)
-- MQ operations (orange)
+- 📥 **Inputs at top** (files, MQ queues)
+- 💻 **Processing in middle** (programs)
+- 🗄️ **Database operations** (DB2 tables with operations)
+- 📤 **Outputs at bottom** (files, MQ queues)
+- 🔗 **Dynamic calls resolved** (shows possible targets)
 
 You can now explore the flow visually in your browser!"""
+                    }
+                ]
+            }
+        
+        # Special handler for full_program_chain
+        if tool_name == "full_program_chain":
+            program = arguments.get("program", "")
+            max_depth = arguments.get("max_depth", 5)
+            
+            request = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "full_program_chain",
+                "params": {"program": program, "max_depth": max_depth}
+            }
+            
+            response = self.server.handle_request(request)
+            
+            if "error" in response:
+                raise Exception(response["error"]["message"])
+            
+            chain = response["result"]
+            
+            # Format nice output
+            output_lines = [
+                f"# Complete Program Chain Analysis: {program}",
+                "",
+                "## Execution Flow",
+                ""
+            ]
+            
+            for step in chain.get('execution_flow', []):
+                indent = "  " * step['depth']
+                output_lines.append(f"{indent}📌 **{step['name']}** ({step['type']})")
+                
+                if step['inputs']:
+                    output_lines.append(f"{indent}  📥 Inputs:")
+                    for inp in step['inputs']:
+                        output_lines.append(f"{indent}    - {inp}")
+                
+                if step['outputs']:
+                    output_lines.append(f"{indent}  📤 Outputs:")
+                    for out in step['outputs']:
+                        output_lines.append(f"{indent}    - {out}")
+                
+                if step['calls']:
+                    output_lines.append(f"{indent}  🔗 Calls:")
+                    for call in step['calls']:
+                        output_lines.append(f"{indent}    - {call['program']} ({call['call_type']})")
+                
+                output_lines.append("")
+            
+            # Add summary
+            output_lines.extend([
+                "## Summary",
+                f"- **Programs called:** {len(chain.get('programs_called', []))}",
+                f"- **Databases accessed:** {len(chain.get('databases', []))}",
+                f"- **MQ queues used:** {len(chain.get('mq_queues', []))}",
+                "",
+                "### Database Operations"
+            ])
+            
+            for db in chain.get('databases', []):
+                output_lines.append(f"- **{db['table']}**: {db['operation']}")
+            
+            if chain.get('mermaid_diagram'):
+                output_lines.extend([
+                    "",
+                    "### Flow Diagram",
+                    "```mermaid",
+                    chain['mermaid_diagram'],
+                    "```"
+                ])
+            
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": '\n'.join(output_lines)
                     }
                 ]
             }

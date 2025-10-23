@@ -300,8 +300,171 @@ class COBOLParser:
     
     def _extract_paragraphs(self, node, source_code: str, filename: str, program_id: str) -> List[CodeChunk]:
         return []
+    
+    def extract_dynamic_calls_advanced(self, source_code: str) -> Dict[str, List[str]]:
+        """Extract dynamic calls with advanced resolution"""
+        resolver = DynamicCallResolver()
+        return resolver.analyze_program(source_code)
+
+# ============================================================================
+# DYNAMIC CALL RESOLVER
+# ============================================================================
+
+class DynamicCallResolver:
+    """
+    Advanced resolver for dynamic CALL statements in COBOL.
+    Analyzes data structures and conditional logic to find all possible targets.
+    """
+    
+    def __init__(self):
+        self.call_patterns = []
+    
+    def analyze_program(self, source_code: str) -> Dict[str, List[str]]:
+        """
+        Analyze entire program for dynamic calls.
+        Returns dict mapping variables to possible program names.
+        """
+        results = {}
+        
+        # Find all dynamic CALL statements
+        dynamic_calls = self._find_dynamic_calls(source_code)
+        
+        for call_var in dynamic_calls:
+            # Find all possible values for this variable
+            possible_values = self._resolve_variable_values(source_code, call_var)
+            if possible_values:
+                results[call_var] = possible_values
+        
+        return results
+    
+    def _find_dynamic_calls(self, source_code: str) -> List[str]:
+        """Find all dynamic CALL statements"""
+        dynamic_calls = []
+        
+        # Pattern: CALL variable-name
+        pattern = re.compile(r'CALL\s+([A-Z][A-Z0-9-]*)\s+USING', re.IGNORECASE)
+        
+        for match in pattern.finditer(source_code):
+            var_name = match.group(1)
+            # Check it's not a literal
+            if not var_name.startswith("'") and not var_name.startswith('"'):
+                dynamic_calls.append(var_name)
+        
+        return list(set(dynamic_calls))
+    
+    def _resolve_variable_values(self, source_code: str, variable: str) -> List[str]:
+        """
+        Resolve all possible values for a variable.
+        Handles:
+        - MOVE statements
+        - VALUE clauses in data structures
+        - Conditional assignments
+        """
+        possible_values = []
+        
+        # Method 1: MOVE 'LITERAL' TO variable
+        move_pattern = re.compile(
+            rf"MOVE\s+['\"]([A-Z0-9]+)['\"]\s+TO\s+{variable}",
+            re.IGNORECASE
+        )
+        for match in move_pattern.finditer(source_code):
+            possible_values.append(match.group(1))
+        
+        # Method 2: VALUE clause in data structure
+        # Pattern: 05 variable PIC X(8) VALUE 'PROGRAM'.
+        value_pattern = re.compile(
+            rf"\d+\s+{variable}\s+PIC\s+X\(\d+\)\s+VALUE\s+['\"]([A-Z0-9]+)['\"]",
+            re.IGNORECASE
+        )
+        for match in value_pattern.finditer(source_code):
+            possible_values.append(match.group(1))
+        
+        # Method 3: Group-level VALUE with FILLER
+        # Pattern:
+        # 01 PROGRAM-TABLE.
+        #    05 FILLER PIC X(8) VALUE 'PROG1'.
+        #    05 FILLER PIC X(8) VALUE 'PROG2'.
+        # ...
+        # MOVE PROGRAM-TABLE(INDEX) TO variable
+        
+        # Find if this variable is part of a table/group
+        group_pattern = self._find_group_values(source_code, variable)
+        possible_values.extend(group_pattern)
+        
+        # Method 4: STRING/UNSTRING operations
+        string_pattern = re.compile(
+            rf"STRING\s+['\"]([A-Z0-9]+)['\"]\s+.*?INTO\s+{variable}",
+            re.IGNORECASE | re.DOTALL
+        )
+        for match in string_pattern.finditer(source_code):
+            possible_values.append(match.group(1))
+        
+        return list(set(possible_values))
+    
+    def _find_group_values(self, source_code: str, variable: str) -> List[str]:
+        """
+        Find values from group-level structures.
+        Example:
+        01 PROGRAM-GROUP.
+           05 FILLER VALUE 'TMS'.
+           05 PROG-NAME PIC X(5).
+        """
+        values = []
+        
+        # Find the group this variable belongs to
+        # Look for pattern like: nn variable-name PIC ...
+        var_pattern = re.compile(
+            rf"(\d+)\s+{variable}\s+PIC",
+            re.IGNORECASE
+        )
+        
+        match = var_pattern.search(source_code)
+        if not match:
+            return values
+        
+        level = match.group(1)
+        
+        # Find the parent group (01 level)
+        # Work backwards to find 01 level
+        lines = source_code[:match.start()].split('\n')
+        group_name = None
+        
+        for line in reversed(lines):
+            group_match = re.match(r'\s*01\s+([A-Z][A-Z0-9-]*)', line, re.IGNORECASE)
+            if group_match:
+                group_name = group_match.group(1)
+                break
+        
+        if not group_name:
+            return values
+        
+        # Now find all FILLER values in this group
+        group_pattern = re.compile(
+            rf"01\s+{group_name}.*?(?=01\s|\Z)",
+            re.IGNORECASE | re.DOTALL
+        )
+        
+        group_match = group_pattern.search(source_code)
+        if group_match:
+            group_text = group_match.group(0)
+            
+            # Find all FILLER VALUE entries
+            filler_pattern = re.compile(
+                r"\d+\s+FILLER.*?VALUE\s+['\"]([A-Z0-9]+)['\"]",
+                re.IGNORECASE
+            )
+            
+            for filler_match in filler_pattern.finditer(group_text):
+                values.append(filler_match.group(1))
+        
+        return values
 
 
+# Update the COBOLParser class to use DynamicCallResolver
+# Add this method to COBOLParser class:
+
+   
+    
 # ============================================================================
 # JCL PARSER
 # ============================================================================
@@ -713,14 +876,18 @@ class VectorIndexBuilder:
 # FLOW DIAGRAM GENERATOR
 # ============================================================================
 
-class FlowDiagramGenerator:
-    """Generate Mermaid flow diagrams from program graph"""
+# ============================================================================
+# ENHANCED FLOW DIAGRAM GENERATOR
+# ============================================================================
+
+class EnhancedFlowDiagramGenerator:
+    """Generate enhanced Mermaid flow diagrams with better layout"""
     
     def __init__(self, graph: nx.DiGraph):
         self.graph = graph
     
     def generate_flow(self, node_id: str, depth: int = 2) -> FlowDiagram:
-        """Generate Mermaid flow diagram for a node"""
+        """Generate enhanced flow diagram with inputs/outputs separated"""
         if not self.graph.has_node(node_id):
             return FlowDiagram(
                 mermaid_code=f"graph TD\n  ERROR[Node {node_id} not found]",
@@ -728,75 +895,303 @@ class FlowDiagramGenerator:
                 edges=[]
             )
         
-        visited_nodes = set([node_id])
-        edges_list = []
+        # Collect nodes by category
+        program_nodes = set([node_id])
+        input_nodes = set()
+        output_nodes = set()
+        db_nodes = set()
+        mq_nodes = set()
+        file_nodes = set()
         
-        self._traverse_graph(node_id, depth, visited_nodes, edges_list)
+        self._categorize_nodes(node_id, depth, program_nodes, input_nodes, 
+                               output_nodes, db_nodes, mq_nodes, file_nodes)
         
-        mermaid_lines = ["graph TD"]
+        # Generate Mermaid code with subgraphs
+        mermaid_lines = ["graph TB"]
         
-        for node in visited_nodes:
+        # Subgraph for inputs
+        if input_nodes:
+            mermaid_lines.append("  subgraph Inputs")
+            for node in input_nodes:
+                node_data = self.graph.nodes[node]
+                node_name = node_data.get('name', node)
+                node_type = node_data.get('node_type', 'unknown')
+                
+                if 'file' in node_type.lower():
+                    style = f"{self._safe_id(node)}[/📄 {node_name}/]"
+                elif 'mq' in node_type.lower():
+                    style = f"{self._safe_id(node)}{{{{📨 {node_name}}}}}"
+                else:
+                    style = f"{self._safe_id(node)}[{node_name}]"
+                
+                mermaid_lines.append(f"    {style}")
+                mermaid_lines.append(f"    style {self._safe_id(node)} fill:#90EE90,stroke:#2D7A4A,color:#000")
+            mermaid_lines.append("  end")
+        
+        # Main program
+        mermaid_lines.append("  subgraph Processing")
+        for node in program_nodes:
             node_data = self.graph.nodes[node]
-            node_type = node_data.get('node_type', 'unknown')
             node_name = node_data.get('name', node)
-            
-            if node_type == 'program':
-                style = f"{self._safe_id(node)}[{node_name}]"
-                mermaid_lines.append(f"  {style}")
-                mermaid_lines.append(f"  style {self._safe_id(node)} fill:#4A90E2,stroke:#2E5C8A,color:#fff")
-            elif node_type == 'db2_table':
-                style = f"{self._safe_id(node)}[({node_name})]"
-                mermaid_lines.append(f"  {style}")
-                mermaid_lines.append(f"  style {self._safe_id(node)} fill:#50C878,stroke:#2D7A4A,color:#fff")
-            elif node_type == 'mq_operation':
-                style = f"{self._safe_id(node)}{{{{MQ: {node_name}}}}}"
-                mermaid_lines.append(f"  {style}")
-                mermaid_lines.append(f"  style {self._safe_id(node)} fill:#FFA500,stroke:#CC8400,color:#fff")
-            elif node_type == 'cics_command':
-                style = f"{self._safe_id(node)}[/CICS: {node_name}/]"
-                mermaid_lines.append(f"  {style}")
-                mermaid_lines.append(f"  style {self._safe_id(node)} fill:#9B59B6,stroke:#6C3483,color:#fff")
-            else:
-                style = f"{self._safe_id(node)}[{node_name}]"
-                mermaid_lines.append(f"  {style}")
+            style = f"{self._safe_id(node)}[💻 {node_name}]"
+            mermaid_lines.append(f"    {style}")
+            mermaid_lines.append(f"    style {self._safe_id(node)} fill:#4A90E2,stroke:#2E5C8A,color:#fff")
+        mermaid_lines.append("  end")
         
-        for source, target, label in edges_list:
-            edge_str = f"  {self._safe_id(source)} -->|{label}| {self._safe_id(target)}"
-            mermaid_lines.append(edge_str)
+        # Database operations
+        if db_nodes:
+            mermaid_lines.append("  subgraph Database")
+            for node in db_nodes:
+                node_data = self.graph.nodes[node]
+                node_name = node_data.get('name', node)
+                edge_data = self._get_edge_to_node(node_id, node)
+                operation = edge_data.get('operation', '') if edge_data else ''
+                
+                style = f"{self._safe_id(node)}[(🗄️ {node_name}<br/>{operation})]"
+                mermaid_lines.append(f"    {style}")
+                mermaid_lines.append(f"    style {self._safe_id(node)} fill:#FFD700,stroke:#DAA520,color:#000")
+            mermaid_lines.append("  end")
+        
+        # Subgraph for outputs
+        if output_nodes:
+            mermaid_lines.append("  subgraph Outputs")
+            for node in output_nodes:
+                node_data = self.graph.nodes[node]
+                node_name = node_data.get('name', node)
+                node_type = node_data.get('node_type', 'unknown')
+                
+                if 'file' in node_type.lower():
+                    style = f"{self._safe_id(node)}[/📄 {node_name}/]"
+                elif 'mq' in node_type.lower():
+                    style = f"{self._safe_id(node)}{{{{📤 {node_name}}}}}"
+                else:
+                    style = f"{self._safe_id(node)}[{node_name}]"
+                
+                mermaid_lines.append(f"    {style}")
+                mermaid_lines.append(f"    style {self._safe_id(node)} fill:#FFA07A,stroke:#FF6347,color:#000")
+            mermaid_lines.append("  end")
+        
+        # Add edges
+        edges_list = []
+        all_nodes = program_nodes | input_nodes | output_nodes | db_nodes | mq_nodes | file_nodes
+        
+        for source in all_nodes:
+            for target in all_nodes:
+                if self.graph.has_edge(source, target):
+                    edge_data = self.graph.get_edge_data(source, target)
+                    edge_label = edge_data.get('edge_type', 'link') if edge_data else 'link'
+                    
+                    # Simplify labels
+                    if edge_label == 'db2_access':
+                        operation = edge_data.get('operation', '')
+                        edge_label = operation
+                    elif edge_label == 'calls':
+                        call_type = edge_data.get('call_type', 'static')
+                        edge_label = f"CALL ({call_type})"
+                    
+                    edge_str = f"  {self._safe_id(source)} -->|{edge_label}| {self._safe_id(target)}"
+                    mermaid_lines.append(edge_str)
+                    edges_list.append((source, target, edge_label))
         
         mermaid_code = '\n'.join(mermaid_lines)
         
         return FlowDiagram(
             mermaid_code=mermaid_code,
-            nodes=list(visited_nodes),
+            nodes=list(all_nodes),
             edges=edges_list
         )
     
-    def _traverse_graph(self, node_id: str, depth: int, visited: Set[str], edges: List[Tuple[str, str, str]]):
-        """Recursively traverse graph to collect nodes and edges"""
-        if depth == 0:
-            return
+    def _categorize_nodes(self, start_node: str, depth: int, 
+                          program_nodes: set, input_nodes: set, output_nodes: set,
+                          db_nodes: set, mq_nodes: set, file_nodes: set):
+        """Categorize nodes into inputs, outputs, databases, etc."""
         
-        for successor in self.graph.successors(node_id):
-            if successor not in visited:
-                visited.add(successor)
-                edge_data = self.graph.get_edge_data(node_id, successor)
-                edge_label = edge_data.get('edge_type', 'link') if edge_data else 'link'
-                edges.append((node_id, successor, edge_label))
-                self._traverse_graph(successor, depth - 1, visited, edges)
+        visited = set()
         
-        if depth == 2:
-            for predecessor in self.graph.predecessors(node_id):
-                if predecessor not in visited:
-                    visited.add(predecessor)
-                    edge_data = self.graph.get_edge_data(predecessor, node_id)
-                    edge_label = edge_data.get('edge_type', 'link') if edge_data else 'link'
-                    edges.append((predecessor, node_id, edge_label))
+        def traverse(node, current_depth, is_input):
+            if current_depth > depth or node in visited:
+                return
+            
+            visited.add(node)
+            node_data = self.graph.nodes.get(node, {})
+            node_type = node_data.get('node_type', 'unknown')
+            
+            # Categorize based on type and direction
+            if node_type == 'program':
+                program_nodes.add(node)
+            elif node_type == 'db2_table':
+                db_nodes.add(node)
+            elif node_type == 'mq_operation':
+                # Determine if input or output based on operation
+                operation = node_data.get('name', '')
+                if 'GET' in operation.upper() or 'READ' in operation.upper():
+                    input_nodes.add(node)
+                else:
+                    output_nodes.add(node)
+            elif 'file' in node_type.lower():
+                if is_input:
+                    input_nodes.add(node)
+                else:
+                    output_nodes.add(node)
+            
+            # Traverse outgoing edges
+            for successor in self.graph.successors(node):
+                traverse(successor, current_depth + 1, False)
+            
+            # Traverse incoming edges for inputs
+            if current_depth == 0:
+                for predecessor in self.graph.predecessors(node):
+                    pred_data = self.graph.nodes.get(predecessor, {})
+                    pred_type = pred_data.get('node_type', '')
+                    if pred_type != 'program':
+                        traverse(predecessor, current_depth + 1, True)
+        
+        traverse(start_node, 0, False)
+    
+    def _get_edge_to_node(self, source: str, target: str) -> Dict:
+        """Get edge data between two nodes"""
+        if self.graph.has_edge(source, target):
+            return self.graph.get_edge_data(source, target)
+        return {}
     
     def _safe_id(self, node_id: str) -> str:
         """Convert node ID to Mermaid-safe identifier"""
         return node_id.replace(':', '_').replace('-', '_').replace('.', '_')
 
+class ProgramChainAnalyzer:
+    """Analyze complete program call chains with file/data flow"""
+    
+    def __init__(self, graph: nx.DiGraph, code_index: 'VectorIndexBuilder'):
+        self.graph = graph
+        self.code_index = code_index
+    
+    def analyze_program_chain(self, start_program: str, max_depth: int = 5) -> Dict[str, Any]:
+        """
+        Analyze complete program chain starting from a program.
+        Returns full flow with inputs, outputs, and intermediate steps.
+        """
+        start_node = f"prog:{start_program}"
+        
+        if not self.graph.has_node(start_node):
+            return {'error': f'Program {start_program} not found'}
+        
+        chain = {
+            'start_program': start_program,
+            'execution_flow': [],
+            'files': {'input': [], 'output': [], 'intermediate': []},
+            'databases': [],
+            'mq_queues': [],
+            'programs_called': []
+        }
+        
+        # Traverse the call graph
+        visited = set()
+        self._traverse_chain(start_node, chain, visited, 0, max_depth)
+        
+        return chain
+    
+    def _traverse_chain(self, node: str, chain: Dict, visited: set, depth: int, max_depth: int):
+        """Recursively traverse program chain"""
+        if depth > max_depth or node in visited:
+            return
+        
+        visited.add(node)
+        node_data = self.graph.nodes.get(node, {})
+        node_type = node_data.get('node_type', 'unknown')
+        node_name = node_data.get('name', node)
+        
+        step = {
+            'depth': depth,
+            'type': node_type,
+            'name': node_name,
+            'inputs': [],
+            'outputs': [],
+            'calls': []
+        }
+        
+        # Analyze successors
+        for successor in self.graph.successors(node):
+            succ_data = self.graph.nodes.get(successor, {})
+            succ_type = succ_data.get('node_type', '')
+            succ_name = succ_data.get('name', successor)
+            edge_data = self.graph.get_edge_data(node, successor)
+            
+            if succ_type == 'program':
+                step['calls'].append({
+                    'program': succ_name,
+                    'call_type': edge_data.get('call_type', 'static') if edge_data else 'unknown'
+                })
+                chain['programs_called'].append(succ_name)
+                
+                # Recursively analyze called program
+                self._traverse_chain(successor, chain, visited, depth + 1, max_depth)
+                
+            elif succ_type == 'db2_table':
+                operation = edge_data.get('operation', 'ACCESS') if edge_data else 'ACCESS'
+                db_info = {'table': succ_name, 'operation': operation}
+                
+                if operation in ['SELECT', 'READ']:
+                    step['inputs'].append(db_info)
+                else:
+                    step['outputs'].append(db_info)
+                
+                if succ_name not in [d['table'] for d in chain['databases']]:
+                    chain['databases'].append(db_info)
+                    
+            elif succ_type == 'mq_operation':
+                mq_info = {'operation': succ_name}
+                
+                if 'GET' in succ_name.upper() or 'READ' in succ_name.upper():
+                    step['inputs'].append(mq_info)
+                else:
+                    step['outputs'].append(mq_info)
+                
+                if succ_name not in chain['mq_queues']:
+                    chain['mq_queues'].append(succ_name)
+        
+        chain['execution_flow'].append(step)
+    
+    def generate_chain_diagram(self, chain: Dict) -> str:
+        """Generate Mermaid diagram for entire chain"""
+        lines = ["graph TB"]
+        
+        # Group by depth
+        depth_groups = {}
+        for step in chain['execution_flow']:
+            depth = step['depth']
+            if depth not in depth_groups:
+                depth_groups[depth] = []
+            depth_groups[depth].append(step)
+        
+        # Generate nodes by level
+        for depth in sorted(depth_groups.keys()):
+            lines.append(f"  subgraph Level_{depth}")
+            for step in depth_groups[depth]:
+                node_id = step['name'].replace('-', '_').replace(':', '_')
+                lines.append(f"    {node_id}[{step['name']}]")
+            lines.append("  end")
+        
+        # Generate edges
+        for step in chain['execution_flow']:
+            source_id = step['name'].replace('-', '_').replace(':', '_')
+            
+            # Inputs
+            for inp in step['inputs']:
+                inp_id = str(inp).replace('-', '_').replace(':', '_').replace(' ', '_')
+                lines.append(f"  {inp_id} --> {source_id}")
+            
+            # Outputs
+            for out in step['outputs']:
+                out_id = str(out).replace('-', '_').replace(':', '_').replace(' ', '_')
+                lines.append(f"  {source_id} --> {out_id}")
+            
+            # Calls
+            for call in step['calls']:
+                target_id = call['program'].replace('-', '_').replace(':', '_')
+                call_type = call['call_type']
+                lines.append(f"  {source_id} -->|CALL ({call_type})| {target_id}")
+        
+        return '\n'.join(lines)
 
 # ============================================================================
 # MCP SERVER
@@ -810,7 +1205,7 @@ class MCPServer:
         self.code_index = code_index
         self.doc_index = doc_index
         self.graph = graph
-        self.diagram_gen = FlowDiagramGenerator(graph.graph)
+        self.diagram_gen = EnhancedFlowDiagramGenerator(graph.graph)
     
     def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Handle JSON-RPC request"""
@@ -945,6 +1340,23 @@ class MCPServer:
             'doc_results': doc_results,
             'graph_context': graph_context
         }
+    
+    # In MCPServer class, add this method:
+
+    def _full_program_chain(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze full program execution chain"""
+        program = params.get('program', '')
+        max_depth = params.get('max_depth', 5)
+        
+        analyzer = ProgramChainAnalyzer(self.graph.graph, self.code_index)
+        chain = analyzer.analyze_program_chain(program, max_depth)
+        
+        if 'error' not in chain:
+            # Generate diagram
+            diagram = analyzer.generate_chain_diagram(chain)
+            chain['mermaid_diagram'] = diagram
+        
+        return chain
     
     def run(self):
         """Run MCP server on stdin/stdout"""

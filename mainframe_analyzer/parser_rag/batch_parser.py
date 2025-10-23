@@ -117,6 +117,96 @@ class FileTracker:
             'stats': stats or {}
         }
 
+# ============================================================================
+# ENHANCED JCL PARSER WITH FILE TRACKING
+# ============================================================================
+
+class EnhancedJCLParser:
+    """Enhanced JCL parser that tracks file I/O"""
+    
+    def __init__(self):
+        self.base_parser = JCLParser()
+    
+    def parse_jcl_with_files(self, source_code: str, filename: str) -> Dict[str, Any]:
+        """
+        Parse JCL and extract file I/O information.
+        Returns: {
+            'chunks': [CodeChunk],
+            'programs': [str],
+            'files': {'input': [], 'output': []},
+            'datasets': []
+        }
+        """
+        result = {
+            'chunks': self.base_parser.parse_jcl(source_code, filename),
+            'programs': self.base_parser.extract_programs(source_code),
+            'files': {'input': [], 'output': []},
+            'datasets': []
+        }
+        
+        # Extract DD statements for file I/O
+        dd_pattern = re.compile(
+            r'//(\w+)\s+DD\s+(?:DSN=)?([^,\s]+)',
+            re.IGNORECASE
+        )
+        
+        for match in dd_pattern.finditer(source_code):
+            ddname = match.group(1)
+            dataset = match.group(2)
+            
+            # Determine if input or output based on DD name or DISP
+            is_input = self._is_input_file(source_code, ddname, dataset)
+            
+            file_info = {
+                'ddname': ddname,
+                'dataset': dataset,
+                'type': 'sequential'  # Could be enhanced to detect VSAM, etc.
+            }
+            
+            if is_input:
+                result['files']['input'].append(file_info)
+            else:
+                result['files']['output'].append(file_info)
+            
+            result['datasets'].append(dataset)
+        
+        return result
+    
+    def _is_input_file(self, source_code: str, ddname: str, dataset: str) -> bool:
+        """
+        Determine if a file is input or output.
+        Checks DISP parameter and common naming conventions.
+        """
+        # Look for DISP parameter on this DD statement
+        dd_line_pattern = re.compile(
+            rf'//{ddname}\s+DD\s+.*?(?=//|\Z)',
+            re.IGNORECASE | re.DOTALL
+        )
+        
+        match = dd_line_pattern.search(source_code)
+        if match:
+            dd_statement = match.group(0)
+            
+            # Check DISP parameter
+            if 'DISP=SHR' in dd_statement or 'DISP=(OLD' in dd_statement:
+                return True
+            elif 'DISP=(NEW' in dd_statement or 'DISP=(MOD' in dd_statement:
+                return False
+        
+        # Fallback: check common naming conventions
+        input_patterns = ['INPUT', 'INFILE', 'SYSIN', 'CARDIN']
+        output_patterns = ['OUTPUT', 'OUTFILE', 'SYSOUT', 'CARDOUT', 'SYSPRINT']
+        
+        ddname_upper = ddname.upper()
+        
+        if any(pattern in ddname_upper for pattern in input_patterns):
+            return True
+        elif any(pattern in ddname_upper for pattern in output_patterns):
+            return False
+        
+        # Default to input if unknown
+        return True
+# ============================================================================
 
 class BatchParser:
     """
@@ -260,16 +350,11 @@ class BatchParser:
     
     def process_cobol_file(self, filepath: Path) -> bool:
         """
-        Process a single COBOL file:
-        - Parse code structure
-        - Extract metadata (DB2, CICS, MQ, calls)
-        - Build graph relationships
-        - Add to vector index
+        Process a single COBOL file with enhanced dynamic call detection
         """
         try:
             logger.info(f"Processing: {filepath.name}")
             
-            # Read file
             with open(filepath, 'r', encoding='latin-1', errors='ignore') as f:
                 source_code = f.read()
             
@@ -288,9 +373,25 @@ class BatchParser:
             self.graph.add_program(program_id, str(filepath))
             self.stats['programs_found'] += 1
             
-            # Extract CALL statements
+            # Extract CALL statements (basic)
             calls = self.cobol_parser.extract_calls(source_code)
-            logger.debug(f"  Found {len(calls)} CALL statements")
+            logger.debug(f"  Found {len(calls)} basic CALL statements")
+            
+            # Extract dynamic calls (advanced)
+            try:
+                dynamic_calls = self.cobol_parser.extract_dynamic_calls_advanced(source_code)
+                logger.debug(f"  Found {len(dynamic_calls)} dynamic call patterns")
+                
+                # Add dynamic calls to graph
+                for var_name, possible_targets in dynamic_calls.items():
+                    for target in possible_targets:
+                        self.graph.add_call(program_id, target, 'dynamic')
+                        self.stats['call_relationships'] += 1
+                        logger.debug(f"    Dynamic call: {var_name} -> {target}")
+            except Exception as e:
+                logger.warning(f"  Could not resolve dynamic calls: {e}")
+            
+            # Add static calls
             for call in calls:
                 if call['type'] == 'static':
                     self.graph.add_call(program_id, call['target'], 'static')
@@ -304,10 +405,12 @@ class BatchParser:
                     self.graph.add_db2_table(program_id, op['table'], op['type'])
                     self.stats['db2_tables'].add(op['table'])
             
-            # Extract CICS commands
+            # Extract CICS commands (only I/O related)
             cics_cmds = self.cobol_parser.extract_cics_commands(source_code)
-            logger.debug(f"  Found {len(cics_cmds)} CICS commands")
-            for cmd in cics_cmds:
+            io_cics = [cmd for cmd in cics_cmds if cmd['command'].upper() in 
+                       ['READ', 'WRITE', 'READNEXT', 'REWRITE', 'DELETE', 'STARTBR', 'ENDBR']]
+            logger.debug(f"  Found {len(io_cics)} CICS I/O commands")
+            for cmd in io_cics:
                 self.graph.add_cics_command(program_id, cmd['command'])
                 self.stats['cics_commands'].add(cmd['command'])
             
@@ -330,8 +433,9 @@ class BatchParser:
                     'program_id': program_id, 
                     'chunks': len(chunks),
                     'db2_ops': len(db2_ops),
-                    'cics_cmds': len(cics_cmds),
-                    'calls': len(calls)
+                    'cics_cmds': len(io_cics),
+                    'calls': len(calls),
+                    'dynamic_calls': len(dynamic_calls) if 'dynamic_calls' in locals() else 0
                 }
             )
             
@@ -342,28 +446,67 @@ class BatchParser:
             return False
     
     def process_jcl_file(self, filepath: Path) -> bool:
-        """Process a single JCL file"""
+        """Process a single JCL file with file I/O tracking"""
         try:
             logger.info(f"Processing JCL: {filepath.name}")
             
             with open(filepath, 'r', encoding='latin-1', errors='ignore') as f:
                 source_code = f.read()
             
-            # Parse JCL
-            chunks = self.jcl_parser.parse_jcl(source_code, str(filepath))
+            # Use enhanced parser
+            enhanced_parser = EnhancedJCLParser()
+            jcl_data = enhanced_parser.parse_jcl_with_files(source_code, str(filepath))
             
-            if chunks:
-                self.code_index.add_chunks(chunks)
-                self.stats['total_chunks'] += len(chunks)
-                logger.debug(f"  Added {len(chunks)} JCL chunks")
+            # Add chunks to index
+            if jcl_data['chunks']:
+                self.code_index.add_chunks(jcl_data['chunks'])
+                self.stats['total_chunks'] += len(jcl_data['chunks'])
+                logger.debug(f"  Added {len(jcl_data['chunks'])} JCL chunks")
             
-            # Extract program references from EXEC statements
-            programs = self.jcl_parser.extract_programs(source_code)
-            logger.debug(f"  Found {len(programs)} program references")
+            # Log file I/O
+            logger.debug(f"  Found {len(jcl_data['programs'])} programs")
+            logger.debug(f"  Input files: {len(jcl_data['files']['input'])}")
+            logger.debug(f"  Output files: {len(jcl_data['files']['output'])}")
+            
+            # Add file nodes to graph if programs are found
+            for program in jcl_data['programs']:
+                prog_node = f"prog:{program}"
+                
+                # Add input files
+                for inp_file in jcl_data['files']['input']:
+                    file_node = f"file:input:{inp_file['ddname']}"
+                    if not self.graph.graph.has_node(file_node):
+                        self.graph.graph.add_node(
+                            file_node,
+                            node_type='input_file',
+                            name=inp_file['ddname'],
+                            dataset=inp_file['dataset']
+                        )
+                    # Input file -> Program
+                    self.graph.graph.add_edge(file_node, prog_node, edge_type='input')
+                
+                # Add output files
+                for out_file in jcl_data['files']['output']:
+                    file_node = f"file:output:{out_file['ddname']}"
+                    if not self.graph.graph.has_node(file_node):
+                        self.graph.graph.add_node(
+                            file_node,
+                            node_type='output_file',
+                            name=out_file['ddname'],
+                            dataset=out_file['dataset']
+                        )
+                    # Program -> Output file
+                    self.graph.graph.add_edge(prog_node, file_node, edge_type='output')
             
             self.file_tracker.mark_processed(
                 str(filepath),
-                {'type': 'jcl', 'chunks': len(chunks), 'programs': len(programs)}
+                {
+                    'type': 'jcl', 
+                    'chunks': len(jcl_data['chunks']), 
+                    'programs': len(jcl_data['programs']),
+                    'input_files': len(jcl_data['files']['input']),
+                    'output_files': len(jcl_data['files']['output'])
+                }
             )
             
             return True
