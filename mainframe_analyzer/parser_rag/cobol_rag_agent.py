@@ -5,13 +5,14 @@ A comprehensive system for parsing COBOL/JCL code, building semantic indexes,
 creating program call graphs, and serving queries via MCP protocol.
 
 Installation Requirements:
-pip install tree-sitter tree-sitter-cobol sentence-transformers faiss-cpu networkx numpy
+pip install tree-sitter sentence-transformers faiss-cpu networkx numpy PyPDF2 python-docx markdown beautifulsoup4
 """
 
 import os
 import json
 import sys
 import re
+import pickle
 from typing import List, Dict, Any, Optional, Set, Tuple
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -22,7 +23,6 @@ try:
     from tree_sitter import Language, Parser
 except ImportError:
     print("Please install: pip install tree-sitter")
-    sys.exit(1)
 
 # Vector search
 try:
@@ -54,7 +54,7 @@ class CodeChunk:
     id: str
     source_file: str
     content: str
-    chunk_type: str  # 'program', 'paragraph', 'section', 'copybook'
+    chunk_type: str  # 'program', 'paragraph', 'section', 'copybook', 'document'
     line_start: int
     line_end: int
     metadata: Dict[str, Any]
@@ -92,9 +92,6 @@ class COBOLParser:
     def _init_parser(self):
         """Initialize Tree-Sitter parser for COBOL"""
         try:
-            # Note: You need to build the COBOL grammar first
-            # git clone https://github.com/tree-sitter/tree-sitter-cobol
-            # python build_cobol.py (see helper below)
             COBOL_LANGUAGE = Language('build/cobol.so', 'cobol')
             self.parser = Parser()
             self.parser.set_language(COBOL_LANGUAGE)
@@ -117,10 +114,7 @@ class COBOLParser:
         tree = self.parser.parse(bytes(source_code, "utf8"))
         root_node = tree.root_node
         
-        # Extract program identification
         program_id = self._extract_program_id(root_node, source_code)
-        
-        # Extract divisions, sections, paragraphs
         chunks.extend(self._extract_divisions(root_node, source_code, filename, program_id))
         chunks.extend(self._extract_paragraphs(root_node, source_code, filename, program_id))
         
@@ -147,7 +141,6 @@ class COBOLParser:
         for i, line in enumerate(lines):
             clean_line = line[6:72].strip() if len(line) > 6 else line.strip()
             
-            # Detect divisions
             if re.match(r'^\s*(IDENTIFICATION|ENVIRONMENT|DATA|PROCEDURE)\s+DIVISION', 
                        clean_line, re.IGNORECASE):
                 if current_division:
@@ -163,7 +156,7 @@ class COBOLParser:
                 current_division = clean_line.split()[0]
                 division_start = i
         
-        # Extract paragraphs from PROCEDURE DIVISION
+        # Extract paragraphs
         paragraph_pattern = re.compile(r'^([A-Z0-9][\w-]*)\s*\.\s*$')
         current_para = None
         para_start = 0
@@ -192,16 +185,12 @@ class COBOLParser:
         calls = []
         lines = source_code.split('\n')
         
-        # Static calls: CALL 'PROGNAME'
         static_pattern = re.compile(r"CALL\s+['\"](\w+)['\"]", re.IGNORECASE)
-        
-        # Dynamic calls: CALL WS-PROG-NAME
         dynamic_pattern = re.compile(r"CALL\s+(\w+-\w+)", re.IGNORECASE)
         
         for i, line in enumerate(lines):
             clean_line = line[6:72] if len(line) > 6 else line
             
-            # Static calls
             for match in static_pattern.finditer(clean_line):
                 calls.append({
                     'type': 'static',
@@ -210,7 +199,6 @@ class COBOLParser:
                     'source_line': line.strip()
                 })
             
-            # Dynamic calls
             for match in dynamic_pattern.finditer(clean_line):
                 calls.append({
                     'type': 'dynamic',
@@ -225,7 +213,6 @@ class COBOLParser:
         """Extract DB2 SQL operations"""
         operations = []
         
-        # EXEC SQL ... END-EXEC
         sql_pattern = re.compile(
             r'EXEC\s+SQL(.*?)END-EXEC', 
             re.IGNORECASE | re.DOTALL
@@ -234,7 +221,6 @@ class COBOLParser:
         for match in sql_pattern.finditer(source_code):
             sql_text = match.group(1).strip()
             
-            # Detect operation type
             op_type = 'UNKNOWN'
             table_name = None
             
@@ -271,7 +257,6 @@ class COBOLParser:
         """Extract CICS commands"""
         commands = []
         
-        # EXEC CICS ... END-EXEC
         cics_pattern = re.compile(
             r'EXEC\s+CICS\s+(.*?)END-EXEC', 
             re.IGNORECASE | re.DOTALL
@@ -280,7 +265,6 @@ class COBOLParser:
         for match in cics_pattern.finditer(source_code):
             cics_text = match.group(1).strip()
             
-            # Extract command type
             cmd_match = re.match(r'(\w+)', cics_text, re.IGNORECASE)
             cmd_type = cmd_match.group(1) if cmd_match else 'UNKNOWN'
             
@@ -295,7 +279,6 @@ class COBOLParser:
         """Extract MQ operations"""
         operations = []
         
-        # MQPUT, MQGET, MQOPEN, MQCLOSE
         mq_pattern = re.compile(
             r'CALL\s+[\'"]?(MQ(?:PUT|GET|OPEN|CLOSE|CONN|DISC))[\'"]?',
             re.IGNORECASE
@@ -310,15 +293,12 @@ class COBOLParser:
         return operations
     
     def _extract_program_id(self, node, source_code: str) -> str:
-        """Extract program ID from AST"""
         return "UNKNOWN"
     
     def _extract_divisions(self, node, source_code: str, filename: str, program_id: str) -> List[CodeChunk]:
-        """Extract divisions from AST"""
         return []
     
     def _extract_paragraphs(self, node, source_code: str, filename: str, program_id: str) -> List[CodeChunk]:
-        """Extract paragraphs from AST"""
         return []
 
 
@@ -339,17 +319,14 @@ class JCLParser:
         step_start = 0
         
         for i, line in enumerate(lines):
-            # Skip comments
             if line.startswith('//*'):
                 continue
             
-            # Job card
             if line.startswith('//') and ' JOB ' in line:
                 job_match = re.match(r'//(\w+)\s+JOB', line)
                 if job_match:
                     job_name = job_match.group(1)
             
-            # Step card
             if line.startswith('//') and ' EXEC ' in line:
                 if current_step:
                     chunks.append(CodeChunk(
@@ -373,13 +350,165 @@ class JCLParser:
         """Extract program names from JCL EXEC statements"""
         programs = []
         
-        # EXEC PGM=PROGNAME
         pgm_pattern = re.compile(r'EXEC\s+(?:PGM=|PROC=)(\w+)', re.IGNORECASE)
         
         for match in pgm_pattern.finditer(source_code):
             programs.append(match.group(1))
         
         return programs
+
+
+# ============================================================================
+# DOCUMENT PARSER
+# ============================================================================
+
+class DocumentParser:
+    """Parse various document formats (PDF, Word, Markdown, Text, HTML)"""
+    
+    def __init__(self):
+        self.chunk_size = 1000  # characters per chunk
+        self.chunk_overlap = 200
+    
+    def parse_pdf(self, filepath: str) -> List[CodeChunk]:
+        """Parse PDF document"""
+        try:
+            import PyPDF2
+            chunks = []
+            
+            with open(filepath, 'rb') as f:
+                pdf_reader = PyPDF2.PdfReader(f)
+                full_text = ""
+                
+                for page_num, page in enumerate(pdf_reader.pages):
+                    full_text += f"\n--- Page {page_num + 1} ---\n"
+                    full_text += page.extract_text()
+            
+            # Split into chunks
+            chunks = self._split_into_chunks(full_text, filepath, 'pdf')
+            logger.info(f"Parsed PDF: {filepath} -> {len(chunks)} chunks")
+            return chunks
+            
+        except Exception as e:
+            logger.error(f"Failed to parse PDF {filepath}: {e}")
+            return []
+    
+    def parse_word(self, filepath: str) -> List[CodeChunk]:
+        """Parse Word document"""
+        try:
+            import docx
+            chunks = []
+            
+            doc = docx.Document(filepath)
+            full_text = ""
+            
+            for para in doc.paragraphs:
+                full_text += para.text + "\n"
+            
+            chunks = self._split_into_chunks(full_text, filepath, 'docx')
+            logger.info(f"Parsed Word: {filepath} -> {len(chunks)} chunks")
+            return chunks
+            
+        except Exception as e:
+            logger.error(f"Failed to parse Word {filepath}: {e}")
+            return []
+    
+    def parse_markdown(self, filepath: str) -> List[CodeChunk]:
+        """Parse Markdown document"""
+        try:
+            import markdown
+            from bs4 import BeautifulSoup
+            
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                md_text = f.read()
+            
+            # Convert to HTML then extract text
+            html = markdown.markdown(md_text)
+            soup = BeautifulSoup(html, 'html.parser')
+            text = soup.get_text()
+            
+            chunks = self._split_into_chunks(text, filepath, 'markdown')
+            logger.info(f"Parsed Markdown: {filepath} -> {len(chunks)} chunks")
+            return chunks
+            
+        except Exception as e:
+            logger.error(f"Failed to parse Markdown {filepath}: {e}")
+            return []
+    
+    def parse_text(self, filepath: str) -> List[CodeChunk]:
+        """Parse plain text document"""
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+            
+            chunks = self._split_into_chunks(text, filepath, 'text')
+            logger.info(f"Parsed Text: {filepath} -> {len(chunks)} chunks")
+            return chunks
+            
+        except Exception as e:
+            logger.error(f"Failed to parse Text {filepath}: {e}")
+            return []
+    
+    def parse_html(self, filepath: str) -> List[CodeChunk]:
+        """Parse HTML document"""
+        try:
+            from bs4 import BeautifulSoup
+            
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                html = f.read()
+            
+            soup = BeautifulSoup(html, 'html.parser')
+            text = soup.get_text()
+            
+            chunks = self._split_into_chunks(text, filepath, 'html')
+            logger.info(f"Parsed HTML: {filepath} -> {len(chunks)} chunks")
+            return chunks
+            
+        except Exception as e:
+            logger.error(f"Failed to parse HTML {filepath}: {e}")
+            return []
+    
+    def _split_into_chunks(self, text: str, filepath: str, doc_type: str) -> List[CodeChunk]:
+        """Split text into overlapping chunks"""
+        chunks = []
+        text = text.strip()
+        
+        if not text:
+            return chunks
+        
+        start = 0
+        chunk_id = 0
+        
+        while start < len(text):
+            end = start + self.chunk_size
+            
+            # Try to break at sentence boundary
+            if end < len(text):
+                sentence_end = text.rfind('.', start, end)
+                if sentence_end > start:
+                    end = sentence_end + 1
+            
+            chunk_text = text[start:end].strip()
+            
+            if chunk_text:
+                chunks.append(CodeChunk(
+                    id=f"{Path(filepath).stem}::chunk{chunk_id}",
+                    source_file=filepath,
+                    content=chunk_text,
+                    chunk_type=f'document_{doc_type}',
+                    line_start=0,
+                    line_end=0,
+                    metadata={
+                        'doc_type': doc_type,
+                        'chunk_index': chunk_id,
+                        'char_start': start,
+                        'char_end': end
+                    }
+                ))
+                chunk_id += 1
+            
+            start = end - self.chunk_overlap
+        
+        return chunks
 
 
 # ============================================================================
@@ -472,7 +601,6 @@ class ProgramGraphBuilder:
             'outgoing': []
         }
         
-        # Get successors (outgoing edges)
         for successor in nx.descendants(self.graph, node_id):
             try:
                 path_length = nx.shortest_path_length(self.graph, node_id, successor)
@@ -487,7 +615,6 @@ class ProgramGraphBuilder:
             except:
                 pass
         
-        # Get predecessors (incoming edges)
         for predecessor in nx.ancestors(self.graph, node_id):
             try:
                 path_length = nx.shortest_path_length(self.graph, predecessor, node_id)
@@ -505,16 +632,15 @@ class ProgramGraphBuilder:
         return neighbors
     
     def save_graph(self, filepath: str):
-        """Save graph to file"""
-        import pickle
+        """Save graph to file using pickle"""
         with open(filepath, 'wb') as f:
             pickle.dump(self.graph, f)
-
+    
     def load_graph(self, filepath: str):
-        """Load graph from file"""
-        import pickle
+        """Load graph from file using pickle"""
         with open(filepath, 'rb') as f:
             self.graph = pickle.load(f)
+
 
 # ============================================================================
 # VECTOR INDEX BUILDER
@@ -534,30 +660,23 @@ class VectorIndexBuilder:
         if not chunks:
             return
         
-        # Generate embeddings
         texts = [f"{chunk.chunk_type}: {chunk.content}" for chunk in chunks]
         embeddings = self.model.encode(texts, show_progress_bar=True)
         
-        # Add to FAISS index
         self.index.add(np.array(embeddings).astype('float32'))
-        
-        # Store chunks
         self.chunks.extend(chunks)
         
         logger.info(f"Added {len(chunks)} chunks to index. Total: {len(self.chunks)}")
     
     def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """Search for similar code chunks"""
-        # Encode query
         query_embedding = self.model.encode([query])
         
-        # Search
         distances, indices = self.index.search(
             np.array(query_embedding).astype('float32'), 
             top_k
         )
         
-        # Format results
         results = []
         for i, (dist, idx) in enumerate(zip(distances[0], indices[0])):
             if idx < len(self.chunks):
@@ -609,22 +728,18 @@ class FlowDiagramGenerator:
                 edges=[]
             )
         
-        # Collect nodes and edges within depth
         visited_nodes = set([node_id])
         edges_list = []
         
         self._traverse_graph(node_id, depth, visited_nodes, edges_list)
         
-        # Generate Mermaid code
         mermaid_lines = ["graph TD"]
         
-        # Add nodes with styling based on type
         for node in visited_nodes:
             node_data = self.graph.nodes[node]
             node_type = node_data.get('node_type', 'unknown')
             node_name = node_data.get('name', node)
             
-            # Style based on type
             if node_type == 'program':
                 style = f"{self._safe_id(node)}[{node_name}]"
                 mermaid_lines.append(f"  {style}")
@@ -645,7 +760,6 @@ class FlowDiagramGenerator:
                 style = f"{self._safe_id(node)}[{node_name}]"
                 mermaid_lines.append(f"  {style}")
         
-        # Add edges with labels
         for source, target, label in edges_list:
             edge_str = f"  {self._safe_id(source)} -->|{label}| {self._safe_id(target)}"
             mermaid_lines.append(edge_str)
@@ -663,7 +777,6 @@ class FlowDiagramGenerator:
         if depth == 0:
             return
         
-        # Outgoing edges
         for successor in self.graph.successors(node_id):
             if successor not in visited:
                 visited.add(successor)
@@ -672,7 +785,6 @@ class FlowDiagramGenerator:
                 edges.append((node_id, successor, edge_label))
                 self._traverse_graph(successor, depth - 1, visited, edges)
         
-        # Incoming edges (limited to depth 1 to avoid clutter)
         if depth == 2:
             for predecessor in self.graph.predecessors(node_id):
                 if predecessor not in visited:
@@ -795,7 +907,6 @@ class MCPServer:
         variable = params.get('variable', '')
         context = params.get('context', '')
         
-        # Simple heuristic: look for MOVE statements
         possible_targets = []
         move_pattern = re.compile(
             rf"MOVE\s+['\"](\w+)['\"]\s+TO\s+{variable}",
@@ -816,13 +927,9 @@ class MCPServer:
         query = params.get('query', '')
         top_k = params.get('top_k', 5)
         
-        # Search code
         code_results = self.code_index.search(query, top_k)
-        
-        # Search docs
         doc_results = self.doc_index.search(query, top_k)
         
-        # Extract relevant nodes and get graph context
         graph_context = []
         for result in code_results[:3]:
             chunk = result['chunk']
@@ -875,6 +982,7 @@ class COBOLIndexer:
         
         self.cobol_parser = COBOLParser()
         self.jcl_parser = JCLParser()
+        self.doc_parser = DocumentParser()
         self.code_index = VectorIndexBuilder()
         self.doc_index = VectorIndexBuilder()
         self.graph = ProgramGraphBuilder()
@@ -885,51 +993,42 @@ class COBOLIndexer:
         
         logger.info(f"Indexing directory: {source_dir}")
         
-        # Find all source files
         cobol_files = list(source_path.rglob('*.cbl')) + list(source_path.rglob('*.cob'))
         jcl_files = list(source_path.rglob('*.jcl'))
         copybook_files = list(source_path.rglob('*.cpy'))
         
         logger.info(f"Found {len(cobol_files)} COBOL files, {len(jcl_files)} JCL files, {len(copybook_files)} copybooks")
         
-        # Process COBOL files
         all_chunks = []
         for filepath in cobol_files:
             logger.info(f"Processing: {filepath}")
             with open(filepath, 'r', encoding='latin-1', errors='ignore') as f:
                 source_code = f.read()
             
-            # Parse and extract
             chunks = self.cobol_parser.parse_cobol(source_code, str(filepath))
             all_chunks.extend(chunks)
             
-            # Extract program ID
             program_id = self._extract_program_id_from_chunks(chunks)
             self.graph.add_program(program_id, str(filepath))
             
-            # Extract calls
             calls = self.cobol_parser.extract_calls(source_code)
             for call in calls:
                 if call['type'] == 'static':
                     self.graph.add_call(program_id, call['target'], 'static')
             
-            # Extract DB2 operations
             db2_ops = self.cobol_parser.extract_db2_operations(source_code)
             for op in db2_ops:
                 if op['table']:
                     self.graph.add_db2_table(program_id, op['table'], op['type'])
             
-            # Extract CICS commands
             cics_cmds = self.cobol_parser.extract_cics_commands(source_code)
             for cmd in cics_cmds:
                 self.graph.add_cics_command(program_id, cmd['command'])
             
-            # Extract MQ operations
             mq_ops = self.cobol_parser.extract_mq_operations(source_code)
             for op in mq_ops:
                 self.graph.add_mq_queue(program_id, op['operation'])
         
-        # Process JCL files
         for filepath in jcl_files:
             logger.info(f"Processing JCL: {filepath}")
             with open(filepath, 'r', encoding='latin-1', errors='ignore') as f:
@@ -938,7 +1037,6 @@ class COBOLIndexer:
             chunks = self.jcl_parser.parse_jcl(source_code, str(filepath))
             all_chunks.extend(chunks)
         
-        # Add chunks to index
         self.code_index.add_chunks(all_chunks)
         
         logger.info("Indexing complete!")
@@ -952,47 +1050,65 @@ class COBOLIndexer:
     
     def save_all(self):
         """Save all indexes to disk"""
-        # Save code index
         self.code_index.save_index(
             str(self.output_dir / 'code_index.faiss'),
             str(self.output_dir / 'code_chunks.json')
         )
         
-        # Save doc index
         self.doc_index.save_index(
             str(self.output_dir / 'doc_index.faiss'),
             str(self.output_dir / 'doc_chunks.json')
         )
         
-        # Save graph
         self.graph.save_graph(str(self.output_dir / 'program_graph.gpickle'))
         
         logger.info(f"All indexes saved to {self.output_dir}")
     
     def load_all(self):
         """Load all indexes from disk"""
-        # Load code index (required)
-        self.code_index.load_index(
-            str(self.output_dir / 'code_index.faiss'),
-            str(self.output_dir / 'code_chunks.json')
-        )
+        code_index_path = self.output_dir / 'code_index.faiss'
+        code_chunks_path = self.output_dir / 'code_chunks.json'
         
-        # Load doc index (optional)
+        if not code_index_path.exists() or not code_chunks_path.exists():
+            raise FileNotFoundError(
+                f"Code index not found in {self.output_dir}. "
+                "Run batch_parser.py first to create indexes."
+            )
+        
+        self.code_index.load_index(
+            str(code_index_path),
+            str(code_chunks_path)
+        )
+        logger.info(f"✓ Loaded code index with {len(self.code_index.chunks)} chunks")
+        
         doc_index_path = self.output_dir / 'doc_index.faiss'
         doc_chunks_path = self.output_dir / 'doc_chunks.json'
+        
         if doc_index_path.exists() and doc_chunks_path.exists():
-            self.doc_index.load_index(
-                str(doc_index_path),
-                str(doc_chunks_path)
-            )
-            logger.info("Loaded doc index")
+            try:
+                self.doc_index.load_index(
+                    str(doc_index_path),
+                    str(doc_chunks_path)
+                )
+                logger.info(f"✓ Loaded doc index with {len(self.doc_index.chunks)} chunks")
+            except Exception as e:
+                logger.warning(f"Could not load doc index: {e}")
         else:
-            logger.info("No doc index found (optional)")
+            logger.info("No doc index found (this is optional)")
         
-        # Load graph (required)
-        self.graph.load_graph(str(self.output_dir / 'program_graph.gpickle'))
+        graph_path = self.output_dir / 'program_graph.gpickle'
         
-        logger.info(f"All indexes loaded from {self.output_dir}")
+        if not graph_path.exists():
+            raise FileNotFoundError(
+                f"Program graph not found in {self.output_dir}. "
+                "Run batch_parser.py first to create indexes."
+            )
+        
+        self.graph.load_graph(str(graph_path))
+        logger.info(f"✓ Loaded program graph with {len(self.graph.graph.nodes)} nodes")
+        
+        logger.info("All indexes loaded successfully!")
+
 
 # ============================================================================
 # CLI INTERFACE

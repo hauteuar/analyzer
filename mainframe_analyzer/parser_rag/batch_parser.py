@@ -1,17 +1,17 @@
 """
-batch_parser.py - Standalone COBOL Batch Parser
-================================================
-Place COBOL/JCL files in a folder and run this script to build indexes.
+batch_parser.py - Standalone COBOL Batch Parser with Document Support
+======================================================================
+Parses COBOL/JCL files AND documentation (PDF, Word, Markdown, HTML, Text)
+to build comprehensive search indexes.
 
 USAGE:
     python batch_parser.py --source /path/to/cobol --output ./index
+    python batch_parser.py --source /path/to/cobol --output ./index --docs /path/to/docs
     python batch_parser.py --source /path/to/cobol --output ./index --incremental
     python batch_parser.py --watch /path/to/cobol --output ./index
 
 REQUIREMENTS:
-    pip install tree-sitter sentence-transformers faiss-cpu networkx
-
-This script requires cobol_rag_agent.py to be in the same directory.
+    pip install tree-sitter sentence-transformers faiss-cpu networkx PyPDF2 python-docx markdown beautifulsoup4
 """
 
 import os
@@ -30,6 +30,7 @@ try:
     from cobol_rag_agent import (
         COBOLParser, 
         JCLParser, 
+        DocumentParser,
         VectorIndexBuilder, 
         ProgramGraphBuilder, 
         CodeChunk
@@ -119,7 +120,7 @@ class FileTracker:
 
 class BatchParser:
     """
-    Main batch parser for COBOL/JCL files.
+    Main batch parser for COBOL/JCL files and documentation.
     Scans directories, parses files, builds indexes.
     """
     
@@ -134,6 +135,7 @@ class BatchParser:
         logger.info("Initializing parsers...")
         self.cobol_parser = COBOLParser()
         self.jcl_parser = JCLParser()
+        self.doc_parser = DocumentParser()
         
         # Initialize indexes
         logger.info("Initializing vector indexes...")
@@ -149,6 +151,7 @@ class BatchParser:
             'failed_files': 0,
             'total_chunks': 0,
             'programs_found': 0,
+            'documents_processed': 0,
             'db2_tables': set(),
             'mq_operations': set(),
             'cics_commands': set(),
@@ -168,6 +171,13 @@ class BatchParser:
             if code_index_path.exists() and code_chunks_path.exists():
                 self.code_index.load_index(str(code_index_path), str(code_chunks_path))
                 logger.info(f"✓ Loaded existing code index with {len(self.code_index.chunks)} chunks")
+            
+            doc_index_path = self.output_dir / 'doc_index.faiss'
+            doc_chunks_path = self.output_dir / 'doc_chunks.json'
+            
+            if doc_index_path.exists() and doc_chunks_path.exists():
+                self.doc_index.load_index(str(doc_index_path), str(doc_chunks_path))
+                logger.info(f"✓ Loaded existing doc index with {len(self.doc_index.chunks)} chunks")
             
             graph_path = self.output_dir / 'program_graph.gpickle'
             if graph_path.exists():
@@ -218,6 +228,35 @@ class BatchParser:
             found_files[file_type] = list(set(found_files[file_type]))
         
         return found_files
+    
+    def find_documents(self, docs_dir: str) -> Dict[str, List[Path]]:
+        """
+        Find all documentation files.
+        Returns dict with document types as keys.
+        """
+        docs_path = Path(docs_dir)
+        
+        if not docs_path.exists():
+            logger.warning(f"Documentation directory does not exist: {docs_dir}")
+            return {'pdf': [], 'word': [], 'markdown': [], 'text': [], 'html': []}
+        
+        logger.info(f"Scanning documentation directory: {docs_dir}")
+        
+        found_docs = {
+            'pdf': list(docs_path.rglob('*.pdf')) + list(docs_path.rglob('*.PDF')),
+            'word': list(docs_path.rglob('*.doc')) + list(docs_path.rglob('*.docx')) + 
+                    list(docs_path.rglob('*.DOC')) + list(docs_path.rglob('*.DOCX')),
+            'markdown': list(docs_path.rglob('*.md')) + list(docs_path.rglob('*.MD')),
+            'text': list(docs_path.rglob('*.txt')) + list(docs_path.rglob('*.TXT')),
+            'html': list(docs_path.rglob('*.html')) + list(docs_path.rglob('*.htm')) +
+                    list(docs_path.rglob('*.HTML')) + list(docs_path.rglob('*.HTM'))
+        }
+        
+        # Remove duplicates
+        for doc_type in found_docs:
+            found_docs[doc_type] = list(set(found_docs[doc_type]))
+        
+        return found_docs
     
     def process_cobol_file(self, filepath: Path) -> bool:
         """
@@ -333,6 +372,41 @@ class BatchParser:
             logger.error(f"Failed to process JCL {filepath.name}: {e}")
             return False
     
+    def process_document(self, filepath: Path, doc_type: str) -> bool:
+        """Process a documentation file"""
+        try:
+            logger.info(f"Processing {doc_type.upper()}: {filepath.name}")
+            
+            chunks = []
+            
+            if doc_type == 'pdf':
+                chunks = self.doc_parser.parse_pdf(str(filepath))
+            elif doc_type == 'word':
+                chunks = self.doc_parser.parse_word(str(filepath))
+            elif doc_type == 'markdown':
+                chunks = self.doc_parser.parse_markdown(str(filepath))
+            elif doc_type == 'text':
+                chunks = self.doc_parser.parse_text(str(filepath))
+            elif doc_type == 'html':
+                chunks = self.doc_parser.parse_html(str(filepath))
+            
+            if chunks:
+                self.doc_index.add_chunks(chunks)
+                self.stats['total_chunks'] += len(chunks)
+                self.stats['documents_processed'] += 1
+                logger.debug(f"  Added {len(chunks)} documentation chunks")
+            
+            self.file_tracker.mark_processed(
+                str(filepath),
+                {'type': f'doc_{doc_type}', 'chunks': len(chunks)}
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to process document {filepath.name}: {e}")
+            return False
+    
     def _extract_program_id(self, chunks: List[CodeChunk], source_code: str) -> str:
         """Extract program ID from chunks or source code"""
         # Try chunks first
@@ -350,14 +424,16 @@ class BatchParser:
         
         return "UNKNOWN"
     
-    def process_batch(self, source_dir: str):
+    def process_batch(self, source_dir: str, docs_dir: Optional[str] = None):
         """
         Main entry point: Process all files in batch
         """
         logger.info("=" * 70)
-        logger.info("COBOL BATCH PARSER - STARTING")
+        logger.info("COBOL BATCH PARSER WITH DOCUMENT SUPPORT - STARTING")
         logger.info("=" * 70)
         logger.info(f"Source Directory: {source_dir}")
+        if docs_dir:
+            logger.info(f"Documentation Directory: {docs_dir}")
         logger.info(f"Output Directory: {self.output_dir}")
         logger.info(f"Mode: {'INCREMENTAL' if self.incremental else 'FULL'}")
         logger.info("")
@@ -365,17 +441,29 @@ class BatchParser:
         start_time = time.time()
         
         # Find all files
-        logger.info("Scanning for files...")
+        logger.info("Scanning for source files...")
         files = self.find_files(source_dir)
         
-        self.stats['total_files'] = sum(len(f) for f in files.values())
+        # Find documentation files
+        docs = {'pdf': [], 'word': [], 'markdown': [], 'text': [], 'html': []}
+        if docs_dir:
+            logger.info("Scanning for documentation files...")
+            docs = self.find_documents(docs_dir)
+        
+        self.stats['total_files'] = sum(len(f) for f in files.values()) + sum(len(d) for d in docs.values())
         
         logger.info("")
-        logger.info(f"Found {len(files['cobol'])} COBOL programs")
-        logger.info(f"Found {len(files['copybook'])} Copybooks")
-        logger.info(f"Found {len(files['jcl'])} JCL files")
-        logger.info(f"Found {len(files['proc'])} Procedures")
-        logger.info(f"Total: {self.stats['total_files']} files")
+        logger.info("FOUND FILES:")
+        logger.info(f"  COBOL Programs:    {len(files['cobol'])}")
+        logger.info(f"  Copybooks:         {len(files['copybook'])}")
+        logger.info(f"  JCL Files:         {len(files['jcl'])}")
+        logger.info(f"  Procedures:        {len(files['proc'])}")
+        logger.info(f"  PDF Documents:     {len(docs['pdf'])}")
+        logger.info(f"  Word Documents:    {len(docs['word'])}")
+        logger.info(f"  Markdown Files:    {len(docs['markdown'])}")
+        logger.info(f"  Text Files:        {len(docs['text'])}")
+        logger.info(f"  HTML Files:        {len(docs['html'])}")
+        logger.info(f"  TOTAL:             {self.stats['total_files']}")
         logger.info("")
         
         if self.stats['total_files'] == 0:
@@ -387,7 +475,6 @@ class BatchParser:
         logger.info("PROCESSING COBOL PROGRAMS")
         logger.info("-" * 70)
         for i, filepath in enumerate(files['cobol'], 1):
-            # Check if changed (for incremental mode)
             if self.incremental and not self.file_tracker.is_file_changed(str(filepath)):
                 logger.debug(f"[{i}/{len(files['cobol'])}] Skipping unchanged: {filepath.name}")
                 self.stats['skipped_files'] += 1
@@ -405,7 +492,7 @@ class BatchParser:
                 logger.info(f"  → Saving intermediate state...")
                 self._save_intermediate()
         
-        # Process Copybooks (treat as COBOL)
+        # Process Copybooks
         logger.info("")
         logger.info("-" * 70)
         logger.info("PROCESSING COPYBOOKS")
@@ -441,6 +528,78 @@ class BatchParser:
             else:
                 self.stats['failed_files'] += 1
         
+        # Process Documentation files
+        if docs_dir:
+            logger.info("")
+            logger.info("-" * 70)
+            logger.info("PROCESSING DOCUMENTATION FILES")
+            logger.info("-" * 70)
+            
+            # Process PDFs
+            for i, filepath in enumerate(docs['pdf'], 1):
+                if self.incremental and not self.file_tracker.is_file_changed(str(filepath)):
+                    self.stats['skipped_files'] += 1
+                    continue
+                
+                logger.info(f"[PDF {i}/{len(docs['pdf'])}] Processing: {filepath.name}")
+                
+                if self.process_document(filepath, 'pdf'):
+                    self.stats['processed_files'] += 1
+                else:
+                    self.stats['failed_files'] += 1
+            
+            # Process Word documents
+            for i, filepath in enumerate(docs['word'], 1):
+                if self.incremental and not self.file_tracker.is_file_changed(str(filepath)):
+                    self.stats['skipped_files'] += 1
+                    continue
+                
+                logger.info(f"[Word {i}/{len(docs['word'])}] Processing: {filepath.name}")
+                
+                if self.process_document(filepath, 'word'):
+                    self.stats['processed_files'] += 1
+                else:
+                    self.stats['failed_files'] += 1
+            
+            # Process Markdown files
+            for i, filepath in enumerate(docs['markdown'], 1):
+                if self.incremental and not self.file_tracker.is_file_changed(str(filepath)):
+                    self.stats['skipped_files'] += 1
+                    continue
+                
+                logger.info(f"[Markdown {i}/{len(docs['markdown'])}] Processing: {filepath.name}")
+                
+                if self.process_document(filepath, 'markdown'):
+                    self.stats['processed_files'] += 1
+                else:
+                    self.stats['failed_files'] += 1
+            
+            # Process Text files
+            for i, filepath in enumerate(docs['text'], 1):
+                if self.incremental and not self.file_tracker.is_file_changed(str(filepath)):
+                    self.stats['skipped_files'] += 1
+                    continue
+                
+                logger.info(f"[Text {i}/{len(docs['text'])}] Processing: {filepath.name}")
+                
+                if self.process_document(filepath, 'text'):
+                    self.stats['processed_files'] += 1
+                else:
+                    self.stats['failed_files'] += 1
+            
+            # Process HTML files
+            for i, filepath in enumerate(docs['html'], 1):
+                if self.incremental and not self.file_tracker.is_file_changed(str(filepath)):
+                    self.stats['skipped_files'] += 1
+                    continue
+                
+                logger.info(f"[HTML {i}/{len(docs['html'])}] Processing: {filepath.name}")
+                
+                if self.process_document(filepath, 'html'):
+                    self.stats['processed_files'] += 1
+                else:
+                    self.stats['failed_files'] += 1
+        
         # Final save
         logger.info("")
         logger.info("-" * 70)
@@ -464,6 +623,12 @@ class BatchParser:
         self.code_index.save_index(
             str(self.output_dir / 'code_index.faiss'),
             str(self.output_dir / 'code_chunks.json')
+        )
+        
+        logger.info("Saving documentation index...")
+        self.doc_index.save_index(
+            str(self.output_dir / 'doc_index.faiss'),
+            str(self.output_dir / 'doc_chunks.json')
         )
         
         logger.info("Saving program graph...")
@@ -491,26 +656,27 @@ class BatchParser:
         logger.info("=" * 70)
         logger.info("BATCH PARSING COMPLETED")
         logger.info("=" * 70)
-        logger.info(f"Total Files Found:      {self.stats['total_files']}")
-        logger.info(f"Files Processed:        {self.stats['processed_files']}")
-        logger.info(f"Files Skipped:          {self.stats['skipped_files']}")
-        logger.info(f"Files Failed:           {self.stats['failed_files']}")
+        logger.info(f"Total Files Found:        {self.stats['total_files']}")
+        logger.info(f"Files Processed:          {self.stats['processed_files']}")
+        logger.info(f"Files Skipped:            {self.stats['skipped_files']}")
+        logger.info(f"Files Failed:             {self.stats['failed_files']}")
         logger.info("")
-        logger.info(f"Total Code Chunks:      {self.stats['total_chunks']}")
-        logger.info(f"Programs Found:         {self.stats['programs_found']}")
-        logger.info(f"Call Relationships:     {self.stats['call_relationships']}")
-        logger.info(f"DB2 Tables:             {len(self.stats['db2_tables'])}")
-        logger.info(f"MQ Operations:          {len(self.stats['mq_operations'])}")
-        logger.info(f"CICS Commands:          {len(self.stats['cics_commands'])}")
+        logger.info(f"Total Code Chunks:        {self.stats['total_chunks']}")
+        logger.info(f"Programs Found:           {self.stats['programs_found']}")
+        logger.info(f"Documents Processed:      {self.stats['documents_processed']}")
+        logger.info(f"Call Relationships:       {self.stats['call_relationships']}")
+        logger.info(f"DB2 Tables:               {len(self.stats['db2_tables'])}")
+        logger.info(f"MQ Operations:            {len(self.stats['mq_operations'])}")
+        logger.info(f"CICS Commands:            {len(self.stats['cics_commands'])}")
         logger.info("")
-        logger.info(f"Processing Time:        {duration:.2f} seconds")
+        logger.info(f"Processing Time:          {duration:.2f} seconds")
         if self.stats['processed_files'] > 0:
-            logger.info(f"Files/Second:           {self.stats['processed_files']/duration:.2f}")
+            logger.info(f"Files/Second:             {self.stats['processed_files']/duration:.2f}")
         logger.info("")
-        logger.info(f"Output Directory:       {self.output_dir}")
+        logger.info(f"Output Directory:         {self.output_dir}")
         logger.info("")
         logger.info("Index Files Created:")
-        for fname in ['code_index.faiss', 'code_chunks.json', 'program_graph.gpickle', 'index_stats.json']:
+        for fname in ['code_index.faiss', 'code_chunks.json', 'doc_index.faiss', 'doc_chunks.json', 'program_graph.gpickle', 'index_stats.json']:
             fpath = self.output_dir / fname
             if fpath.exists():
                 size_mb = fpath.stat().st_size / (1024 * 1024)
@@ -524,8 +690,9 @@ class FileWatcher:
     Useful for development environments.
     """
     
-    def __init__(self, source_dir: str, output_dir: str):
+    def __init__(self, source_dir: str, output_dir: str, docs_dir: Optional[str] = None):
         self.source_dir = source_dir
+        self.docs_dir = docs_dir
         self.parser = BatchParser(output_dir, incremental=True)
         self.last_check = datetime.now()
     
@@ -538,6 +705,8 @@ class FileWatcher:
         logger.info("FILE WATCHER MODE")
         logger.info("=" * 70)
         logger.info(f"Watching: {self.source_dir}")
+        if self.docs_dir:
+            logger.info(f"Watching Docs: {self.docs_dir}")
         logger.info(f"Interval: {interval} seconds")
         logger.info("Press Ctrl+C to stop")
         logger.info("")
@@ -551,11 +720,19 @@ class FileWatcher:
                 files = self.parser.find_files(self.source_dir)
                 changed_files = []
                 
-                # Check which files changed
+                # Check source files
                 for file_type, file_list in files.items():
                     for filepath in file_list:
                         if self.parser.file_tracker.is_file_changed(str(filepath)):
                             changed_files.append((file_type, filepath))
+                
+                # Check documentation files
+                if self.docs_dir:
+                    docs = self.parser.find_documents(self.docs_dir)
+                    for doc_type, doc_list in docs.items():
+                        for filepath in doc_list:
+                            if self.parser.file_tracker.is_file_changed(str(filepath)):
+                                changed_files.append((f'doc_{doc_type}', filepath))
                 
                 if changed_files:
                     logger.info(f"  → Found {len(changed_files)} changed files")
@@ -568,6 +745,10 @@ class FileWatcher:
                         elif file_type in ['jcl', 'proc']:
                             logger.info(f"  → Reprocessing: {filepath.name}")
                             self.parser.process_jcl_file(filepath)
+                        elif file_type.startswith('doc_'):
+                            doc_type = file_type.replace('doc_', '')
+                            logger.info(f"  → Reprocessing: {filepath.name}")
+                            self.parser.process_document(filepath, doc_type)
                     
                     # Save updates
                     logger.info("  → Saving updated indexes...")
@@ -592,26 +773,31 @@ def main():
     """Main entry point with argument parsing"""
     
     parser = argparse.ArgumentParser(
-        description='Batch Parser for COBOL/JCL Files - Build Search Indexes',
+        description='Batch Parser for COBOL/JCL Files and Documentation - Build Search Indexes',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Full parse (first time)
+  # Parse COBOL code only
   python batch_parser.py --source /mainframe/cobol --output ./index
   
-  # Incremental parse (only process changed files)
+  # Parse COBOL code + documentation
+  python batch_parser.py --source /mainframe/cobol --docs /mainframe/docs --output ./index
+  
+  # Incremental parse (only changed files)
   python batch_parser.py --source /mainframe/cobol --output ./index --incremental
   
   # Watch mode (auto-reindex when files change)
   python batch_parser.py --watch /mainframe/cobol --output ./index --interval 300
 
 After indexing, use the MCP server:
-  python cobol_rag_agent.py serve --index-dir ./index
+  python mcp_server_rag.py
         """
     )
     
     parser.add_argument('--source', 
                        help='Source directory containing COBOL/JCL files')
+    parser.add_argument('--docs',
+                       help='Documentation directory (PDF, Word, Markdown, HTML, Text)')
     parser.add_argument('--output', 
                        required=True, 
                        help='Output directory for index files')
@@ -633,7 +819,7 @@ After indexing, use the MCP server:
             print(f"ERROR: Watch directory not found: {args.watch}")
             sys.exit(1)
         
-        watcher = FileWatcher(args.watch, args.output)
+        watcher = FileWatcher(args.watch, args.output, args.docs)
         watcher.watch(args.interval)
         return
     
@@ -647,11 +833,14 @@ After indexing, use the MCP server:
     
     # Create and run batch parser
     batch_parser = BatchParser(args.output, args.incremental)
-    batch_parser.process_batch(args.source)
+    batch_parser.process_batch(args.source, args.docs)
     
     logger.info("")
     logger.info("Next step: Start the MCP server with:")
-    logger.info(f"  python cobol_rag_agent.py serve --index-dir {args.output}")
+    logger.info(f"  python mcp_server_rag.py")
+    logger.info("")
+    logger.info("Or configure in VS Code settings.json:")
+    logger.info('  "INDEX_DIR": "' + args.output + '"')
 
 
 if __name__ == '__main__':
