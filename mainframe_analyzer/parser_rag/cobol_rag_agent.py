@@ -43,7 +43,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from enhanced_flow_diagram_generator import EnhancedFlowDiagramGenerator
+
 
 # ============================================================================
 # DATA MODELS
@@ -1160,198 +1160,386 @@ class VectorIndexBuilder:
 # ENHANCED FLOW DIAGRAM GENERATOR
 # ============================================================================
 
+"""
+EnhancedFlowDiagramGenerator - Complete Flow Visualization
+===========================================================
+Generates comprehensive Mermaid diagrams showing:
+- Program call chains (static, dynamic, CICS)
+- Input/Output files
+- Database operations
+- MQ operations
+- Full execution flow
+"""
+
+
+
 class EnhancedFlowDiagramGenerator:
-    """Generate enhanced Mermaid flow diagrams with better layout"""
+    """
+    Enhanced flow diagram generator that shows complete program execution flow
+    including called programs, input files, output files, and database operations.
+    """
     
-    def __init__(self, graph: nx.DiGraph):
-        self.graph = graph
+    def __init__(self, graph_builder):
+        """Initialize with a ProgramGraphBuilder instance"""
+        self.graph = graph_builder
+        self.colors = {
+            'program': '#4A90E2',
+            'called_program': '#5BA3F5',
+            'input_file': '#50C878',
+            'output_file': '#FF6B6B',
+            'db2_table': '#9B59B6',
+            'mq_queue': '#FFA500',
+            'cics': '#E74C3C'
+        }
     
-    def generate_flow(self, node_id: str, depth: int = 2) -> FlowDiagram:
-        """Generate enhanced flow diagram with inputs/outputs separated"""
-        if not self.graph.has_node(node_id):
-            return FlowDiagram(
-                mermaid_code=f"graph TD\n  ERROR[Node {node_id} not found]",
-                nodes=[],
-                edges=[]
-            )
+    def generate_complete_flow(self, program_name: str, max_depth: int = 3) -> Dict[str, Any]:
+        """
+        Generate complete flow diagram for a program including:
+        - All called programs (with recursion up to max_depth)
+        - All input files
+        - All output files
+        - All database operations
+        - All MQ operations
         
-        # Collect nodes by category
-        program_nodes = set([node_id])
-        input_nodes = set()
-        output_nodes = set()
-        db_nodes = set()
-        mq_nodes = set()
-        file_nodes = set()
+        Returns:
+            {
+                'mermaid_diagram': str,
+                'programs_called': [str],
+                'input_files': [str],
+                'output_files': [str],
+                'databases': [dict],
+                'mq_queues': [str],
+                'execution_flow': [dict]
+            }
+        """
+        logger.info(f"Generating complete flow for {program_name} (max depth: {max_depth})")
         
-        self._categorize_nodes(node_id, depth, program_nodes, input_nodes, 
-                               output_nodes, db_nodes, mq_nodes, file_nodes)
+        if not self.graph.graph.has_node(program_name):
+            logger.warning(f"Program {program_name} not found in graph")
+            return self._empty_result()
         
-        # Generate Mermaid code with subgraphs
-        mermaid_lines = ["graph TB"]
+        # Collect all information
+        result = {
+            'program': program_name,
+            'programs_called': [],
+            'input_files': [],
+            'output_files': [],
+            'databases': [],
+            'mq_queues': [],
+            'execution_flow': []
+        }
         
-        # Subgraph for inputs
-        if input_nodes:
-            mermaid_lines.append("  subgraph Inputs")
-            for node in input_nodes:
-                node_data = self.graph.nodes[node]
-                node_name = node_data.get('name', node)
-                node_type = node_data.get('node_type', 'unknown')
-                
-                if 'file' in node_type.lower():
-                    style = f"{self._safe_id(node)}[/📄 {node_name}/]"
-                elif 'mq' in node_type.lower():
-                    style = f"{self._safe_id(node)}{{{{📨 {node_name}}}}}"
-                else:
-                    style = f"{self._safe_id(node)}[{node_name}]"
-                
-                mermaid_lines.append(f"    {style}")
-                mermaid_lines.append(f"    style {self._safe_id(node)} fill:#90EE90,stroke:#2D7A4A,color:#000")
-            mermaid_lines.append("  end")
+        # Traverse the call graph
+        visited_programs = set()
+        self._traverse_calls(program_name, result, visited_programs, depth=0, max_depth=max_depth)
         
-        # Main program
-        mermaid_lines.append("  subgraph Processing")
-        for node in program_nodes:
-            node_data = self.graph.nodes[node]
-            node_name = node_data.get('name', node)
-            style = f"{self._safe_id(node)}[💻 {node_name}]"
-            mermaid_lines.append(f"    {style}")
-            mermaid_lines.append(f"    style {self._safe_id(node)} fill:#4A90E2,stroke:#2E5C8A,color:#fff")
-        mermaid_lines.append("  end")
+        # Generate Mermaid diagram
+        result['mermaid_diagram'] = self._generate_mermaid_with_files(program_name, result, max_depth)
         
-        # Database operations
-        if db_nodes:
-            mermaid_lines.append("  subgraph Database")
-            for node in db_nodes:
-                node_data = self.graph.nodes[node]
-                node_name = node_data.get('name', node)
-                edge_data = self._get_edge_to_node(node_id, node)
-                operation = edge_data.get('operation', '') if edge_data else ''
-                
-                style = f"{self._safe_id(node)}[(🗄️ {node_name}<br/>{operation})]"
-                mermaid_lines.append(f"    {style}")
-                mermaid_lines.append(f"    style {self._safe_id(node)} fill:#FFD700,stroke:#DAA520,color:#000")
-            mermaid_lines.append("  end")
+        logger.info(f"Flow generated: {len(result['programs_called'])} programs, "
+                   f"{len(result['input_files'])} inputs, {len(result['output_files'])} outputs")
         
-        # Subgraph for outputs
-        if output_nodes:
-            mermaid_lines.append("  subgraph Outputs")
-            for node in output_nodes:
-                node_data = self.graph.nodes[node]
-                node_name = node_data.get('name', node)
-                node_type = node_data.get('node_type', 'unknown')
-                
-                if 'file' in node_type.lower():
-                    style = f"{self._safe_id(node)}[/📄 {node_name}/]"
-                elif 'mq' in node_type.lower():
-                    style = f"{self._safe_id(node)}{{{{📤 {node_name}}}}}"
-                else:
-                    style = f"{self._safe_id(node)}[{node_name}]"
-                
-                mermaid_lines.append(f"    {style}")
-                mermaid_lines.append(f"    style {self._safe_id(node)} fill:#FFA07A,stroke:#FF6347,color:#000")
-            mermaid_lines.append("  end")
-        
-        # Add edges
-        edges_list = []
-        all_nodes = program_nodes | input_nodes | output_nodes | db_nodes | mq_nodes | file_nodes
-        
-        for source in all_nodes:
-            for target in all_nodes:
-                if self.graph.has_edge(source, target):
-                    edge_data = self.graph.get_edge_data(source, target)
-                    edge_label = edge_data.get('edge_type', 'link') if edge_data else 'link'
-                    
-                    # Simplify labels
-                    if edge_label == 'db2_access':
-                        operation = edge_data.get('operation', '')
-                        edge_label = operation if operation else 'DB2'
-                        
-                    elif edge_label == 'calls':
-                        # Get call type
-                        call_type = edge_data.get('call_type', 'static')
-                        
-                        # Map call types to display icons and labels
-                        call_display = {
-                            'static': ('📞', 'CALL'),
-                            'dynamic': ('🔄', 'CALL (dynamic)'),
-                            'cics_link': ('🔗', 'CICS LINK'),
-                            'cics_link_dynamic': ('🔗🔄', 'CICS LINK (dynamic)'),
-                            'cics_xctl': ('⚡', 'CICS XCTL'),
-                            'cics_xctl_dynamic': ('⚡🔄', 'CICS XCTL (dynamic)')
-                        }
-                        
-                        icon, label = call_display.get(call_type, ('📞', 'CALL'))
-                        edge_label = f"{icon} {label}"
-                    
-                    # Add the edge
-                    edge_str = f"  {self._safe_id(source)} -->|{edge_label}| {self._safe_id(target)}"
-                    mermaid_lines.append(edge_str)
-                    edges_list.append((source, target, edge_label))
-        
-        mermaid_code = '\n'.join(mermaid_lines)
-        
-        return FlowDiagram(
-            mermaid_code=mermaid_code,
-            nodes=list(all_nodes),
-            edges=edges_list
-        )
+        return result
     
-    def _categorize_nodes(self, start_node: str, depth: int, 
-                          program_nodes: set, input_nodes: set, output_nodes: set,
-                          db_nodes: set, mq_nodes: set, file_nodes: set):
-        """Categorize nodes into inputs, outputs, databases, etc."""
+    def _traverse_calls(self, program: str, result: Dict, visited: Set[str], depth: int, max_depth: int):
+        """
+        Recursively traverse program calls and collect all information
+        """
+        if depth > max_depth or program in visited:
+            return
         
-        visited = set()
+        visited.add(program)
         
-        def traverse(node, current_depth, is_input):
-            if current_depth > depth or node in visited:
-                return
+        if not self.graph.graph.has_node(program):
+            return
+        
+        node_data = self.graph.graph.nodes[program]
+        
+        # Create execution flow entry
+        flow_entry = {
+            'name': program,
+            'type': node_data.get('type', 'program'),
+            'depth': depth,
+            'calls': [],
+            'inputs': [],
+            'outputs': [],
+            'databases': []
+        }
+        
+        # Collect calls from this program
+        for successor in self.graph.graph.successors(program):
+            edge_data = self.graph.graph.edges[program, successor]
+            edge_type = edge_data.get('type', 'unknown')
             
-            visited.add(node)
-            node_data = self.graph.nodes.get(node, {})
-            node_type = node_data.get('node_type', 'unknown')
+            successor_node_data = self.graph.graph.nodes[successor]
+            successor_type = successor_node_data.get('type', 'program')
             
-            # Categorize based on type and direction
-            if node_type == 'program':
-                program_nodes.add(node)
-            elif node_type == 'db2_table':
-                db_nodes.add(node)
-            elif node_type == 'mq_operation':
+            if successor_type == 'program':
+                # It's a program call
+                call_info = {
+                    'program': successor,
+                    'call_type': edge_type,
+                    'depth': depth + 1
+                }
+                flow_entry['calls'].append(call_info)
+                
+                if successor not in result['programs_called']:
+                    result['programs_called'].append(successor)
+                
+                # Recursively traverse called program
+                self._traverse_calls(successor, result, visited, depth + 1, max_depth)
+            
+            elif successor_type == 'file':
+                # It's a file operation
+                file_info = {
+                    'name': successor,
+                    'operation': edge_data.get('operation', 'unknown')
+                }
+                
                 # Determine if input or output based on operation
-                operation = node_data.get('name', '')
-                if 'GET' in operation.upper() or 'READ' in operation.upper():
-                    input_nodes.add(node)
+                operation = edge_data.get('operation', '').upper()
+                if 'READ' in operation or 'INPUT' in operation or 'OPEN INPUT' in operation:
+                    if successor not in result['input_files']:
+                        result['input_files'].append(successor)
+                    flow_entry['inputs'].append(file_info['name'])
+                elif 'WRITE' in operation or 'OUTPUT' in operation or 'OPEN OUTPUT' in operation:
+                    if successor not in result['output_files']:
+                        result['output_files'].append(successor)
+                    flow_entry['outputs'].append(file_info['name'])
                 else:
-                    output_nodes.add(node)
-            elif 'file' in node_type.lower():
-                if is_input:
-                    input_nodes.add(node)
-                else:
-                    output_nodes.add(node)
+                    # Default: treat as both input and output
+                    if successor not in result['input_files']:
+                        result['input_files'].append(successor)
+                    flow_entry['inputs'].append(file_info['name'])
             
-            # Traverse outgoing edges
-            for successor in self.graph.successors(node):
-                traverse(successor, current_depth + 1, False)
+            elif successor_type == 'table':
+                # Database table
+                table_info = {
+                    'table': successor,
+                    'operation': edge_data.get('operation', 'unknown')
+                }
+                flow_entry['databases'].append(table_info)
+                
+                if table_info not in result['databases']:
+                    result['databases'].append(table_info)
             
-            # Traverse incoming edges for inputs
-            if current_depth == 0:
-                for predecessor in self.graph.predecessors(node):
-                    pred_data = self.graph.nodes.get(predecessor, {})
-                    pred_type = pred_data.get('node_type', '')
-                    if pred_type != 'program':
-                        traverse(predecessor, current_depth + 1, True)
+            elif successor_type == 'mq_queue':
+                # MQ queue
+                if successor not in result['mq_queues']:
+                    result['mq_queues'].append(successor)
         
-        traverse(start_node, 0, False)
+        result['execution_flow'].append(flow_entry)
     
-    def _get_edge_to_node(self, source: str, target: str) -> Dict:
-        """Get edge data between two nodes"""
-        if self.graph.has_edge(source, target):
-            return self.graph.get_edge_data(source, target)
-        return {}
+    def _generate_mermaid_with_files(self, root_program: str, flow_data: Dict, max_depth: int) -> str:
+        """
+        Generate Mermaid diagram with programs, files, and databases
+        """
+        lines = [
+            "graph TB",
+            "    %% Styling",
+            "    classDef programStyle fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#fff",
+            "    classDef calledProgramStyle fill:#5BA3F5,stroke:#3A7BC8,stroke-width:2px,color:#fff",
+            "    classDef inputFileStyle fill:#50C878,stroke:#2D7A4A,stroke-width:2px,color:#fff",
+            "    classDef outputFileStyle fill:#FF6B6B,stroke:#CC5555,stroke-width:2px,color:#fff",
+            "    classDef databaseStyle fill:#9B59B6,stroke:#6C3483,stroke-width:2px,color:#fff",
+            "    classDef mqStyle fill:#FFA500,stroke:#CC8400,stroke-width:2px,color:#fff",
+            "",
+            "    %% Main program"
+        ]
+        
+        # Clean IDs for Mermaid
+        def clean_id(name: str) -> str:
+            return name.replace('-', '_').replace('.', '_').replace('/', '_').replace(' ', '_')
+        
+        root_id = clean_id(root_program)
+        lines.append(f"    {root_id}[\"{root_program}<br/><b>MAIN PROGRAM</b>\"]")
+        lines.append(f"    class {root_id} programStyle")
+        lines.append("")
+        
+        # Track what we've added to avoid duplicates
+        added_nodes = {root_id}
+        added_edges = set()
+        
+        # Add input files
+        if flow_data['input_files']:
+            lines.append("    %% Input Files")
+            for file in flow_data['input_files']:
+                file_id = clean_id(f"in_{file}")
+                if file_id not in added_nodes:
+                    lines.append(f"    {file_id}[\"📥 {file}<br/><small>INPUT</small>\"]")
+                    lines.append(f"    class {file_id} inputFileStyle")
+                    added_nodes.add(file_id)
+                
+                edge = (file_id, root_id)
+                if edge not in added_edges:
+                    lines.append(f"    {file_id} -->|reads| {root_id}")
+                    added_edges.add(edge)
+            lines.append("")
+        
+        # Add output files
+        if flow_data['output_files']:
+            lines.append("    %% Output Files")
+            for file in flow_data['output_files']:
+                file_id = clean_id(f"out_{file}")
+                if file_id not in added_nodes:
+                    lines.append(f"    {file_id}[\"📤 {file}<br/><small>OUTPUT</small>\"]")
+                    lines.append(f"    class {file_id} outputFileStyle")
+                    added_nodes.add(file_id)
+                
+                edge = (root_id, file_id)
+                if edge not in added_edges:
+                    lines.append(f"    {root_id} -->|writes| {file_id}")
+                    added_edges.add(edge)
+            lines.append("")
+        
+        # Add database operations
+        if flow_data['databases']:
+            lines.append("    %% Database Tables")
+            for db_info in flow_data['databases']:
+                table = db_info['table']
+                operation = db_info.get('operation', 'ACCESS')
+                table_id = clean_id(f"db_{table}")
+                
+                if table_id not in added_nodes:
+                    lines.append(f"    {table_id}[(\"💾 {table}<br/><small>DATABASE</small>\")]")
+                    lines.append(f"    class {table_id} databaseStyle")
+                    added_nodes.add(table_id)
+                
+                edge = (root_id, table_id)
+                if edge not in added_edges:
+                    lines.append(f"    {root_id} -->|{operation}| {table_id}")
+                    added_edges.add(edge)
+            lines.append("")
+        
+        # Add MQ queues
+        if flow_data['mq_queues']:
+            lines.append("    %% MQ Queues")
+            for queue in flow_data['mq_queues']:
+                queue_id = clean_id(f"mq_{queue}")
+                if queue_id not in added_nodes:
+                    lines.append(f"    {queue_id}[\"📨 {queue}<br/><small>MQ QUEUE</small>\"]")
+                    lines.append(f"    class {queue_id} mqStyle")
+                    added_nodes.add(queue_id)
+                
+                edge = (root_id, queue_id)
+                if edge not in added_edges:
+                    lines.append(f"    {root_id} -->|uses| {queue_id}")
+                    added_edges.add(edge)
+            lines.append("")
+        
+        # Add called programs with their I/O
+        if flow_data['programs_called']:
+            lines.append("    %% Called Programs")
+            
+            for flow_entry in flow_data['execution_flow']:
+                if flow_entry['name'] == root_program:
+                    continue  # Skip root, already added
+                
+                prog_id = clean_id(flow_entry['name'])
+                
+                if prog_id not in added_nodes:
+                    depth_indicator = "▶" * min(flow_entry['depth'], 3)
+                    lines.append(f"    {prog_id}[\"{depth_indicator} {flow_entry['name']}<br/><small>CALLED PROGRAM</small>\"]")
+                    lines.append(f"    class {prog_id} calledProgramStyle")
+                    added_nodes.add(prog_id)
+                
+                # Find which program calls this one
+                for parent_flow in flow_data['execution_flow']:
+                    for call_info in parent_flow['calls']:
+                        if call_info['program'] == flow_entry['name']:
+                            parent_id = clean_id(parent_flow['name'])
+                            call_type = call_info.get('call_type', 'CALL')
+                            edge = (parent_id, prog_id)
+                            
+                            if edge not in added_edges:
+                                lines.append(f"    {parent_id} -->|{call_type}| {prog_id}")
+                                added_edges.add(edge)
+                
+                # Add I/O for called programs
+                for inp in flow_entry['inputs']:
+                    inp_id = clean_id(f"in_{inp}_{prog_id}")
+                    if inp_id not in added_nodes:
+                        lines.append(f"    {inp_id}[\"📥 {inp}\"]")
+                        lines.append(f"    class {inp_id} inputFileStyle")
+                        added_nodes.add(inp_id)
+                    
+                    edge = (inp_id, prog_id)
+                    if edge not in added_edges:
+                        lines.append(f"    {inp_id} -.->|reads| {prog_id}")
+                        added_edges.add(edge)
+                
+                for out in flow_entry['outputs']:
+                    out_id = clean_id(f"out_{out}_{prog_id}")
+                    if out_id not in added_nodes:
+                        lines.append(f"    {out_id}[\"📤 {out}\"]")
+                        lines.append(f"    class {out_id} outputFileStyle")
+                        added_nodes.add(out_id)
+                    
+                    edge = (prog_id, out_id)
+                    if edge not in added_edges:
+                        lines.append(f"    {prog_id} -.->|writes| {out_id}")
+                        added_edges.add(edge)
+        
+        return '\n'.join(lines)
     
-    def _safe_id(self, node_id: str) -> str:
-        """Convert node ID to Mermaid-safe identifier"""
-        return node_id.replace(':', '_').replace('-', '_').replace('.', '_')
+    def _empty_result(self) -> Dict[str, Any]:
+        """Return empty result structure"""
+        return {
+            'mermaid_diagram': 'graph TB\n    A[Program Not Found]',
+            'programs_called': [],
+            'input_files': [],
+            'output_files': [],
+            'databases': [],
+            'mq_queues': [],
+            'execution_flow': []
+        }
+    
+    def generate_simple_flow(self, program_name: str) -> str:
+        """
+        Generate a simple Mermaid diagram for a single program.
+        Shows only direct neighbors (calls, files, tables).
+        """
+        if not self.graph.graph.has_node(program_name):
+            return "graph TB\n    A[Program Not Found]"
+        
+        lines = [
+            "graph TB",
+            "    classDef programStyle fill:#4A90E2,stroke:#2E5C8A,stroke-width:2px,color:#fff",
+            "    classDef fileStyle fill:#50C878,stroke:#2D7A4A,stroke-width:2px,color:#fff",
+            "    classDef tableStyle fill:#9B59B6,stroke:#6C3483,stroke-width:2px,color:#fff",
+            ""
+        ]
+        
+        def clean_id(name: str) -> str:
+            return name.replace('-', '_').replace('.', '_').replace('/', '_')
+        
+        root_id = clean_id(program_name)
+        lines.append(f"    {root_id}[\"{program_name}\"]")
+        lines.append(f"    class {root_id} programStyle")
+        
+        # Add all successors
+        for successor in self.graph.graph.successors(program_name):
+            succ_id = clean_id(successor)
+            node_data = self.graph.graph.nodes[successor]
+            node_type = node_data.get('type', 'program')
+            edge_data = self.graph.graph.edges[program_name, successor]
+            
+            if node_type == 'file':
+                lines.append(f"    {succ_id}[\"{successor}\"]")
+                lines.append(f"    class {succ_id} fileStyle")
+                lines.append(f"    {root_id} --> {succ_id}")
+            elif node_type == 'table':
+                lines.append(f"    {succ_id}[(\"{successor}\")]")
+                lines.append(f"    class {succ_id} tableStyle")
+                operation = edge_data.get('operation', 'ACCESS')
+                lines.append(f"    {root_id} -->|{operation}| {succ_id}")
+            else:
+                lines.append(f"    {succ_id}[\"{successor}\"]")
+                lines.append(f"    class {succ_id} programStyle")
+                call_type = edge_data.get('type', 'CALL')
+                lines.append(f"    {root_id} -->|{call_type}| {succ_id}")
+        
+        return '\n'.join(lines)
 
 class ProgramChainAnalyzer:
     """Analyze complete program call chains with file/data flow"""

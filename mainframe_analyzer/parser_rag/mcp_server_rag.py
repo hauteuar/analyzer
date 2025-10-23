@@ -32,6 +32,7 @@ from datetime import datetime
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
+import cobol_rag_patches  # This auto-applies all patches
 # Import from cobol_rag_agent
 try:
     from cobol_rag_agent import COBOLIndexer, MCPServer
