@@ -315,11 +315,27 @@ class MCPServerWrapper:
 
 
 def main():
-    """Main entry point"""
+    """Main entry point with command-line argument support"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='MCP Server for COBOL RAG')
+    parser.add_argument('command', nargs='?', default='serve', 
+                       help='Command to run (default: serve)')
+    parser.add_argument('--index-dir', default=None,
+                       help='Index directory path')
+    
+    args = parser.parse_args()
+    
     logger.info("Starting MCP Server Wrapper")
     
-    # Get index directory from environment or default
-    index_dir = os.getenv('INDEX_DIR', './index')
+    # Get index directory from args, environment, or default
+    if args.index_dir:
+        index_dir = args.index_dir
+    else:
+        index_dir = os.getenv('INDEX_DIR', './index')
+    
+    # Convert relative to absolute path
+    index_dir = os.path.abspath(index_dir)
     logger.info(f"Index directory: {index_dir}")
     
     if not os.path.exists(index_dir):
@@ -356,3 +372,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
