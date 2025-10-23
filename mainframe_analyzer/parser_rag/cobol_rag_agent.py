@@ -559,6 +559,23 @@ class COBOLParser:
             })
         
         return operations
+    
+    def extract_dynamic_calls_advanced(self, source_code: str) -> List[Dict[str, Any]]:
+        """
+        Compatibility wrapper for batch_parser.py
+        This method now calls the enhanced extract_calls() which handles everything
+        """
+        # Call the enhanced method that handles all call types
+        all_calls = self.extract_calls(source_code)
+        
+        # Filter to only return dynamic calls for backward compatibility
+        dynamic_calls = [
+            call for call in all_calls 
+            if call.get('is_dynamic', False)
+        ]
+        
+        logger.info(f"extract_dynamic_calls_advanced: Found {len(dynamic_calls)} dynamic calls")
+        return dynamic_calls
 
 # ============================================================================
 # DYNAMIC CALL RESOLVER
