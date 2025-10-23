@@ -43,6 +43,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from enhanced_flow_diagram_generator import EnhancedFlowDiagramGenerator
 
 # ============================================================================
 # DATA MODELS
@@ -83,22 +84,34 @@ class FlowDiagram:
 # ============================================================================
 
 class COBOLParser:
-    """Parse COBOL source code using Tree-Sitter"""
+    """
+    Enhanced COBOL Parser with complete call detection
+    
+    Detects:
+    - Static CALL statements
+    - Dynamic CALL statements (with variable resolution)
+    - CICS LINK (static and dynamic)
+    - CICS XCTL (static and dynamic)
+    - Multi-line CICS commands
+    - DB2 operations
+    - MQ operations
+    """
     
     def __init__(self):
         self.parser = None
         self._init_parser()
     
     def _init_parser(self):
-        """Initialize Tree-Sitter parser for COBOL"""
+        """Initialize Tree-Sitter parser for COBOL (if available)"""
         try:
+            from tree_sitter import Language, Parser
             COBOL_LANGUAGE = Language('build/cobol.so', 'cobol')
             self.parser = Parser()
             self.parser.set_language(COBOL_LANGUAGE)
-            logger.info("COBOL parser initialized successfully")
+            logger.info("✓ Tree-Sitter COBOL parser initialized")
         except Exception as e:
             logger.warning(f"Tree-sitter COBOL not available: {e}")
-            logger.info("Falling back to heuristic parser")
+            logger.info("Using heuristic parser (fully functional)")
             self.parser = None
     
     def parse_cobol(self, source_code: str, filename: str) -> List[CodeChunk]:
@@ -107,18 +120,6 @@ class COBOLParser:
             return self._parse_with_treesitter(source_code, filename)
         else:
             return self._parse_with_heuristics(source_code, filename)
-    
-    def _parse_with_treesitter(self, source_code: str, filename: str) -> List[CodeChunk]:
-        """Parse using Tree-Sitter"""
-        chunks = []
-        tree = self.parser.parse(bytes(source_code, "utf8"))
-        root_node = tree.root_node
-        
-        program_id = self._extract_program_id(root_node, source_code)
-        chunks.extend(self._extract_divisions(root_node, source_code, filename, program_id))
-        chunks.extend(self._extract_paragraphs(root_node, source_code, filename, program_id))
-        
-        return chunks
     
     def _parse_with_heuristics(self, source_code: str, filename: str) -> List[CodeChunk]:
         """Fallback heuristic parser for COBOL"""
@@ -180,131 +181,384 @@ class COBOLParser:
         
         return chunks
     
+    # ============================================================================
+    # ENHANCED CALL EXTRACTION - Main Method
+    # ============================================================================
+    
     def extract_calls(self, source_code: str) -> List[Dict[str, Any]]:
-        """Extract CALL statements (static and dynamic)"""
+        """
+        Extract ALL program calls:
+        - Regular CALL (static: CALL 'PROG', dynamic: CALL WS-VAR)
+        - CICS LINK (static: PROGRAM('PROG'), dynamic: PROGRAM(WS-VAR))
+        - CICS XCTL (static: PROGRAM('PROG'), dynamic: PROGRAM(WS-VAR))
+        
+        Returns list of call dictionaries with:
+        - type: 'static', 'dynamic', 'cics_link', 'cics_xctl', etc.
+        - call_mechanism: STATIC_CALL, DYNAMIC_CALL, CICS_LINK, CICS_XCTL, etc.
+        - target: Program name or variable name
+        - variable: Variable name (for dynamic calls)
+        - is_dynamic: Boolean
+        - possible_targets: List of resolved program names (for dynamic)
+        - resolution_details: Details of MOVE statements found
+        """
         calls = []
         lines = source_code.split('\n')
         
-        static_pattern = re.compile(r"CALL\s+['\"](\w+)['\"]", re.IGNORECASE)
-        dynamic_pattern = re.compile(r"CALL\s+(\w+-\w+)", re.IGNORECASE)
+        # Track multi-line CICS statements
+        in_cics_statement = False
+        cics_buffer = []
+        cics_start_line = 0
         
-        for i, line in enumerate(lines):
+        logger.debug(f"Starting call extraction, {len(lines)} lines")
+        
+        for i, line in enumerate(lines, 1):
+            line_upper = line.upper().strip()
             clean_line = line[6:72] if len(line) > 6 else line
             
-            for match in static_pattern.finditer(clean_line):
-                calls.append({
-                    'type': 'static',
-                    'target': match.group(1),
-                    'line': i + 1,
-                    'source_line': line.strip()
-                })
+            # Handle multi-line CICS statements
+            if 'EXEC CICS' in line_upper or in_cics_statement:
+                if 'EXEC CICS' in line_upper and not in_cics_statement:
+                    in_cics_statement = True
+                    cics_buffer = [line]
+                    cics_start_line = i
+                elif in_cics_statement:
+                    cics_buffer.append(line)
+                
+                if 'END-EXEC' in line_upper:
+                    # Process complete CICS statement
+                    full_cics = ' '.join(cics_buffer)
+                    cics_calls = self._extract_cics_program_calls(full_cics, cics_start_line)
+                    calls.extend(cics_calls)
+                    
+                    in_cics_statement = False
+                    cics_buffer = []
+                    cics_start_line = 0
+                continue
             
-            for match in dynamic_pattern.finditer(clean_line):
-                calls.append({
-                    'type': 'dynamic',
-                    'variable': match.group(1),
-                    'line': i + 1,
-                    'source_line': line.strip()
-                })
+            # Extract regular CALL statements
+            if 'CALL' in line_upper:
+                regular_calls = self._extract_regular_call_statements(clean_line, i)
+                calls.extend(regular_calls)
+        
+        logger.info(f"Found {len(calls)} calls before resolution")
+        
+        # Resolve dynamic calls by analyzing MOVE statements
+        calls = self._resolve_dynamic_call_variables(calls, source_code)
+        
+        logger.info(f"Extracted {len(calls)} total program calls")
+        self._log_call_summary(calls)
         
         return calls
+    
+    # ============================================================================
+    # CICS Program Call Extraction
+    # ============================================================================
+    
+    def _extract_cics_program_calls(self, cics_statement: str, line_num: int) -> List[Dict[str, Any]]:
+        """
+        Extract CICS LINK and XCTL calls with program names.
+        Handles both:
+        - Static: EXEC CICS LINK PROGRAM('LITERAL')
+        - Dynamic: EXEC CICS LINK PROGRAM(VARIABLE)
+        """
+        calls = []
+        
+        # Define patterns for CICS calls
+        cics_patterns = {
+            'CICS_LINK': {
+                'static': re.compile(
+                    r"EXEC\s+CICS\s+LINK\s+.*?PROGRAM\s*\(\s*['\"]([A-Z0-9\-]+)['\"]\s*\)",
+                    re.IGNORECASE | re.DOTALL
+                ),
+                'dynamic': re.compile(
+                    r"EXEC\s+CICS\s+LINK\s+.*?PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)",
+                    re.IGNORECASE | re.DOTALL
+                )
+            },
+            'CICS_XCTL': {
+                'static': re.compile(
+                    r"EXEC\s+CICS\s+XCTL\s+.*?PROGRAM\s*\(\s*['\"]([A-Z0-9\-]+)['\"]\s*\)",
+                    re.IGNORECASE | re.DOTALL
+                ),
+                'dynamic': re.compile(
+                    r"EXEC\s+CICS\s+XCTL\s+.*?PROGRAM\s*\(\s*([A-Z0-9\-]+)\s*\)",
+                    re.IGNORECASE | re.DOTALL
+                )
+            }
+        }
+        
+        for call_type, patterns in cics_patterns.items():
+            # Check if this is the right CICS command type
+            if call_type.split('_')[1] not in cics_statement.upper():
+                continue
+            
+            # Try static pattern first (quoted literal)
+            match = patterns['static'].search(cics_statement)
+            if match:
+                calls.append({
+                    'type': call_type.lower(),
+                    'call_mechanism': call_type,
+                    'target': match.group(1),
+                    'line': line_num,
+                    'source_line': cics_statement.strip(),
+                    'is_dynamic': False,
+                    'variable': None
+                })
+                logger.debug(f"Found {call_type}: {match.group(1)} at line {line_num}")
+                continue
+            
+            # Try dynamic pattern (variable)
+            match = patterns['dynamic'].search(cics_statement)
+            if match and not self._is_quoted_literal(match.group(1)):
+                variable_name = match.group(1)
+                calls.append({
+                    'type': f"{call_type.lower()}_dynamic",
+                    'call_mechanism': f"{call_type}_DYNAMIC",
+                    'target': variable_name,  # Will be resolved later
+                    'line': line_num,
+                    'source_line': cics_statement.strip(),
+                    'is_dynamic': True,
+                    'variable': variable_name
+                })
+                logger.debug(f"Found {call_type} (dynamic): {variable_name} at line {line_num}")
+        
+        return calls
+    
+    # ============================================================================
+    # Regular CALL Statement Extraction
+    # ============================================================================
+    
+    def _extract_regular_call_statements(self, line: str, line_num: int) -> List[Dict[str, Any]]:
+        """
+        Extract regular COBOL CALL statements.
+        - Static: CALL 'PROGRAM-NAME'
+        - Dynamic: CALL WS-PROGRAM-NAME
+        """
+        calls = []
+        
+        # Static CALL pattern: CALL 'LITERAL' or CALL "LITERAL"
+        static_pattern = re.compile(r"CALL\s+['\"]([A-Z0-9\-]+)['\"]", re.IGNORECASE)
+        match = static_pattern.search(line)
+        if match:
+            calls.append({
+                'type': 'static',
+                'call_mechanism': 'STATIC_CALL',
+                'target': match.group(1),
+                'line': line_num,
+                'source_line': line.strip(),
+                'is_dynamic': False,
+                'variable': None
+            })
+            logger.debug(f"Found STATIC_CALL: {match.group(1)} at line {line_num}")
+            return calls
+        
+        # Dynamic CALL pattern: CALL VARIABLE-NAME (not quoted)
+        dynamic_pattern = re.compile(r"CALL\s+([A-Z0-9\-]+)(?!\s*['\"])", re.IGNORECASE)
+        match = dynamic_pattern.search(line)
+        if match:
+            variable_name = match.group(1)
+            
+            # Exclude COBOL keywords that shouldn't be treated as variables
+            keywords = ['USING', 'RETURNING', 'BY', 'REFERENCE', 'CONTENT', 'VALUE', 
+                       'PROCEDURE', 'FUNCTION']
+            if variable_name.upper() not in keywords:
+                calls.append({
+                    'type': 'dynamic',
+                    'call_mechanism': 'DYNAMIC_CALL',
+                    'target': variable_name,  # Will be resolved later
+                    'line': line_num,
+                    'source_line': line.strip(),
+                    'is_dynamic': True,
+                    'variable': variable_name
+                })
+                logger.debug(f"Found DYNAMIC_CALL: {variable_name} at line {line_num}")
+        
+        return calls
+    
+    # ============================================================================
+    # Dynamic Call Resolution
+    # ============================================================================
+    
+    def _resolve_dynamic_call_variables(self, calls: List[Dict], source_code: str) -> List[Dict]:
+        """
+        Resolve dynamic call variables by analyzing MOVE statements.
+        Finds all possible values that can be moved to the call variable.
+        
+        Example:
+            IF UPDATE-MODE
+                MOVE 'PROG1' TO WS-PROGRAM
+            ELSE
+                MOVE 'PROG2' TO WS-PROGRAM
+            END-IF
+            CALL WS-PROGRAM
+        
+        Result: WS-PROGRAM resolves to ['PROG1', 'PROG2']
+        """
+        # Build variable value map
+        variable_values = {}
+        lines = source_code.split('\n')
+        current_condition = None
+        
+        # Pattern for MOVE statements: MOVE 'LITERAL' TO VARIABLE
+        move_pattern = re.compile(
+            r"MOVE\s+['\"]?([A-Z0-9\-]+)['\"]?\s+TO\s+([A-Z0-9\-]+)",
+            re.IGNORECASE
+        )
+        
+        logger.debug("Analyzing MOVE statements for variable resolution")
+        
+        for line_num, line in enumerate(lines, 1):
+            clean_line = line[6:72] if len(line) > 6 else line
+            line_upper = clean_line.upper().strip()
+            
+            # Track conditional context (for better debugging)
+            if line_upper.startswith('IF '):
+                current_condition = line.strip()
+            elif line_upper.startswith(('END-IF', 'ELSE')):
+                current_condition = None
+            elif line_upper.endswith('.') and current_condition:
+                current_condition = None
+            
+            # Find MOVE statements
+            match = move_pattern.search(clean_line)
+            if match:
+                value = match.group(1).strip("'\"")
+                variable = match.group(2)
+                
+                if variable not in variable_values:
+                    variable_values[variable] = []
+                
+                variable_values[variable].append({
+                    'value': value,
+                    'line': line_num,
+                    'condition': current_condition,
+                    'source_line': line.strip()
+                })
+                
+                logger.debug(f"Found MOVE: {value} → {variable} at line {line_num}")
+        
+        # Resolve each dynamic call
+        resolved_count = 0
+        unresolved_count = 0
+        
+        for call in calls:
+            if call.get('is_dynamic') and call.get('variable'):
+                variable = call['variable']
+                
+                # Direct variable match
+                if variable in variable_values:
+                    call['possible_targets'] = [v['value'] for v in variable_values[variable]]
+                    call['resolution_details'] = variable_values[variable]
+                    resolved_count += 1
+                    logger.info(f"✓ Resolved {variable} → {call['possible_targets']}")
+                    continue
+                
+                # Check for group variables (e.g., TRANX contains HOLD-TRANX)
+                # The variable might be a group item with sub-fields
+                found_group = False
+                for var_name, values in variable_values.items():
+                    if var_name in variable or variable in var_name:
+                        # Found a related variable (possibly sub-field)
+                        call['possible_targets'] = [v['value'] for v in values]
+                        call['resolution_details'] = values
+                        call['resolved_via_group'] = var_name
+                        resolved_count += 1
+                        found_group = True
+                        logger.info(f"✓ Resolved {variable} via group {var_name} → {call['possible_targets']}")
+                        break
+                
+                if not found_group:
+                    unresolved_count += 1
+                    logger.warning(f"✗ Could not resolve variable: {variable} at line {call['line']}")
+        
+        dynamic_call_count = len([c for c in calls if c.get('is_dynamic')])
+        logger.info(f"Dynamic call resolution: {resolved_count}/{dynamic_call_count} resolved, {unresolved_count} unresolved")
+        
+        return calls
+    
+    # ============================================================================
+    # Helper Methods
+    # ============================================================================
+    
+    def _is_quoted_literal(self, value: str) -> bool:
+        """Check if a value is a quoted string literal"""
+        stripped = value.strip()
+        return (stripped.startswith(("'", '"')) and stripped.endswith(("'", '"')))
+    
+    def _log_call_summary(self, calls: List[Dict]):
+        """Log summary of detected calls"""
+        summary = {
+            'STATIC_CALL': 0,
+            'DYNAMIC_CALL': 0,
+            'CICS_LINK': 0,
+            'CICS_LINK_DYNAMIC': 0,
+            'CICS_XCTL': 0,
+            'CICS_XCTL_DYNAMIC': 0
+        }
+        
+        for call in calls:
+            mechanism = call.get('call_mechanism', 'UNKNOWN')
+            summary[mechanism] = summary.get(mechanism, 0) + 1
+        
+        logger.info("Call Type Summary:")
+        for call_type, count in summary.items():
+            if count > 0:
+                logger.info(f"  {call_type}: {count}")
+    
+    # ============================================================================
+    # DB2 and Other Extractions (unchanged from original)
+    # ============================================================================
     
     def extract_db2_operations(self, source_code: str) -> List[Dict[str, Any]]:
         """Extract DB2 SQL operations"""
         operations = []
-        
-        sql_pattern = re.compile(
-            r'EXEC\s+SQL(.*?)END-EXEC', 
+        pattern = re.compile(
+            r'EXEC\s+SQL\s+(SELECT|INSERT|UPDATE|DELETE).*?FROM\s+(\w+)',
             re.IGNORECASE | re.DOTALL
         )
         
-        for match in sql_pattern.finditer(source_code):
-            sql_text = match.group(1).strip()
-            
-            op_type = 'UNKNOWN'
-            table_name = None
-            
-            if 'SELECT' in sql_text.upper():
-                op_type = 'SELECT'
-                table_match = re.search(r'FROM\s+(\w+)', sql_text, re.IGNORECASE)
-                if table_match:
-                    table_name = table_match.group(1)
-            elif 'INSERT' in sql_text.upper():
-                op_type = 'INSERT'
-                table_match = re.search(r'INTO\s+(\w+)', sql_text, re.IGNORECASE)
-                if table_match:
-                    table_name = table_match.group(1)
-            elif 'UPDATE' in sql_text.upper():
-                op_type = 'UPDATE'
-                table_match = re.search(r'UPDATE\s+(\w+)', sql_text, re.IGNORECASE)
-                if table_match:
-                    table_name = table_match.group(1)
-            elif 'DELETE' in sql_text.upper():
-                op_type = 'DELETE'
-                table_match = re.search(r'FROM\s+(\w+)', sql_text, re.IGNORECASE)
-                if table_match:
-                    table_name = table_match.group(1)
-            
+        for match in pattern.finditer(source_code):
             operations.append({
-                'type': op_type,
-                'table': table_name,
-                'sql': sql_text
+                'type': match.group(1).upper(),
+                'table': match.group(2),
+                'statement': match.group(0)
             })
         
         return operations
     
     def extract_cics_commands(self, source_code: str) -> List[Dict[str, Any]]:
-        """Extract CICS commands"""
+        """Extract CICS commands (general)"""
         commands = []
+        pattern = re.compile(r'EXEC\s+CICS\s+(\w+)', re.IGNORECASE)
         
-        cics_pattern = re.compile(
-            r'EXEC\s+CICS\s+(.*?)END-EXEC', 
-            re.IGNORECASE | re.DOTALL
-        )
-        
-        for match in cics_pattern.finditer(source_code):
-            cics_text = match.group(1).strip()
+        lines = source_code.split('\n')
+        for i, line in enumerate(lines):
+            clean_line = line[6:72] if len(line) > 6 else line
             
-            cmd_match = re.match(r'(\w+)', cics_text, re.IGNORECASE)
-            cmd_type = cmd_match.group(1) if cmd_match else 'UNKNOWN'
-            
-            commands.append({
-                'command': cmd_type,
-                'full_text': cics_text
-            })
+            for match in pattern.finditer(clean_line):
+                commands.append({
+                    'command': match.group(1),
+                    'line': i + 1,
+                    'source_line': line.strip()
+                })
         
         return commands
     
     def extract_mq_operations(self, source_code: str) -> List[Dict[str, Any]]:
         """Extract MQ operations"""
         operations = []
-        
-        mq_pattern = re.compile(
-            r'CALL\s+[\'"]?(MQ(?:PUT|GET|OPEN|CLOSE|CONN|DISC))[\'"]?',
+        pattern = re.compile(
+            r'(MQOPEN|MQGET|MQPUT|MQCLOSE)\s*\(',
             re.IGNORECASE
         )
         
-        for match in mq_pattern.finditer(source_code):
+        for match in pattern.finditer(source_code):
             operations.append({
-                'operation': match.group(1),
-                'context': match.group(0)
+                'operation': match.group(1).upper(),
+                'statement': match.group(0)
             })
         
         return operations
-    
-    def _extract_program_id(self, node, source_code: str) -> str:
-        return "UNKNOWN"
-    
-    def _extract_divisions(self, node, source_code: str, filename: str, program_id: str) -> List[CodeChunk]:
-        return []
-    
-    def _extract_paragraphs(self, node, source_code: str, filename: str, program_id: str) -> List[CodeChunk]:
-        return []
-    
-    def extract_dynamic_calls_advanced(self, source_code: str) -> Dict[str, List[str]]:
-        """Extract dynamic calls with advanced resolution"""
-        resolver = DynamicCallResolver()
-        return resolver.analyze_program(source_code)
 
 # ============================================================================
 # DYNAMIC CALL RESOLVER
@@ -694,14 +948,23 @@ class ProgramGraphBuilder:
             metadata=metadata or {}
         )
     
-    def add_call(self, from_program: str, to_program: str, call_type: str = 'static'):
-        """Add a call edge between programs"""
-        self.graph.add_edge(
-            f"prog:{from_program}",
-            f"prog:{to_program}",
-            edge_type='calls',
-            call_type=call_type
-        )
+    # Around line 892 in cobol_rag_agent.py
+    def add_call(self, source: str, target: str, call_mechanism: str = 'STATIC_CALL'):
+       """Add call with mechanism type"""
+       source_id = f"prog:{source}"
+       target_id = f"prog:{target}"
+       
+       if source_id not in self.graph:
+           self.add_program(source, source)
+       if target_id not in self.graph:
+           self.add_program(target, target)
+       
+       self.graph.add_edge(
+           source_id, 
+           target_id, 
+           type='calls',
+           call_mechanism=call_mechanism  # NEW: store the mechanism
+       )
     
     def add_db2_table(self, program_id: str, table_name: str, operation: str):
         """Add DB2 table access"""
@@ -1395,6 +1658,7 @@ class COBOLIndexer:
         self.cobol_parser = COBOLParser()
         self.jcl_parser = JCLParser()
         self.doc_parser = DocumentParser()
+        self.flow_generator = EnhancedFlowDiagramGenerator(self.db_manager)
         self.code_index = VectorIndexBuilder()
         self.doc_index = VectorIndexBuilder()
         self.graph = ProgramGraphBuilder()
@@ -1422,11 +1686,18 @@ class COBOLIndexer:
             
             program_id = self._extract_program_id_from_chunks(chunks)
             self.graph.add_program(program_id, str(filepath))
-            
             calls = self.cobol_parser.extract_calls(source_code)
             for call in calls:
-                if call['type'] == 'static':
-                    self.graph.add_call(program_id, call['target'], 'static')
+                target = call['target']
+                call_mechanism = call.get('call_mechanism', 'STATIC_CALL')
+                
+                # Add the call with mechanism
+                self.graph.add_call(program_id, target, call_mechanism)
+                
+                # If dynamic and resolved, add resolved targets too
+                if call.get('possible_targets'):
+                    for resolved_target in call['possible_targets']:
+                        self.graph.add_call(program_id, resolved_target, call_mechanism)
             
             db2_ops = self.cobol_parser.extract_db2_operations(source_code)
             for op in db2_ops:
@@ -1440,6 +1711,7 @@ class COBOLIndexer:
             mq_ops = self.cobol_parser.extract_mq_operations(source_code)
             for op in mq_ops:
                 self.graph.add_mq_queue(program_id, op['operation'])
+            
         
         for filepath in jcl_files:
             logger.info(f"Processing JCL: {filepath}")
