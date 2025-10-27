@@ -1416,7 +1416,7 @@ class EnhancedFlowDiagramGenerator:
             "    classDef calledProgramStyle fill:#5BA3F5,stroke:#3A7BC8,stroke-width:2px,color:#fff",
             "    classDef inputFileStyle fill:#50C878,stroke:#2D7A4A,stroke-width:2px,color:#fff",
             "    classDef outputFileStyle fill:#FF6B6B,stroke:#CC5555,stroke-width:2px,color:#fff",
-            "    classDef databaseStyle fill:#9B59B6,stroke:#6C3483,stroke-width:2px,color:#fff",
+            "    classDef databaseStyle fill:#50C878,stroke:#2D7A4A,stroke-width:2px,color:#fff",
             "    classDef mqStyle fill:#FFA500,stroke:#CC8400,stroke-width:2px,color:#fff",
             "",
             "    %% Main program"
@@ -1785,6 +1785,8 @@ class MCPServer:
                 result = self._resolve_dynamic_call(params)
             elif method == 'combined_search':
                 result = self._combined_search(params)
+            elif method == 'full_program_chain':
+                result = self._full_program_chain(params)
             else:
                 return {
                     'jsonrpc': '2.0',
