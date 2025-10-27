@@ -717,7 +717,7 @@ class MCPServerWrapper:
             if "error" in response:
                 raise Exception(response["error"]["message"])
             
-            mermaid_code = response["result"]["mermaid"]
+            mermaid_code = response["result"]["mermaid_diagram"]
             
             # Generate HTML file
             html_path = generate_flow_html(mermaid_code, node, output_file)
