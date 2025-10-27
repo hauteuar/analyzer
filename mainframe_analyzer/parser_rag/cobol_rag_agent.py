@@ -1851,9 +1851,9 @@ class MCPServer:
         return {
             'node': node,
             'depth': depth,
-            'mermaid': diagram.mermaid_code,
-            'nodes': diagram.nodes,
-            'edges': diagram.edges
+            'mermaid_diagram': diagram.get('mermaid_diagram', ''),
+            'nodes': diagram.get('programs_called', []),
+            'edges': diagram.get('execution_flow', [])
         }
     
     def _resolve_dynamic_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
