@@ -1,0 +1,38 @@
+{
+    "global_settings": {
+        "source_folder": "./incoming_data/",
+        "archive_folder": "./processed_data/",
+        "batch_size": 50000
+    },
+    "vendors": {
+        "VENDOR_A": {
+            "file_pattern": "data_feed_A_*.csv",
+            "file_type": "csv",
+            "read_options": {
+                "sep": "|", 
+                "encoding": "latin1",
+                "header": 0
+            },
+            "column_map": {
+                "txn_id": "TRANSACTION_ID",
+                "cust_ref": "CUSTOMER_ID",
+                "total_amt": "AMOUNT",
+                "txn_dt": "TXN_DATE"
+            }
+        },
+        "VENDOR_B": {
+            "file_pattern": "monthly_b_*.xlsx",
+            "file_type": "excel",
+            "read_options": {
+                "sheet_name": "Export",
+                "skiprows": 2
+            },
+            "column_map": {
+                "InvoiceNo": "TRANSACTION_ID",
+                "Client_ID": "CUSTOMER_ID",
+                "Value": "AMOUNT",
+                "Region": "REGION_CODE" 
+            }
+        }
+    }
+}
