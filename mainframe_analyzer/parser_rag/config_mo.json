@@ -36,3 +36,124 @@
         }
     }
 }
+
+import oracledb
+import pandas as pd
+import json
+import glob
+import os
+import shutil
+from datetime import datetime
+
+# --- 1. SETUP & CONSTANTS ---
+DB_USER = "admin"
+DB_PASS = "password"
+DB_DSN  = "localhost:1521/xepdb1"
+TARGET_TABLE = "ALL_VENDOR_TRANSACTIONS"
+
+# THE SUPERSET SCHEMA
+# This list defines the Common Oracle Table Structure.
+# Order matters! It must match the table columns exactly.
+COMMON_SCHEMA = [
+    "TRANSACTION_ID",
+    "CUSTOMER_ID",
+    "AMOUNT",
+    "TXN_DATE",     # Vendor B missing this -> becomes NULL
+    "REGION_CODE",  # Vendor A missing this -> becomes NULL
+    "SOURCE_FILE",
+    "LOAD_TIMESTAMP"
+]
+
+def load_config():
+    with open('config.json', 'r') as f:
+        return json.load(f)
+
+def get_db_connection():
+    return oracledb.connect(user=DB_USER, password=DB_PASS, dsn=DB_DSN)
+
+# --- 2. BULK LOAD FUNCTION ---
+def bulk_insert_oracle(cursor, data_chunk):
+    """
+    Uses Oracle Array Processing for high performance.
+    """
+    # Create SQL with bind variables: INSERT INTO T VALUES (:1, :2, :3...)
+    bind_vars = ",".join([f":{i+1}" for i in range(len(COMMON_SCHEMA))])
+    sql = f"INSERT INTO {TARGET_TABLE} ({','.join(COMMON_SCHEMA)}) VALUES ({bind_vars})"
+    
+    # Convert DataFrame to list of tuples for oracledb
+    rows = data_chunk.values.tolist()
+    
+    # executemany is the key for bulk loading
+    cursor.executemany(sql, rows)
+
+# --- 3. MAIN ETL PROCESS ---
+def run_pipeline():
+    config = load_config()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Create archive folder if not exists
+    os.makedirs(config['global_settings']['archive_folder'], exist_ok=True)
+
+    try:
+        # Iterate over every vendor defined in JSON
+        for vendor_name, rules in config['vendors'].items():
+            print(f"--- Checking {vendor_name} ---")
+            
+            # Build file path
+            search_path = os.path.join(config['global_settings']['source_folder'], rules['file_pattern'])
+            files = glob.glob(search_path)
+
+            for file_path in files:
+                print(f"Processing: {os.path.basename(file_path)}")
+                
+                # A. DYNAMIC READ STRATEGY
+                # Use chunksize to prevent memory crashes on massive files
+                chunk_size = config['global_settings']['batch_size']
+                
+                if rules['file_type'] == 'csv':
+                    reader = pd.read_csv(file_path, chunksize=chunk_size, **rules['read_options'])
+                elif rules['file_type'] == 'excel':
+                    # Excel doesn't support chunking easily, read full file (usually smaller)
+                    # or convert to CSV first. Here we wrap in list to mimic iterator.
+                    reader = [pd.read_excel(file_path, **rules['read_options'])]
+                
+                # B. PROCESS CHUNKS
+                for df in reader:
+                    # 1. Map Vendor Columns -> Common Names
+                    df.rename(columns=rules['column_map'], inplace=True)
+                    
+                    # 2. Add Audit Columns
+                    df['SOURCE_FILE'] = os.path.basename(file_path)
+                    df['LOAD_TIMESTAMP'] = datetime.now()
+                    
+                    # 3. HARMONIZE SCHEMA (The Critical Step)
+                    # Force DataFrame to match COMMON_SCHEMA exactly.
+                    # Missing columns are added as NaN. Extra columns are dropped.
+                    df = df.reindex(columns=COMMON_SCHEMA)
+                    
+                    # 4. Handle Nulls for Oracle
+                    # Oracle cannot digest Pandas NaN. Convert to None.
+                    df = df.where(pd.notnull(df), None)
+                    
+                    # 5. Load to Oracle
+                    bulk_insert_oracle(cursor, df)
+                    print(f"   > Loaded {len(df)} rows.")
+
+                # C. COMMIT & ARCHIVE
+                conn.commit()
+                
+                # Move file to archive folder
+                dest = os.path.join(config['global_settings']['archive_folder'], os.path.basename(file_path))
+                shutil.move(file_path, dest)
+                print("   > File Archived.")
+
+    except Exception as e:
+        print(f"CRITICAL ERROR: {str(e)}")
+        conn.rollback()
+    finally:
+        cursor.close()
+        conn.close()
+
+if __name__ == "__main__":
+    run_pipeline()
