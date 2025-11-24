@@ -1,0 +1,43 @@
+sequenceDiagram
+    autonumber
+
+    participant User
+    participant VoiceIn as Voice Input (Speech)
+    participant STT as STT Engine (Speech-to-Text)
+    participant UI as Common UI
+    participant Orchestrator as Copilot Orchestrator
+    participant Classifier as Intent Classifier
+    participant Dept as Department Router
+    participant SubAgent as Sub-Department Agent
+    participant MCP as MCP Router
+    participant DB as DB Server
+    participant Docs as Documentation RAG
+    participant Composer as Response Composer
+    participant TTS as TTS Engine
+
+    User ->> VoiceIn: Speak Query
+    VoiceIn ->> STT: Convert Speech to Text
+    STT -->> UI: Normalized Text Query
+
+    User ->> UI: (optional) Text Input Instead
+
+    UI ->> Orchestrator: Forward Input
+    Orchestrator ->> Classifier: Detect Intent
+    Classifier ->> Dept: Route to Department
+    Dept ->> SubAgent: Sub-Department Logic
+    SubAgent ->> MCP: Data / Documentation Request
+
+    MCP ->> DB: Query Database
+    DB -->> MCP: Results
+
+    MCP ->> Docs: Retrieve Documentation
+    Docs -->> MCP: RAG Summary
+
+    MCP -->> SubAgent: Consolidated Data
+    SubAgent ->> Composer: Build Response
+
+    Composer -->> UI: Text Response
+    UI -->> User: Display Response
+
+    Composer ->> TTS: Convert to Speech
+    TTS -->> User: Play Audio Response
