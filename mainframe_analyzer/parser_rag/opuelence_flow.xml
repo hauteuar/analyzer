@@ -1,139 +1,87 @@
 <mxfile host="app.diagrams.net">
-  <diagram id="seq" name="SequenceDiagram">
-    <mxGraphModel dx="1700" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1200" math="0" shadow="0">
+  <diagram id="diagram1" name="Sequence">
+    <mxGraphModel dx="1500" dy="900" grid="1" gridSize="10" guides="1">
       <root>
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
 
-        <!-- Participants -->
-        <mxCell id="User" value="User" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+        <!-- ROW OF NODES -->
+        <mxCell id="User" value="User" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="40" y="40" width="120" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="VoiceIn" value="Voice Input (Speech)" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+        <mxCell id="VoiceIn" value="Voice Input (Speech)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="200" y="40" width="160" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="STT" value="STT Engine (Speech-to-Text)" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+        <mxCell id="STT" value="STT Engine (Speech-to-Text)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="400" y="40" width="200" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="UI" value="Common UI" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+        <mxCell id="UI" value="Common UI" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="650" y="40" width="140" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="Orch" value="Copilot Orchestrator" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+        <mxCell id="Orch" value="Copilot Orchestrator" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="850" y="40" width="180" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="Classifier" value="Intent Classifier" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+        <mxCell id="Classifier" value="Intent Classifier" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="1100" y="40" width="160" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="Dept" value="Department Router" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+        <mxCell id="Dept" value="Department Router" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="1300" y="40" width="160" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="SubAgent" value="Sub-Department Agent" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+        <mxCell id="SubAgent" value="Sub-Department Agent" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="1500" y="40" width="180" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="MCP" value="MCP Router" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+        <mxCell id="MCP" value="MCP Router" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="1720" y="40" width="140" height="50" as="geometry"/>
         </mxCell>
 
-        <mxCell id="DB" value="DB Server" style="shape=cylinder;whiteSpace=wrap;html=1;" vertex="1">
-          <mxGeometry x="1720" y="300" width="140" height="120" as="geometry"/>
+        <!-- SECOND ROW -->
+        <mxCell id="DB" value="DB Server" style="shape=cylinder;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1720" y="200" width="140" height="100" as="geometry"/>
         </mxCell>
 
-        <mxCell id="Docs" value="Documentation RAG" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
-          <mxGeometry x="1500" y="300" width="180" height="100" as="geometry"/>
+        <mxCell id="Docs" value="Documentation RAG" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="200" width="180" height="80" as="geometry"/>
         </mxCell>
 
-        <mxCell id="Composer" value="Response Composer" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
-          <mxGeometry x="1100" y="300" width="180" height="100" as="geometry"/>
+        <mxCell id="Composer" value="Response Composer" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="200" width="180" height="80" as="geometry"/>
         </mxCell>
 
-        <mxCell id="TTS" value="TTS Engine" style="shape=rectangle;rounded=1;whiteSpace=wrap;html=1;" vertex="1">
-          <mxGeometry x="850" y="300" width="180" height="80" as="geometry"/>
+        <mxCell id="TTS" value="TTS Engine" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="850" y="200" width="180" height="70" as="geometry"/>
         </mxCell>
 
+        <!-- ARROWS -->
+        <mxCell id="a1" edge="1" parent="1" source="User" target="VoiceIn" style="endArrow=classic"/>
+        <mxCell id="a2" edge="1" parent="1" source="VoiceIn" target="STT" style="endArrow=classic"/>
+        <mxCell id="a3" edge="1" parent="1" source="STT" target="UI" style="endArrow=classic;dashed=1"/>
+        <mxCell id="a4" edge="1" parent="1" source="User" target="UI" style="endArrow=classic;dashed=1"/>
 
-        <!-- Message arrows -->
-        <mxCell id="a1" edge="1" source="User" target="VoiceIn" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"><mxPoint x="0" y="120" as="targetPoint"/></mxGeometry>
-        </mxCell>
-        <mxCell id="a2" edge="1" source="VoiceIn" target="STT" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-        <mxCell id="a3" edge="1" source="STT" target="UI" style="endArrow=block;dashed=1;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
+        <mxCell id="a5" edge="1" parent="1" source="UI" target="Orch" style="endArrow=classic"/>
+        <mxCell id="a6" edge="1" parent="1" source="Orch" target="Classifier" style="endArrow=classic"/>
+        <mxCell id="a7" edge="1" parent="1" source="Classifier" target="Dept" style="endArrow=classic"/>
+        <mxCell id="a8" edge="1" parent="1" source="Dept" target="SubAgent" style="endArrow=classic"/>
+        <mxCell id="a9" edge="1" parent="1" source="SubAgent" target="MCP" style="endArrow=classic"/>
 
-        <mxCell id="a4" edge="1" source="User" target="UI" style="endArrow=block;dashed=1;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
+        <mxCell id="a10" edge="1" parent="1" source="MCP" target="DB" style="endArrow=classic"/>
+        <mxCell id="a11" edge="1" parent="1" source="DB" target="MCP" style="endArrow=classic;dashed=1"/>
+        <mxCell id="a12" edge="1" parent="1" source="MCP" target="Docs" style="endArrow=classic"/>
+        <mxCell id="a13" edge="1" parent="1" source="Docs" target="MCP" style="endArrow=classic;dashed=1"/>
 
-        <mxCell id="a5" edge="1" source="UI" target="Orch" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
+        <mxCell id="a14" edge="1" parent="1" source="MCP" target="SubAgent" style="endArrow=classic;dashed=1"/>
+        <mxCell id="a15" edge="1" parent="1" source="SubAgent" target="Composer" style="endArrow=classic"/>
+        <mxCell id="a16" edge="1" parent="1" source="Composer" target="UI" style="endArrow=classic"/>
 
-        <mxCell id="a6" edge="1" source="Orch" target="Classifier" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a7" edge="1" source="Classifier" target="Dept" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a8" edge="1" source="Dept" target="SubAgent" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a9" edge="1" source="SubAgent" target="MCP" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-
-        <!-- MCP → DB & Docs -->
-        <mxCell id="a10" edge="1" source="MCP" target="DB" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a11" edge="1" source="DB" target="MCP" style="endArrow=block;dashed=1;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a12" edge="1" source="MCP" target="Docs" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a13" edge="1" source="Docs" target="MCP" style="endArrow=block;dashed=1;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-
-        <!-- MCP → SubAgent → Composer -->
-        <mxCell id="a14" edge="1" source="MCP" target="SubAgent" style="endArrow=block;dashed=1;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a15" edge="1" source="SubAgent" target="Composer" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <!-- Composer output -->
-        <mxCell id="a16" edge="1" source="Composer" target="UI" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a17" edge="1" source="Composer" target="TTS" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a18" edge="1" source="TTS" target="User" style="endArrow=block;">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
+        <mxCell id="a17" edge="1" parent="1" source="Composer" target="TTS" style="endArrow=classic"/>
+        <mxCell id="a18" edge="1" parent="1" source="TTS" target="User" style="endArrow=classic"/>
 
       </root>
     </mxGraphModel>
