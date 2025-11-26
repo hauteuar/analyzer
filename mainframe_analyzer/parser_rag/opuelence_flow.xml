@@ -1,138 +1,80 @@
-<mxfile host="app.diagrams.net" modified="2025-01-01T12:00:00.000Z" agent="draw.io" version="20.1.3">
-  <diagram id="sequence1" name="Sequence Diagram">
-    <mxGraphModel dx="1300" dy="1300" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1">
+<mxfile host="app.diagrams.net">
+  <diagram id="workflow" name="Copilot-Class">
+    <mxGraphModel dx="1354" dy="722" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
       <root>
         <mxCell id="0"/>
         <mxCell id="1" parent="0"/>
 
-        <!-- PARTICIPANTS -->
-        <mxCell id="User" value="User" style="rounded=1;whiteSpace=wrap;fillColor=#dae8fc;" vertex="1" parent="1">
-          <mxGeometry x="40" y="40" width="140" height="50" as="geometry"/>
+        <!-- Voice Agent -->
+        <mxCell id="voiceAgent" value="VoiceAgent&#10;• Speech-to-text&#10;• Hands-free queries" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+          <mxGeometry x="60" y="60" width="200" height="110" as="geometry"/>
         </mxCell>
 
-        <mxCell id="VoiceIn" value="Voice Input (Speech)" style="rounded=1;whiteSpace=wrap;fillColor=#ffe6cc;" vertex="1" parent="1">
-          <mxGeometry x="40" y="120" width="140" height="50" as="geometry"/>
+        <!-- UI -->
+        <mxCell id="ui" value="User Interface&#10;• Chat UI&#10;• Voice or text input" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+          <mxGeometry x="330" y="60" width="200" height="110" as="geometry"/>
         </mxCell>
 
-        <mxCell id="STT" value="STT Engine (Speech-to-Text)" style="rounded=1;whiteSpace=wrap;fillColor=#fff2cc;" vertex="1" parent="1">
-          <mxGeometry x="40" y="200" width="180" height="60" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="UI" value="Common UI" style="rounded=1;whiteSpace=wrap;fillColor=#e1d5e7;" vertex="1" parent="1">
-          <mxGeometry x="40" y="290" width="140" height="50" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="Orchestrator" value="Copilot Orchestrator" style="rounded=1;whiteSpace=wrap;fillColor=#d5e8d4;" vertex="1" parent="1">
-          <mxGeometry x="40" y="370" width="180" height="60" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="Classifier" value="Intent Classifier" style="rounded=1;whiteSpace=wrap;fillColor=#ffdede;" vertex="1" parent="1">
-          <mxGeometry x="40" y="460" width="160" height="50" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="Dept" value="Department Router" style="rounded=1;whiteSpace=wrap;fillColor=#e3f6ff;" vertex="1" parent="1">
-          <mxGeometry x="40" y="540" width="180" height="50" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="SubAgent" value="Sub-Department Agent" style="rounded=1;whiteSpace=wrap;fillColor=#e8e8e8;" vertex="1" parent="1">
-          <mxGeometry x="40" y="620" width="200" height="50" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="MCP" value="MCP Router" style="rounded=1;whiteSpace=wrap;fillColor=#ffe6f0;" vertex="1" parent="1">
-          <mxGeometry x="40" y="700" width="150" height="50" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="DB" value="DB Server" style="rounded=1;whiteSpace=wrap;fillColor=#d0f0c0;" vertex="1" parent="1">
-          <mxGeometry x="40" y="780" width="120" height="40" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="Docs" value="Documentation RAG" style="rounded=1;whiteSpace=wrap;fillColor=#cce5ff;" vertex="1" parent="1">
-          <mxGeometry x="40" y="840" width="170" height="40" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="Composer" value="Response Composer" style="rounded=1;whiteSpace=wrap;fillColor=#faf3dd;" vertex="1" parent="1">
-          <mxGeometry x="40" y="900" width="160" height="50" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="TTS" value="TTS Engine" style="rounded=1;whiteSpace=wrap;fillColor=#ffe6cc;" vertex="1" parent="1">
-          <mxGeometry x="40" y="980" width="120" height="40" as="geometry"/>
-        </mxCell>
-
-
-        <!-- ARROWS (CONNECTORS) -->
-
-        <!-- Voice -->
-        <mxCell id="a1" edge="1" parent="1" source="User" target="VoiceIn">
+        <mxCell id="edge1" edge="1" source="voiceAgent" target="ui" style="endArrow=block;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
 
-        <mxCell id="a2" edge="1" parent="1" source="VoiceIn" target="STT">
+        <!-- Classifier -->
+        <mxCell id="classifier" value="QueryClassifier&#10;• Intent detection&#10;• Route to department" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+          <mxGeometry x="600" y="60" width="220" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge2" edge="1" source="ui" target="classifier" style="endArrow=block;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
 
-        <mxCell id="a3" edge="1" parent="1" source="STT" target="UI">
+        <!-- Departments -->
+        <mxCell id="deptSRR" value="Service Request (SRR)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+          <mxGeometry x="300" y="250" width="200" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="deptPricing" value="Pricing" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+          <mxGeometry x="550" y="250" width="200" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="deptTax" value="Tax Lots" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+          <mxGeometry x="800" y="250" width="200" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge3a" edge="1" source="classifier" target="deptSRR" style="endArrow=block;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge3b" edge="1" source="classifier" target="deptPricing" style="endArrow=block;dashed=1;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge3c" edge="1" source="classifier" target="deptTax" style="endArrow=block;dashed=1;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
 
-        <!-- Text input alternative -->
-        <mxCell id="a4" edge="1" parent="1" source="User" target="UI">
+        <!-- Subdepartment MCP -->
+        <mxCell id="mcp" value="MCP Agent&#10;• DB Calls&#10;• RAG Docs&#10;• AI Bloating/Compression" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+          <mxGeometry x="550" y="400" width="240" height="130" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge4" edge="1" source="deptPricing" target="mcp" style="endArrow=block;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
 
-        <!-- Main logic flow -->
-        <mxCell id="a5" edge="1" parent="1" source="UI" target="Orchestrator">
+        <!-- DB -->
+        <mxCell id="db" value="Database Server&#10;• Pricing&#10;• Tax Lots&#10;• SRR" style="shape=cylinder;whiteSpace=wrap;html=1;" vertex="1">
+          <mxGeometry x="300" y="600" width="160" height="140" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="edge5" edge="1" source="mcp" target="db" style="endArrow=block;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
 
-        <mxCell id="a6" edge="1" parent="1" source="Orchestrator" target="Classifier">
-          <mxGeometry relative="1" as="geometry"/>
+        <!-- Documentation RAG -->
+        <mxCell id="docs" value="Document RAG&#10;• Policies&#10;• Procedures&#10;• Knowledge base" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1">
+          <mxGeometry x="750" y="600" width="180" height="120" as="geometry"/>
         </mxCell>
 
-        <mxCell id="a7" edge="1" parent="1" source="Classifier" target="Dept">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a8" edge="1" parent="1" source="Dept" target="SubAgent">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a9" edge="1" parent="1" source="SubAgent" target="MCP">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <!-- MCP to DB -->
-        <mxCell id="a10" edge="1" parent="1" source="MCP" target="DB">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <!-- MCP to Docs -->
-        <mxCell id="a11" edge="1" parent="1" source="MCP" target="Docs">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <!-- Back to SubAgent -->
-        <mxCell id="a12" edge="1" parent="1" source="Docs" target="SubAgent">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a13" edge="1" parent="1" source="SubAgent" target="Composer">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <!-- Final outputs -->
-        <mxCell id="a14" edge="1" parent="1" source="Composer" target="UI">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a15" edge="1" parent="1" source="Composer" target="TTS">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a16" edge="1" parent="1" source="UI" target="User">
-          <mxGeometry relative="1" as="geometry"/>
-        </mxCell>
-
-        <mxCell id="a17" edge="1" parent="1" source="TTS" target="User">
+        <mxCell id="edge6" edge="1" source="mcp" target="docs" style="endArrow=block;">
           <mxGeometry relative="1" as="geometry"/>
         </mxCell>
 
