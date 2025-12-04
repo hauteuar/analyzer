@@ -273,10 +273,4 @@ classDiagram
 
 ---
 
-If you want, I can now:
 
-* Export PNG/SVG from the draw.io XML and attach here.
-* Produce a Mermaid sequence diagram that shows message flow and sample payloads.
-* Convert the draw.io diagram into a JSON manifest for Copilot Studio.
-
-Tell me which next step you prefer.
