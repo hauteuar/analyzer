@@ -190,8 +190,19 @@ app.post('/api/jira/create-issue', async (req, res) => {
       issueData.fields.labels = item.labels;
     }
     
+    // Epic handling
     if (item.epicName && jiraIssueType === 'Epic') {
       issueData.fields.customfield_10011 = item.epicName; // Epic Name field
+    }
+    
+    // Epic Link - for Stories/Tasks that should be linked to an epic
+    if (item.epicLink && jiraIssueType !== 'Epic') {
+      issueData.fields.customfield_10014 = item.epicLink; // Epic Link field
+    }
+    
+    // Parent Link - for Sub-tasks
+    if (item.parentKey && jiraIssueType === 'Sub-task') {
+      issueData.fields.parent = { key: item.parentKey };
     }
 
     const response = await axios.post(

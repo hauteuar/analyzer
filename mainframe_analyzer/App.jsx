@@ -128,6 +128,8 @@ const ProjectManager = () => {
   const [editingItem, setEditingItem] = useState(null);
   const [availableEpics, setAvailableEpics] = useState([]);
   const [selectedEpics, setSelectedEpics] = useState([]);
+  const [projectEpics, setProjectEpics] = useState([]); // Epics from current project
+  const [selectedJiraEpic, setSelectedJiraEpic] = useState(''); // Selected epic for linking
   
   // Filters
   const [timelineFilters, setTimelineFilters] = useState({
@@ -365,6 +367,7 @@ const ProjectManager = () => {
     }
   };
   
+  
   const loadEpicsFromJira = async () => {
     if (!jiraConfig.connected) {
       alert('Please connect to Jira first');
@@ -388,6 +391,59 @@ const ProjectManager = () => {
       alert('Error loading epics from Jira');
     }
   };
+  
+  const loadProjectEpics = async () => {
+    if (!selectedProject) return;
+    
+    // Get epics from current project
+    const localEpics = selectedProject.items
+      .filter(item => item.type === 'epic')
+      .map(epic => ({
+        id: epic.id,
+        key: epic.jira?.issueKey || `LOCAL-${epic.id}`,
+        name: epic.name,
+        isLocal: !epic.jira
+      }));
+    
+    // If Jira connected, also get Jira epics for the project
+    if (jiraConfig.connected && useBackend && backendConnected) {
+      try {
+        const response = await fetch(`${backendUrl}/jira/get-epics`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jiraConfig })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const jiraEpics = data.epics.map(epic => ({
+            id: epic.id,
+            key: epic.key,
+            name: epic.name,
+            isLocal: false
+          }));
+          
+          // Combine local and Jira epics, removing duplicates
+          const allEpics = [...localEpics];
+          jiraEpics.forEach(jiraEpic => {
+            if (!allEpics.some(e => e.key === jiraEpic.key)) {
+              allEpics.push(jiraEpic);
+            }
+          });
+          
+          setProjectEpics(allEpics);
+        } else {
+          setProjectEpics(localEpics);
+        }
+      } catch (error) {
+        console.error('Error loading Jira epics:', error);
+        setProjectEpics(localEpics);
+      }
+    } else {
+      setProjectEpics(localEpics);
+    }
+  };
+  
   
   const importSelectedEpics = async () => {
     if (selectedEpics.length === 0) {
@@ -448,6 +504,7 @@ const ProjectManager = () => {
             ...item,
             storyPoints: item.jiraStoryPoints,
             epicName: item.jiraEpicName,
+            epicLink: selectedJiraEpic || null, // Add the selected epic
             labels: item.jiraLabels ? item.jiraLabels.split(',').map(l => l.trim()) : []
           }
         })
@@ -663,6 +720,7 @@ const ProjectManager = () => {
       jiraStoryPoints: '',
       jiraLabels: ''
     });
+    setSelectedJiraEpic(''); // Reset epic selection
     setShowItemModal(false);
   };
   
@@ -1211,7 +1269,10 @@ const ProjectManager = () => {
                   style={{ display: 'none' }}
                 />
               </label>
-              <button onClick={() => setShowItemModal(true)} className="btn btn-primary">
+              <button onClick={() => {
+                loadProjectEpics();
+                setShowItemModal(true);
+              }} className="btn btn-primary">
                 <Plus size={20} />
                 Add Item
               </button>
@@ -1225,96 +1286,6 @@ const ProjectManager = () => {
               No items yet. Click "Add Item" to create your first item.
             </div>
           )}
-        </div>
-      </div>
-    );
-  };
-  
-  const renderTimeline = () => {
-    if (!selectedProject) return <div className="card">Select a project to view timeline</div>;
-    
-    return (
-      <div>
-        <div className="filter-panel">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Timeline View</h3>
-            <div style={{ display: 'flex', gap: '16px' }}>
-              <label className="checkbox-wrapper">
-                <input
-                  type="checkbox"
-                  className="checkbox"
-                  checked={timelineFilters.showEpics}
-                  onChange={(e) => setTimelineFilters({ ...timelineFilters, showEpics: e.target.checked })}
-                />
-                <span>Epics</span>
-              </label>
-              <label className="checkbox-wrapper">
-                <input
-                  type="checkbox"
-                  className="checkbox"
-                  checked={timelineFilters.showStories}
-                  onChange={(e) => setTimelineFilters({ ...timelineFilters, showStories: e.target.checked })}
-                />
-                <span>Stories</span>
-              </label>
-              <label className="checkbox-wrapper">
-                <input
-                  type="checkbox"
-                  className="checkbox"
-                  checked={timelineFilters.showTasks}
-                  onChange={(e) => setTimelineFilters({ ...timelineFilters, showTasks: e.target.checked })}
-                />
-                <span>Tasks</span>
-              </label>
-              <label className="checkbox-wrapper">
-                <input
-                  type="checkbox"
-                  className="checkbox"
-                  checked={timelineFilters.showSubtasks}
-                  onChange={(e) => setTimelineFilters({ ...timelineFilters, showSubtasks: e.target.checked })}
-                />
-                <span>Subtasks</span>
-              </label>
-            </div>
-          </div>
-          
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button 
-              onClick={() => setSelectedChartType('gantt')}
-              className={`btn ${selectedChartType === 'gantt' ? 'btn-primary' : 'btn-outline'}`}
-            >
-              <Calendar size={16} />
-              Gantt Chart
-            </button>
-            <button 
-              onClick={() => setSelectedChartType('burndown')}
-              className={`btn ${selectedChartType === 'burndown' ? 'btn-primary' : 'btn-outline'}`}
-            >
-              <TrendingUp size={16} />
-              Burndown
-            </button>
-            <button 
-              onClick={() => setSelectedChartType('velocity')}
-              className={`btn ${selectedChartType === 'velocity' ? 'btn-primary' : 'btn-outline'}`}
-            >
-              <BarChart3 size={16} />
-              Velocity
-            </button>
-            <button 
-              onClick={() => setSelectedChartType('status')}
-              className={`btn ${selectedChartType === 'status' ? 'btn-primary' : 'btn-outline'}`}
-            >
-              <PieChart size={16} />
-              Status Breakdown
-            </button>
-          </div>
-        </div>
-        
-        <div className="card">
-          {selectedChartType === 'gantt' && renderGanttChart()}
-          {selectedChartType === 'burndown' && renderBurndownChart()}
-          {selectedChartType === 'velocity' && renderVelocityChart()}
-          {selectedChartType === 'status' && renderStatusChart()}
         </div>
       </div>
     );
@@ -1653,6 +1624,79 @@ const ProjectManager = () => {
     );
   };
   
+  const renderTimeline = () => {
+    if (!selectedProject) return <div className="card">Select a project to view timeline</div>;
+    
+    return (
+      <div>
+        <div className="filter-panel">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Timeline View</h3>
+            <div style={{ display: 'flex', gap: '16px' }}>
+              <label className="checkbox-wrapper">
+                <input
+                  type="checkbox"
+                  className="checkbox"
+                  checked={timelineFilters.showEpics}
+                  onChange={(e) => setTimelineFilters({ ...timelineFilters, showEpics: e.target.checked })}
+                />
+                <span>Epics</span>
+              </label>
+              <label className="checkbox-wrapper">
+                <input
+                  type="checkbox"
+                  className="checkbox"
+                  checked={timelineFilters.showStories}
+                  onChange={(e) => setTimelineFilters({ ...timelineFilters, showStories: e.target.checked })}
+                />
+                <span>Stories</span>
+              </label>
+              <label className="checkbox-wrapper">
+                <input
+                  type="checkbox"
+                  className="checkbox"
+                  checked={timelineFilters.showTasks}
+                  onChange={(e) => setTimelineFilters({ ...timelineFilters, showTasks: e.target.checked })}
+                />
+                <span>Tasks</span>
+              </label>
+              <label className="checkbox-wrapper">
+                <input
+                  type="checkbox"
+                  className="checkbox"
+                  checked={timelineFilters.showSubtasks}
+                  onChange={(e) => setTimelineFilters({ ...timelineFilters, showSubtasks: e.target.checked })}
+                />
+                <span>Subtasks</span>
+              </label>
+            </div>
+          </div>
+          
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button 
+              onClick={() => setSelectedChartType('gantt')}
+              className={`btn ${selectedChartType === 'gantt' ? 'btn-primary' : 'btn-outline'}`}
+            >
+              <Calendar size={16} />
+              Gantt Chart
+            </button>
+            <button 
+              onClick={() => setSelectedChartType('burndown')}
+              className={`btn ${selectedChartType === 'burndown' ? 'btn-primary' : 'btn-outline'}`}
+            >
+              <TrendingUp size={16} />
+              Burndown
+            </button>
+          </div>
+        </div>
+        
+        <div className="card">
+          {selectedChartType === 'gantt' ? renderGanttChart() : renderBurndownChart()}
+        </div>
+      </div>
+    );
+  };
+  
   return (
     <div className="container">
       <div className="header">
@@ -1984,7 +2028,10 @@ const ProjectManager = () => {
       
       {/* Add Item Modal */}
       {showItemModal && (
-        <div className="modal-overlay" onClick={() => setShowItemModal(false)}>
+        <div className="modal-overlay" onClick={() => {
+          setSelectedJiraEpic('');
+          setShowItemModal(false);
+        }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Add New Item</h2>
             
@@ -2120,16 +2167,54 @@ const ProjectManager = () => {
                 
                 {newItem.createInJira && (
                   <div style={{ marginTop: '12px' }}>
-                    <div className="custom-field">
-                      <div className="custom-field-label">Epic Name (if creating new epic)</div>
-                      <input
-                        type="text"
-                        value={newItem.jiraEpicName}
-                        onChange={(e) => setNewItem({ ...newItem, jiraEpicName: e.target.value })}
-                        className="input"
-                        placeholder="Leave empty to use existing epic"
-                      />
-                    </div>
+                    {/* Epic Selection - Only show for Story, Task, Subtask */}
+                    {newItem.type !== 'epic' && projectEpics.length > 0 && (
+                      <div className="custom-field">
+                        <div className="custom-field-label">
+                          Link to Epic {newItem.type === 'story' ? '(Required for Stories)' : '(Optional)'}
+                        </div>
+                        <select
+                          value={selectedJiraEpic}
+                          onChange={(e) => setSelectedJiraEpic(e.target.value)}
+                          className="select"
+                        >
+                          <option value="">-- Select an Epic --</option>
+                          <optgroup label="Project Epics">
+                            {projectEpics.filter(e => e.isLocal).map(epic => (
+                              <option key={epic.id} value={epic.key}>
+                                {epic.name} ({epic.key})
+                              </option>
+                            ))}
+                          </optgroup>
+                          {projectEpics.some(e => !e.isLocal) && (
+                            <optgroup label="Jira Epics">
+                              {projectEpics.filter(e => !e.isLocal).map(epic => (
+                                <option key={epic.id} value={epic.key}>
+                                  {epic.name} ({epic.key})
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
+                        <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+                          {selectedJiraEpic ? `Will be created under: ${selectedJiraEpic}` : 'Select an epic from the dropdown'}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Epic Name - Only show when creating an Epic */}
+                    {newItem.type === 'epic' && (
+                      <div className="custom-field">
+                        <div className="custom-field-label">Epic Name (Required for Epics)</div>
+                        <input
+                          type="text"
+                          value={newItem.jiraEpicName}
+                          onChange={(e) => setNewItem({ ...newItem, jiraEpicName: e.target.value })}
+                          className="input"
+                          placeholder="Enter epic name"
+                        />
+                      </div>
+                    )}
                     
                     <div className="custom-field">
                       <div className="custom-field-label">Story Points</div>
@@ -2165,7 +2250,10 @@ const ProjectManager = () => {
               <button onClick={addItem} className="btn btn-primary" style={{ flex: 1 }}>
                 Add Item
               </button>
-              <button onClick={() => setShowItemModal(false)} className="btn btn-secondary" style={{ flex: 1 }}>
+              <button onClick={() => {
+                setSelectedJiraEpic('');
+                setShowItemModal(false);
+              }} className="btn btn-secondary" style={{ flex: 1 }}>
                 Cancel
               </button>
             </div>
