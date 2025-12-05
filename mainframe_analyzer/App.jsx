@@ -1293,11 +1293,361 @@ const ProjectManager = () => {
               <TrendingUp size={16} />
               Burndown
             </button>
+            <button 
+              onClick={() => setSelectedChartType('velocity')}
+              className={`btn ${selectedChartType === 'velocity' ? 'btn-primary' : 'btn-outline'}`}
+            >
+              <BarChart3 size={16} />
+              Velocity
+            </button>
+            <button 
+              onClick={() => setSelectedChartType('status')}
+              className={`btn ${selectedChartType === 'status' ? 'btn-primary' : 'btn-outline'}`}
+            >
+              <PieChart size={16} />
+              Status Breakdown
+            </button>
           </div>
         </div>
         
         <div className="card">
-          {selectedChartType === 'gantt' ? renderGanttChart() : renderBurndownChart()}
+          {selectedChartType === 'gantt' && renderGanttChart()}
+          {selectedChartType === 'burndown' && renderBurndownChart()}
+          {selectedChartType === 'velocity' && renderVelocityChart()}
+          {selectedChartType === 'status' && renderStatusChart()}
+        </div>
+      </div>
+    );
+  };
+  
+  const renderVelocityChart = () => {
+    if (!selectedProject) return null;
+    
+    const items = selectedProject.items;
+    const completedItems = items.filter(i => i.status === 'review');
+    const inProgressItems = items.filter(i => i.status === 'in-progress');
+    
+    // Group by type
+    const epicStats = {
+      completed: completedItems.filter(i => i.type === 'epic').length,
+      inProgress: inProgressItems.filter(i => i.type === 'epic').length,
+      total: items.filter(i => i.type === 'epic').length
+    };
+    
+    const storyStats = {
+      completed: completedItems.filter(i => i.type === 'story').length,
+      inProgress: inProgressItems.filter(i => i.type === 'story').length,
+      total: items.filter(i => i.type === 'story').length
+    };
+    
+    const taskStats = {
+      completed: completedItems.filter(i => i.type === 'task').length,
+      inProgress: inProgressItems.filter(i => i.type === 'task').length,
+      total: items.filter(i => i.type === 'task').length
+    };
+    
+    return (
+      <div className="chart-container">
+        <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>Team Velocity</h3>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '24px' }}>
+          <div>
+            <div className="chart-label">Epics</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '8px' }}>
+              <div className="chart-value" style={{ color: '#9333ea' }}>{epicStats.completed}</div>
+              <div style={{ fontSize: '14px', color: '#6b7280' }}>/ {epicStats.total} completed</div>
+            </div>
+            <div style={{ height: '150px', backgroundColor: '#f3f4f6', borderRadius: '4px', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ 
+                position: 'absolute', 
+                bottom: 0, 
+                width: '100%', 
+                height: `${epicStats.total > 0 ? (epicStats.completed / epicStats.total) * 100 : 0}%`, 
+                backgroundColor: '#9333ea',
+                transition: 'height 0.3s'
+              }} />
+            </div>
+            <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px', textAlign: 'center' }}>
+              {epicStats.inProgress} in progress
+            </div>
+          </div>
+          
+          <div>
+            <div className="chart-label">Stories</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '8px' }}>
+              <div className="chart-value" style={{ color: '#2563eb' }}>{storyStats.completed}</div>
+              <div style={{ fontSize: '14px', color: '#6b7280' }}>/ {storyStats.total} completed</div>
+            </div>
+            <div style={{ height: '150px', backgroundColor: '#f3f4f6', borderRadius: '4px', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ 
+                position: 'absolute', 
+                bottom: 0, 
+                width: '100%', 
+                height: `${storyStats.total > 0 ? (storyStats.completed / storyStats.total) * 100 : 0}%`, 
+                backgroundColor: '#2563eb',
+                transition: 'height 0.3s'
+              }} />
+            </div>
+            <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px', textAlign: 'center' }}>
+              {storyStats.inProgress} in progress
+            </div>
+          </div>
+          
+          <div>
+            <div className="chart-label">Tasks</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '8px' }}>
+              <div className="chart-value" style={{ color: '#16a34a' }}>{taskStats.completed}</div>
+              <div style={{ fontSize: '14px', color: '#6b7280' }}>/ {taskStats.total} completed</div>
+            </div>
+            <div style={{ height: '150px', backgroundColor: '#f3f4f6', borderRadius: '4px', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ 
+                position: 'absolute', 
+                bottom: 0, 
+                width: '100%', 
+                height: `${taskStats.total > 0 ? (taskStats.completed / taskStats.total) * 100 : 0}%`, 
+                backgroundColor: '#16a34a',
+                transition: 'height 0.3s'
+              }} />
+            </div>
+            <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '8px', textAlign: 'center' }}>
+              {taskStats.inProgress} in progress
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
+  const renderStatusChart = () => {
+    if (!selectedProject) return null;
+    
+    const items = selectedProject.items;
+    const pending = items.filter(i => i.status === 'pending').length;
+    const inProgress = items.filter(i => i.status === 'in-progress').length;
+    const review = items.filter(i => i.status === 'review').length;
+    const total = items.length;
+    
+    const pendingPercent = total > 0 ? (pending / total) * 100 : 0;
+    const inProgressPercent = total > 0 ? (inProgress / total) * 100 : 0;
+    const reviewPercent = total > 0 ? (review / total) * 100 : 0;
+    
+    return (
+      <div className="chart-container">
+        <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>Status Distribution</h3>
+        
+        <div style={{ display: 'flex', gap: '48px', alignItems: 'center' }}>
+          <div style={{ position: 'relative', width: '200px', height: '200px' }}>
+            <svg viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
+              <circle cx="50" cy="50" r="40" fill="none" stroke="#f3f4f6" strokeWidth="20" />
+              <circle 
+                cx="50" 
+                cy="50" 
+                r="40" 
+                fill="none" 
+                stroke="#6b7280" 
+                strokeWidth="20"
+                strokeDasharray={`${pendingPercent * 2.51} ${251 - pendingPercent * 2.51}`}
+                strokeDashoffset="0"
+              />
+              <circle 
+                cx="50" 
+                cy="50" 
+                r="40" 
+                fill="none" 
+                stroke="#2563eb" 
+                strokeWidth="20"
+                strokeDasharray={`${inProgressPercent * 2.51} ${251 - inProgressPercent * 2.51}`}
+                strokeDashoffset={`-${pendingPercent * 2.51}`}
+              />
+              <circle 
+                cx="50" 
+                cy="50" 
+                r="40" 
+                fill="none" 
+                stroke="#16a34a" 
+                strokeWidth="20"
+                strokeDasharray={`${reviewPercent * 2.51} ${251 - reviewPercent * 2.51}`}
+                strokeDashoffset={`-${(pendingPercent + inProgressPercent) * 2.51}`}
+              />
+            </svg>
+            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' }}>
+              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{total}</div>
+              <div style={{ fontSize: '12px', color: '#6b7280' }}>Items</div>
+            </div>
+          </div>
+          
+          <div style={{ flex: 1 }}>
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ width: '16px', height: '16px', backgroundColor: '#6b7280', borderRadius: '2px' }} />
+                  <span style={{ fontSize: '14px' }}>Pending</span>
+                </div>
+                <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{pending} ({pendingPercent.toFixed(0)}%)</span>
+              </div>
+              <div style={{ height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
+                <div style={{ width: `${pendingPercent}%`, height: '100%', backgroundColor: '#6b7280' }} />
+              </div>
+            </div>
+            
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ width: '16px', height: '16px', backgroundColor: '#2563eb', borderRadius: '2px' }} />
+                  <span style={{ fontSize: '14px' }}>In Progress</span>
+                </div>
+                <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{inProgress} ({inProgressPercent.toFixed(0)}%)</span>
+              </div>
+              <div style={{ height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
+                <div style={{ width: `${inProgressPercent}%`, height: '100%', backgroundColor: '#2563eb' }} />
+              </div>
+            </div>
+            
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ width: '16px', height: '16px', backgroundColor: '#16a34a', borderRadius: '2px' }} />
+                  <span style={{ fontSize: '14px' }}>Review/Done</span>
+                </div>
+                <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{review} ({reviewPercent.toFixed(0)}%)</span>
+              </div>
+              <div style={{ height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
+                <div style={{ width: `${reviewPercent}%`, height: '100%', backgroundColor: '#16a34a' }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
+  const renderCalendar = () => {
+    if (!selectedProject) return <div className="card">Select a project to view calendar</div>;
+    
+    const currentDate = selectedMonth;
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    
+    // Get first and last day of month
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDayOfWeek = firstDay.getDay();
+    
+    // Create calendar grid
+    const calendarDays = [];
+    
+    // Add empty cells for days before month starts
+    for (let i = 0; i < startingDayOfWeek; i++) {
+      calendarDays.push(null);
+    }
+    
+    // Add days of month
+    for (let day = 1; day <= daysInMonth; day++) {
+      calendarDays.push(new Date(year, month, day));
+    }
+    
+    const isToday = (date) => {
+      if (!date) return false;
+      const today = new Date();
+      return date.getDate() === today.getDate() &&
+             date.getMonth() === today.getMonth() &&
+             date.getFullYear() === today.getFullYear();
+    };
+    
+    const isWeekend = (date) => {
+      if (!date) return false;
+      const day = date.getDay();
+      return day === 0 || day === 6;
+    };
+    
+    const getItemsForDate = (date) => {
+      if (!date) return [];
+      const dateStr = date.toISOString().split('T')[0];
+      return selectedProject.items.filter(item => {
+        const itemStart = item.startDate;
+        const itemEnd = item.endDate;
+        return dateStr >= itemStart && dateStr <= itemEnd;
+      });
+    };
+    
+    const changeMonth = (delta) => {
+      setSelectedMonth(new Date(year, month + delta, 1));
+    };
+    
+    return (
+      <div>
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+            <button onClick={() => changeMonth(-1)} className="btn btn-outline">
+              &larr; Previous
+            </button>
+            <h2 style={{ fontSize: '24px', fontWeight: 'bold' }}>
+              {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            </h2>
+            <button onClick={() => changeMonth(1)} className="btn btn-outline">
+              Next &rarr;
+            </button>
+          </div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+              <div key={day} style={{ 
+                padding: '8px', 
+                textAlign: 'center', 
+                fontWeight: 'bold', 
+                fontSize: '12px',
+                color: '#6b7280',
+                backgroundColor: '#f9fafb'
+              }}>
+                {day}
+              </div>
+            ))}
+            
+            {calendarDays.map((date, index) => {
+              if (!date) {
+                return <div key={`empty-${index}`} style={{ minHeight: '100px', backgroundColor: '#f9fafb' }} />;
+              }
+              
+              const items = getItemsForDate(date);
+              const dayClass = isToday(date) ? 'today' : isWeekend(date) ? 'weekend' : 'normal';
+              
+              return (
+                <div key={index} className={`calendar-day ${dayClass}`}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                    {date.getDate()}
+                  </div>
+                  <div style={{ fontSize: '10px' }}>
+                    {items.slice(0, 3).map(item => (
+                      <div 
+                        key={item.id}
+                        style={{
+                          padding: '2px 4px',
+                          marginBottom: '2px',
+                          borderRadius: '2px',
+                          backgroundColor: item.status === 'review' ? '#dcfce7' :
+                                         item.status === 'in-progress' ? '#dbeafe' : '#f3f4f6',
+                          color: item.status === 'review' ? '#166534' :
+                                item.status === 'in-progress' ? '#1e40af' : '#374151',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}
+                        title={item.name}
+                      >
+                        {getItemIcon(item.type)} {item.name}
+                      </div>
+                    ))}
+                    {items.length > 3 && (
+                      <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '2px' }}>
+                        +{items.length - 3} more
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     );
@@ -1370,11 +1720,20 @@ const ProjectManager = () => {
             <Calendar size={18} />
             Timeline
           </button>
+          <button
+            onClick={() => setActiveView('calendar')}
+            className={`tab ${activeView === 'calendar' ? 'active' : 'inactive'}`}
+            disabled={!selectedProject}
+          >
+            <Calendar size={18} />
+            Calendar
+          </button>
         </div>
         
         {activeView === 'dashboard' && renderDashboard()}
         {activeView === 'hierarchy' && renderHierarchy()}
         {activeView === 'timeline' && renderTimeline()}
+        {activeView === 'calendar' && renderCalendar()}
       </div>
       
       {/* Add Project Modal */}
@@ -1427,6 +1786,195 @@ const ProjectManager = () => {
                 Create Project
               </button>
               <button onClick={() => setShowProjectModal(false)} className="btn btn-secondary" style={{ flex: 1 }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Edit Item Modal */}
+      {showEditItemModal && editingItem && (
+        <div className="modal-overlay" onClick={() => setShowEditItemModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Edit Item</h2>
+            
+            <div className="form-group">
+              <label className="label">Item Name *</label>
+              <input
+                type="text"
+                value={editingItem.name}
+                onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
+                className="input"
+                placeholder="Enter item name"
+              />
+            </div>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="form-group">
+                <label className="label">Type</label>
+                <select
+                  value={editingItem.type}
+                  onChange={(e) => setEditingItem({ ...editingItem, type: e.target.value })}
+                  className="select"
+                >
+                  <option value="epic">Epic</option>
+                  <option value="story">Story</option>
+                  <option value="task">Task</option>
+                  <option value="subtask">Subtask</option>
+                </select>
+              </div>
+              
+              <div className="form-group">
+                <label className="label">Status</label>
+                <select
+                  value={editingItem.status}
+                  onChange={(e) => setEditingItem({ ...editingItem, status: e.target.value })}
+                  className="select"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="in-progress">In Progress</option>
+                  <option value="review">Review</option>
+                </select>
+              </div>
+            </div>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="form-group">
+                <label className="label">Priority</label>
+                <select
+                  value={editingItem.priority}
+                  onChange={(e) => setEditingItem({ ...editingItem, priority: e.target.value })}
+                  className="select"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </div>
+              
+              <div className="form-group">
+                <label className="label">Assignee</label>
+                <input
+                  type="text"
+                  value={editingItem.assignee}
+                  onChange={(e) => setEditingItem({ ...editingItem, assignee: e.target.value })}
+                  className="input"
+                  placeholder="Enter assignee name"
+                />
+              </div>
+            </div>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="form-group">
+                <label className="label">Start Date *</label>
+                <input
+                  type="date"
+                  value={editingItem.startDate}
+                  onChange={(e) => setEditingItem({ ...editingItem, startDate: e.target.value })}
+                  className="input"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label className="label">End Date *</label>
+                <input
+                  type="date"
+                  value={editingItem.endDate}
+                  onChange={(e) => setEditingItem({ ...editingItem, endDate: e.target.value })}
+                  className="input"
+                />
+              </div>
+            </div>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="form-group">
+                <label className="label">Estimated Hours</label>
+                <input
+                  type="number"
+                  value={editingItem.estimatedHours}
+                  onChange={(e) => setEditingItem({ ...editingItem, estimatedHours: e.target.value })}
+                  className="input"
+                  placeholder="0"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label className="label">Actual Hours</label>
+                <input
+                  type="number"
+                  value={editingItem.actualHours || 0}
+                  onChange={(e) => setEditingItem({ ...editingItem, actualHours: e.target.value })}
+                  className="input"
+                  placeholder="0"
+                />
+              </div>
+            </div>
+            
+            {editingItem.jira && jiraConfig.connected && (
+              <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px', marginTop: '16px', backgroundColor: '#f3e8ff' }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#6b21a8' }}>
+                  🔗 Linked to Jira: {editingItem.jira.issueKey}
+                </div>
+                <label className="checkbox-wrapper">
+                  <input
+                    type="checkbox"
+                    className="checkbox"
+                    checked={true}
+                    readOnly
+                  />
+                  <span>Sync changes to Jira after saving</span>
+                </label>
+              </div>
+            )}
+            
+            <div style={{ display: 'flex', gap: '8px', marginTop: '24px' }}>
+              <button 
+                onClick={async () => {
+                  const updatedProjects = projects.map(p => {
+                    if (p.id === selectedProject.id) {
+                      return {
+                        ...p,
+                        items: p.items.map(i => 
+                          i.id === editingItem.id ? editingItem : i
+                        )
+                      };
+                    }
+                    return p;
+                  });
+                  
+                  setProjects(updatedProjects);
+                  
+                  // Sync to Jira if item is linked
+                  if (editingItem.jira && jiraConfig.connected) {
+                    await syncToJira(editingItem);
+                  }
+                  
+                  const updated = updatedProjects.find(p => p.id === selectedProject.id);
+                  if (updated) {
+                    setSelectedProject(updated);
+                    if (useBackend) {
+                      await saveProjectToBackend(updated);
+                    }
+                  }
+                  
+                  setShowEditItemModal(false);
+                  setEditingItem(null);
+                }}
+                className="btn btn-primary" 
+                style={{ flex: 1 }}
+              >
+                Save Changes
+              </button>
+              <button 
+                onClick={() => {
+                  setShowEditItemModal(false);
+                  setEditingItem(null);
+                }} 
+                className="btn btn-secondary" 
+                style={{ flex: 1 }}
+              >
                 Cancel
               </button>
             </div>

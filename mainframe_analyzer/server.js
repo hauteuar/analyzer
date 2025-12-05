@@ -139,24 +139,59 @@ app.post('/api/jira/create-issue', async (req, res) => {
   const { jiraConfig, item } = req.body;
   
   try {
+    // Map our types to Jira issue types (with proper capitalization)
+    const issueTypeMap = {
+      'epic': 'Epic',
+      'story': 'Story',
+      'task': 'Task',
+      'subtask': 'Sub-task',
+      'bug': 'Bug'
+    };
+    
+    const jiraIssueType = issueTypeMap[item.type.toLowerCase()] || 'Task';
+    
+    // Map our priorities to Jira priorities
+    const priorityMap = {
+      'critical': 'Highest',
+      'high': 'High',
+      'medium': 'Medium',
+      'low': 'Low'
+    };
+    
+    const jiraPriority = priorityMap[item.priority.toLowerCase()] || 'Medium';
+    
     const issueData = {
       fields: {
         project: {
           key: jiraConfig.defaultProject
         },
         summary: item.name,
-        description: `Created from Project Manager Pro\n\nPriority: ${item.priority}\nDue Date: ${item.duedate}`,
+        description: `Created from Project Manager Pro\n\nPriority: ${item.priority}\nEstimated Hours: ${item.estimatedHours || 0}\nAssignee: ${item.assignee || 'Unassigned'}`,
         issuetype: {
-          name: item.type
+          name: jiraIssueType
         },
         priority: {
-          name: item.priority
+          name: jiraPriority
         }
       }
     };
 
-    if (item.duedate) {
-      issueData.fields.duedate = item.duedate;
+    // Add due date if provided
+    if (item.endDate) {
+      issueData.fields.duedate = item.endDate;
+    }
+    
+    // Add custom fields if provided
+    if (item.storyPoints) {
+      issueData.fields.customfield_10016 = parseFloat(item.storyPoints);
+    }
+    
+    if (item.labels && Array.isArray(item.labels) && item.labels.length > 0) {
+      issueData.fields.labels = item.labels;
+    }
+    
+    if (item.epicName && jiraIssueType === 'Epic') {
+      issueData.fields.customfield_10011 = item.epicName; // Epic Name field
     }
 
     const response = await axios.post(
@@ -177,7 +212,7 @@ app.post('/api/jira/create-issue', async (req, res) => {
       self: response.data.self
     });
   } catch (error) {
-    console.error('Error creating Jira issue:', error.message);
+    console.error('Error creating Jira issue:', error.response?.data || error.message);
     res.status(400).json({ 
       error: error.response?.data?.errors || error.message 
     });
@@ -213,7 +248,7 @@ app.post('/api/jira/get-epics', async (req, res) => {
       status: issue.fields.status.name,
       assignee: issue.fields.assignee?.displayName || 'Unassigned',
       created: issue.fields.created,
-      hasChildren: false // Will be populated if needed
+      hasChildren: false
     }));
 
     res.json({ epics });
@@ -232,9 +267,7 @@ app.post('/api/jira/import-epics', async (req, res) => {
   try {
     const allItems = [];
     
-    // For each epic, get the epic and its children
     for (const epicKey of epicKeys) {
-      // Get the epic itself
       const epicResponse = await axios.get(
         `${jiraConfig.url}/rest/api/2/issue/${epicKey}`,
         {
@@ -252,7 +285,6 @@ app.post('/api/jira/import-epics', async (req, res) => {
       const epicItem = formatJiraIssue(epic, 'epic');
       allItems.push(epicItem);
       
-      // Get children of the epic
       const childrenJql = `"Epic Link" = ${epicKey} OR parent = ${epicKey}`;
       const childrenResponse = await axios.get(
         `${jiraConfig.url}/rest/api/2/search`,
@@ -290,7 +322,6 @@ app.post('/api/jira/update-status', async (req, res) => {
   const { jiraConfig, issueKey, newStatus } = req.body;
   
   try {
-    // Get available transitions
     const transitionsResponse = await axios.get(
       `${jiraConfig.url}/rest/api/2/issue/${issueKey}/transitions`,
       {
@@ -301,7 +332,6 @@ app.post('/api/jira/update-status', async (req, res) => {
       }
     );
 
-    // Map our status to Jira transitions
     const statusMap = {
       'pending': ['To Do', 'Open', 'Backlog', 'New'],
       'in-progress': ['In Progress', 'Start Progress', 'In Development', 'Developing'],
@@ -576,7 +606,6 @@ function logSync(action, issueKey, status, error = null) {
       .push(log)
       .write();
     
-    // Keep only last 100 logs
     const logs = db.get('syncLog').value();
     if (logs.length > 100) {
       db.set('syncLog', logs.slice(-100)).write();
