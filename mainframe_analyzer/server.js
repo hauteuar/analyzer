@@ -160,6 +160,7 @@ app.post('/api/jira/create-issue', async (req, res) => {
     
     const jiraPriority = priorityMap[item.priority.toLowerCase()] || 'Medium';
     
+    // Base issue data (required fields only)
     const issueData = {
       fields: {
         project: {
@@ -181,41 +182,100 @@ app.post('/api/jira/create-issue', async (req, res) => {
       issueData.fields.duedate = item.endDate;
     }
     
-    // Add custom fields if provided
-    if (item.storyPoints) {
-      issueData.fields.customfield_10016 = parseFloat(item.storyPoints);
-    }
-    
+    // Add labels if provided
     if (item.labels && Array.isArray(item.labels) && item.labels.length > 0) {
       issueData.fields.labels = item.labels;
     }
     
-    // Epic handling
-    if (item.epicName && jiraIssueType === 'Epic') {
-      issueData.fields.customfield_10011 = item.epicName; // Epic Name field
-    }
-    
-    // Epic Link - for Stories/Tasks that should be linked to an epic
-    if (item.epicLink && jiraIssueType !== 'Epic') {
-      issueData.fields.customfield_10014 = item.epicLink; // Epic Link field
-    }
-    
-    // Parent Link - for Sub-tasks
+    // Parent Link - for Sub-tasks (this is usually allowed)
     if (item.parentKey && jiraIssueType === 'Sub-task') {
       issueData.fields.parent = { key: item.parentKey };
     }
 
-    const response = await axios.post(
-      `${jiraConfig.url}/rest/api/2/issue`,
-      issueData,
-      {
-        headers: {
-          'Authorization': `Bearer ${jiraConfig.apiToken}`,
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
+    // Try to create issue with optional custom fields
+    let response;
+    try {
+      // Add optional custom fields
+      const issueDataWithCustomFields = { ...issueData };
+      
+      // Epic Name for Epics
+      if (item.epicName && jiraIssueType === 'Epic') {
+        issueDataWithCustomFields.fields.customfield_10011 = item.epicName;
+      }
+      
+      // Epic Link for Stories/Tasks
+      if (item.epicLink && jiraIssueType !== 'Epic') {
+        issueDataWithCustomFields.fields.customfield_10014 = item.epicLink;
+      }
+      
+      // Story Points
+      if (item.storyPoints) {
+        issueDataWithCustomFields.fields.customfield_10016 = parseFloat(item.storyPoints);
+      }
+
+      response = await axios.post(
+        `${jiraConfig.url}/rest/api/2/issue`,
+        issueDataWithCustomFields,
+        {
+          headers: {
+            'Authorization': `Bearer ${jiraConfig.apiToken}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+    } catch (customFieldError) {
+      // If custom fields fail, try without them
+      console.log('Custom fields not supported on create screen, creating without them...');
+      
+      response = await axios.post(
+        `${jiraConfig.url}/rest/api/2/issue`,
+        issueData,
+        {
+          headers: {
+            'Authorization': `Bearer ${jiraConfig.apiToken}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      // Try to update with custom fields after creation
+      if (response.data.key) {
+        const updateData = { fields: {} };
+        
+        if (item.epicName && jiraIssueType === 'Epic') {
+          updateData.fields.customfield_10011 = item.epicName;
+        }
+        
+        if (item.epicLink && jiraIssueType !== 'Epic') {
+          updateData.fields.customfield_10014 = item.epicLink;
+        }
+        
+        if (item.storyPoints) {
+          updateData.fields.customfield_10016 = parseFloat(item.storyPoints);
+        }
+        
+        if (Object.keys(updateData.fields).length > 0) {
+          try {
+            await axios.put(
+              `${jiraConfig.url}/rest/api/2/issue/${response.data.key}`,
+              updateData,
+              {
+                headers: {
+                  'Authorization': `Bearer ${jiraConfig.apiToken}`,
+                  'Accept': 'application/json',
+                  'Content-Type': 'application/json'
+                }
+              }
+            );
+            console.log('Successfully updated custom fields after creation');
+          } catch (updateError) {
+            console.log('Could not update custom fields, but issue created successfully');
+          }
         }
       }
-    );
+    }
 
     res.json({
       key: response.data.key,
@@ -341,21 +401,44 @@ app.post('/api/jira/import-epics', async (req, res) => {
       const epicItem = formatJiraIssue(epic, 'epic');
       allItems.push(epicItem);
       
-      const childrenJql = `"Epic Link" = ${epicKey} OR parent = ${epicKey}`;
-      const childrenResponse = await axios.get(
-        `${jiraConfig.url}/rest/api/2/search`,
-        {
-          params: {
-            jql: childrenJql,
-            maxResults: 100,
-            fields: 'summary,status,priority,assignee,duedate,issuetype,created,updated,timetracking'
-          },
-          headers: {
-            'Authorization': `Bearer ${jiraConfig.apiToken}`,
-            'Accept': 'application/json'
+      // Try to get children using multiple methods (for different Jira versions)
+      // Method 1: Greenhopper/BofA Jira custom field
+      let childrenResponse;
+      try {
+        const greenhopperJql = `cf[10014] = ${epicKey} OR parent = ${epicKey}`;
+        childrenResponse = await axios.get(
+          `${jiraConfig.url}/rest/api/2/search`,
+          {
+            params: {
+              jql: greenhopperJql,
+              maxResults: 100,
+              fields: 'summary,status,priority,assignee,duedate,issuetype,created,updated,timetracking,customfield_10014'
+            },
+            headers: {
+              'Authorization': `Bearer ${jiraConfig.apiToken}`,
+              'Accept': 'application/json'
+            }
           }
-        }
-      );
+        );
+      } catch (error) {
+        // Method 2: Standard Jira Epic Link field name
+        console.log('Greenhopper query failed, trying standard Epic Link...');
+        const standardJql = `"Epic Link" = ${epicKey} OR parent = ${epicKey}`;
+        childrenResponse = await axios.get(
+          `${jiraConfig.url}/rest/api/2/search`,
+          {
+            params: {
+              jql: standardJql,
+              maxResults: 100,
+              fields: 'summary,status,priority,assignee,duedate,issuetype,created,updated,timetracking'
+            },
+            headers: {
+              'Authorization': `Bearer ${jiraConfig.apiToken}`,
+              'Accept': 'application/json'
+            }
+          }
+        );
+      }
       
       childrenResponse.data.issues.forEach(child => {
         const childItem = formatJiraIssue(child, null, epicItem.id);

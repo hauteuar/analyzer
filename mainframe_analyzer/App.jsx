@@ -121,6 +121,7 @@ const ProjectManager = () => {
   const [showItemDetailsModal, setShowItemDetailsModal] = useState(false);
   const [showEditItemModal, setShowEditItemModal] = useState(false);
   const [showEpicSelectorModal, setShowEpicSelectorModal] = useState(false);
+  const [epicSearchQuery, setEpicSearchQuery] = useState('');
   const [showExportModal, setShowExportModal] = useState(false);
   
   // Selection States
@@ -2802,7 +2803,10 @@ const ProjectManager = () => {
       
       {/* Epic Selector Modal */}
       {showEpicSelectorModal && (
-        <div className="modal-overlay" onClick={() => setShowEpicSelectorModal(false)}>
+        <div className="modal-overlay" onClick={() => {
+          setShowEpicSelectorModal(false);
+          setEpicSearchQuery('');
+        }}>
           <div className="modal modal-large" onClick={(e) => e.stopPropagation()}>
             <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>
               Select Epics to Import
@@ -2810,34 +2814,66 @@ const ProjectManager = () => {
             <p style={{ marginBottom: '16px', color: '#6b7280' }}>
               Select the epics you want to import. Their stories and tasks will be imported automatically.
             </p>
+            
+            {/* Search Input */}
+            <div style={{ marginBottom: '16px' }}>
+              <input
+                type="text"
+                placeholder="🔍 Search epics by key or name..."
+                value={epicSearchQuery}
+                onChange={(e) => setEpicSearchQuery(e.target.value)}
+                className="input"
+                style={{ width: '100%' }}
+              />
+            </div>
+            
+            {/* Filtered Epic List */}
             <div className="epic-selector">
-              {availableEpics.map(epic => (
-                <div 
-                  key={epic.key}
-                  className={`epic-item ${selectedEpics.includes(epic.key) ? 'selected' : ''}`}
-                  onClick={() => {
-                    if (selectedEpics.includes(epic.key)) {
-                      setSelectedEpics(selectedEpics.filter(k => k !== epic.key));
-                    } else {
-                      setSelectedEpics([...selectedEpics, epic.key]);
-                    }
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedEpics.includes(epic.key)}
-                    onChange={() => {}}
-                    className="checkbox"
-                  />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 'bold' }}>{epic.key}: {epic.name}</div>
-                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                      Status: {epic.status} • Assignee: {epic.assignee}
+              {availableEpics
+                .filter(epic => {
+                  if (!epicSearchQuery) return true;
+                  const query = epicSearchQuery.toLowerCase();
+                  return epic.key.toLowerCase().includes(query) || 
+                         epic.name.toLowerCase().includes(query);
+                })
+                .map(epic => (
+                  <div 
+                    key={epic.key}
+                    className={`epic-item ${selectedEpics.includes(epic.key) ? 'selected' : ''}`}
+                    onClick={() => {
+                      if (selectedEpics.includes(epic.key)) {
+                        setSelectedEpics(selectedEpics.filter(k => k !== epic.key));
+                      } else {
+                        setSelectedEpics([...selectedEpics, epic.key]);
+                      }
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedEpics.includes(epic.key)}
+                      onChange={() => {}}
+                      className="checkbox"
+                    />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 'bold' }}>{epic.key}: {epic.name}</div>
+                      <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                        Status: {epic.status} • Assignee: {epic.assignee}
+                      </div>
                     </div>
                   </div>
+                ))}
+              {availableEpics.filter(epic => {
+                if (!epicSearchQuery) return true;
+                const query = epicSearchQuery.toLowerCase();
+                return epic.key.toLowerCase().includes(query) || 
+                       epic.name.toLowerCase().includes(query);
+              }).length === 0 && (
+                <div style={{ textAlign: 'center', padding: '24px', color: '#9ca3af' }}>
+                  No epics found matching "{epicSearchQuery}"
                 </div>
-              ))}
+              )}
             </div>
+            
             <div style={{ display: 'flex', gap: '8px', marginTop: '24px' }}>
               <button 
                 onClick={importSelectedEpics}
@@ -2845,10 +2881,13 @@ const ProjectManager = () => {
                 className="btn btn-primary" 
                 style={{ flex: 1 }}
               >
-                Import {selectedEpics.length} Epic(s)
+                Import {selectedEpics.length} Epic(s) + Stories
               </button>
               <button 
-                onClick={() => setShowEpicSelectorModal(false)} 
+                onClick={() => {
+                  setShowEpicSelectorModal(false);
+                  setEpicSearchQuery('');
+                }} 
                 className="btn btn-secondary" 
                 style={{ flex: 1 }}
               >
