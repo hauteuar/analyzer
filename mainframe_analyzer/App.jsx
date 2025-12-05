@@ -131,6 +131,11 @@ const ProjectManager = () => {
   const [projectEpics, setProjectEpics] = useState([]); // Epics from current project
   const [selectedJiraEpic, setSelectedJiraEpic] = useState(''); // Selected epic for linking
   
+  // Calendar & Timeline
+  const [calendarView, setCalendarView] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(new Date());
+  const [holidays, setHolidays] = useState([]);
+  
   // Filters
   const [timelineFilters, setTimelineFilters] = useState({
     showEpics: true,
@@ -367,7 +372,6 @@ const ProjectManager = () => {
     }
   };
   
-  
   const loadEpicsFromJira = async () => {
     if (!jiraConfig.connected) {
       alert('Please connect to Jira first');
@@ -443,6 +447,7 @@ const ProjectManager = () => {
       setProjectEpics(localEpics);
     }
   };
+  
   
   
   const importSelectedEpics = async () => {
