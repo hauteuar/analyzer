@@ -1,23 +1,50 @@
 const express = require('express');
 const cors = require('cors');
-const low = require('lowdb');
-const FileSync = require('lowdb/adapters/FileSync');
 const axios = require('axios');
 const Holidays = require('date-holidays');
 const path = require('path');
+const fs = require('fs');
+
+// Simple file-based database (synchronous for simplicity)
+const DB_FILE = 'db.json';
+
+// Initialize database
+let db = { projects: [], syncLog: [] };
+if (fs.existsSync(DB_FILE)) {
+  try {
+    db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+  } catch (error) {
+    console.error('Error reading database:', error);
+  }
+}
+
+// Helper functions for database operations
+const saveDB = () => {
+  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+};
+
+const getProjects = () => db.projects || [];
+const setProjects = (projects) => {
+  db.projects = projects;
+  saveDB();
+};
+
+const addSyncLog = (log) => {
+  if (!db.syncLog) db.syncLog = [];
+  db.syncLog.push(log);
+  // Keep only last 100 logs
+  if (db.syncLog.length > 100) {
+    db.syncLog = db.syncLog.slice(-100);
+  }
+  saveDB();
+};
+
+const getSyncLog = () => db.syncLog || [];
 
 const app = express();
-const adapter = new FileSync('db.json');
-const db = low(adapter);
 
 // Initialize holidays
 const hd = new Holidays('US');
-
-// Initialize database with default structure
-db.defaults({ 
-  projects: [],
-  syncLog: []
-}).write();
 
 // Middleware
 app.use(cors());
@@ -49,7 +76,7 @@ app.get('/api/holidays/:year', (req, res) => {
 // Projects CRUD endpoints
 app.get('/api/projects', (req, res) => {
   try {
-    const projects = db.get('projects').value();
+    const projects = getProjects();
     res.json(projects || []);
   } catch (error) {
     console.error('Error getting projects:', error);
@@ -62,21 +89,16 @@ app.put('/api/projects/:id', (req, res) => {
     const projectId = parseInt(req.params.id);
     const project = req.body;
     
-    const existingProject = db.get('projects')
-      .find({ id: projectId })
-      .value();
+    const projects = getProjects();
+    const existingIndex = projects.findIndex(p => p.id === projectId);
     
-    if (existingProject) {
-      db.get('projects')
-        .find({ id: projectId })
-        .assign(project)
-        .write();
+    if (existingIndex !== -1) {
+      projects[existingIndex] = project;
     } else {
-      db.get('projects')
-        .push(project)
-        .write();
+      projects.push(project);
     }
     
+    setProjects(projects);
     res.json(project);
   } catch (error) {
     console.error('Error saving project:', error);
@@ -87,9 +109,9 @@ app.put('/api/projects/:id', (req, res) => {
 app.delete('/api/projects/:id', (req, res) => {
   try {
     const projectId = parseInt(req.params.id);
-    db.get('projects')
-      .remove({ id: projectId })
-      .write();
+    const projects = getProjects();
+    const filteredProjects = projects.filter(p => p.id !== projectId);
+    setProjects(filteredProjects);
     res.json({ deleted: true, id: projectId });
   } catch (error) {
     console.error('Error deleting project:', error);
@@ -741,14 +763,7 @@ function logSync(action, issueKey, status, error = null) {
       error
     };
     
-    db.get('syncLog')
-      .push(log)
-      .write();
-    
-    const logs = db.get('syncLog').value();
-    if (logs.length > 100) {
-      db.set('syncLog', logs.slice(-100)).write();
-    }
+    addSyncLog(log);
   } catch (e) {
     console.error('Failed to write sync log:', e);
   }
