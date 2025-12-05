@@ -158,8 +158,11 @@ const ProjectManager = () => {
       epicLink: '',
       sprint: '',
       labels: ''
-    }
+    },
+    autoSyncInterval: 0 // 0 = disabled, otherwise minutes
   });
+  
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
   
   const [jiraProjects, setJiraProjects] = useState([]);
   const [selectedJiraUrl, setSelectedJiraUrl] = useState('');
@@ -216,9 +219,48 @@ const ProjectManager = () => {
   
   useEffect(() => {
     if (!useBackend) {
+      // Save to localStorage when backend is disabled
       localStorage.setItem('projectManagerData', JSON.stringify(projects));
+    } else if (useBackend && backendConnected && projects.length > 0) {
+      // Save to backend when backend is enabled
+      saveAllProjectsToBackend();
     }
-  }, [projects, useBackend]);
+  }, [projects, useBackend, backendConnected]);
+  
+  // Auto-sync from Jira at interval
+  useEffect(() => {
+    if (!autoSyncEnabled || !jiraConfig.connected || !selectedProject || jiraConfig.autoSyncInterval === 0) {
+      return;
+    }
+    
+    const intervalMs = jiraConfig.autoSyncInterval * 60 * 1000; // Convert minutes to ms
+    
+    console.log(`Auto-sync from Jira enabled: every ${jiraConfig.autoSyncInterval} minutes`);
+    
+    const syncInterval = setInterval(() => {
+      console.log('Auto-syncing from Jira...');
+      syncAllFromJira();
+    }, intervalMs);
+    
+    return () => {
+      console.log('Auto-sync from Jira disabled');
+      clearInterval(syncInterval);
+    };
+  }, [autoSyncEnabled, jiraConfig.connected, jiraConfig.autoSyncInterval, selectedProject]);
+  
+  // Save all projects to backend
+  const saveAllProjectsToBackend = async () => {
+    if (!useBackend || !backendConnected) return;
+    
+    try {
+      for (const project of projects) {
+        await saveProjectToBackend(project);
+      }
+      setLastSyncTime(new Date().toISOString());
+    } catch (error) {
+      console.error('Error saving all projects:', error);
+    }
+  };
 
   // Load initial data
   const loadInitialData = () => {
@@ -281,8 +323,12 @@ const ProjectManager = () => {
       setUseBackend(true);
       localStorage.setItem('backendUrl', backendUrl);
       localStorage.setItem('useBackend', 'true');
+      
+      // Load data from backend immediately
+      await syncFromBackend();
+      
       setShowBackendSettings(false);
-      alert('✅ Connected to backend server!');
+      alert('✅ Connected to backend server! Data loaded.');
     } else {
       alert('❌ Cannot connect to backend server');
     }
@@ -412,14 +458,18 @@ const ProjectManager = () => {
     // If Jira connected, also get Jira epics for the project
     if (jiraConfig.connected && useBackend && backendConnected) {
       try {
+        console.log('Fetching Jira epics from:', `${backendUrl}/jira/get-epics`);
         const response = await fetch(`${backendUrl}/jira/get-epics`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ jiraConfig })
         });
         
+        console.log('Response status:', response.status);
+        
         if (response.ok) {
           const data = await response.json();
+          console.log('Received Jira epics:', data.epics?.length);
           const jiraEpics = data.epics.map(epic => ({
             id: epic.id,
             key: epic.key,
@@ -437,6 +487,9 @@ const ProjectManager = () => {
           
           setProjectEpics(allEpics);
         } else {
+          console.error('Failed to fetch Jira epics:', response.status, response.statusText);
+          const errorText = await response.text();
+          console.error('Error details:', errorText);
           setProjectEpics(localEpics);
         }
       } catch (error) {
@@ -448,7 +501,7 @@ const ProjectManager = () => {
     }
   };
   
-  
+ 
   
   const importSelectedEpics = async () => {
     if (selectedEpics.length === 0) {
@@ -593,6 +646,71 @@ const ProjectManager = () => {
       alert('Error syncing from Jira');
     }
   };
+  
+  // Sync ALL Jira-linked items in a project from Jira
+  const syncAllFromJira = async () => {
+    if (!selectedProject || !jiraConfig.connected) {
+      alert('Please select a project and ensure Jira is connected');
+      return;
+    }
+    
+    const jiraLinkedItems = selectedProject.items.filter(item => item.jira);
+    
+    if (jiraLinkedItems.length === 0) {
+      alert('No Jira-linked items to sync');
+      return;
+    }
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    for (const item of jiraLinkedItems) {
+      try {
+        const response = await fetch(`${backendUrl}/jira/sync-issue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jiraConfig,
+            issueKey: item.jira.issueKey
+          })
+        });
+        
+        if (response.ok) {
+          const syncedData = await response.json();
+          
+          // Update the item with synced data
+          const updatedProjects = projects.map(p => {
+            if (p.id === selectedProject.id) {
+              return {
+                ...p,
+                items: p.items.map(i => 
+                  i.id === item.id 
+                    ? { ...i, ...syncedData, jira: { ...i.jira, lastSynced: syncedData.lastSynced } }
+                    : i
+                )
+              };
+            }
+            return p;
+          });
+          
+          setProjects(updatedProjects);
+          const updated = updatedProjects.find(p => p.id === selectedProject.id);
+          if (updated) setSelectedProject(updated);
+          
+          successCount++;
+        } else {
+          errorCount++;
+        }
+      } catch (error) {
+        console.error(`Error syncing ${item.jira.issueKey}:`, error);
+        errorCount++;
+      }
+    }
+    
+    alert(`✅ Synced ${successCount} items from Jira${errorCount > 0 ? ` (${errorCount} failed)` : ''}`);
+  };
+  
+  
   
   const syncToJira = async (item) => {
     if (!item.jira || !jiraConfig.connected) return;
@@ -1255,10 +1373,20 @@ const ProjectManager = () => {
             </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               {jiraConfig.connected && (
-                <button onClick={loadEpicsFromJira} className="btn btn-purple">
-                  <Download size={20} />
-                  Import from Jira
-                </button>
+                <>
+                  <button onClick={loadEpicsFromJira} className="btn btn-purple">
+                    <Download size={20} />
+                    Import from Jira
+                  </button>
+                  <button 
+                    onClick={syncAllFromJira} 
+                    className="btn btn-purple"
+                    title="Sync all Jira-linked items from Jira"
+                  >
+                    <RefreshCw size={20} />
+                    Sync All from Jira
+                  </button>
+                </>
               )}
               <button onClick={exportToExcel} className="btn btn-success">
                 <Download size={20} />
@@ -1726,6 +1854,15 @@ const ProjectManager = () => {
               {useBackend && backendConnected ? <Wifi size={16} /> : <WifiOff size={16} />}
               Backend
             </button>
+            {useBackend && backendConnected && (
+              <button onClick={async () => {
+                await syncFromBackend();
+                alert('✅ Synced from backend!');
+              }} className="btn btn-outline" title="Sync from backend">
+                <RefreshCw size={16} />
+                Sync
+              </button>
+            )}
             {jiraConfig.connected ? (
               <button onClick={() => setShowJiraSettingsModal(true)} className="btn btn-purple">
                 <Settings size={16} />
@@ -2382,10 +2519,24 @@ const ProjectManager = () => {
             {useBackend && backendConnected ? (
               <div style={{ padding: '16px', backgroundColor: '#dcfce7', borderRadius: '8px', border: '1px solid #86efac' }}>
                 <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#166534' }}>✅ Connected to Backend</div>
-                <div style={{ fontSize: '14px', color: '#166534' }}>
+                <div style={{ fontSize: '14px', color: '#166534', marginBottom: '12px' }}>
                   Server: {backendUrl}<br/>
-                  Last sync: {lastSyncTime ? new Date(lastSyncTime).toLocaleString() : 'Never'}
+                  Last sync: {lastSyncTime ? new Date(lastSyncTime).toLocaleString() : 'Never'}<br/>
+                  Projects in backend: {projects.length}
                 </div>
+                
+                <button 
+                  onClick={async () => {
+                    await syncFromBackend();
+                    alert('✅ Data synced from backend!');
+                  }}
+                  className="btn btn-primary" 
+                  style={{ marginBottom: '8px', width: '100%' }}
+                >
+                  <RefreshCw size={16} />
+                  Sync from Backend Now
+                </button>
+                
                 <button 
                   onClick={() => {
                     setUseBackend(false);
@@ -2394,7 +2545,7 @@ const ProjectManager = () => {
                     setShowBackendSettings(false);
                   }}
                   className="btn btn-danger" 
-                  style={{ marginTop: '12px', width: '100%' }}
+                  style={{ width: '100%' }}
                 >
                   Disconnect
                 </button>
@@ -2436,10 +2587,51 @@ const ProjectManager = () => {
             {jiraConfig.connected ? (
               <div style={{ padding: '16px', backgroundColor: '#dcfce7', borderRadius: '8px', border: '1px solid #86efac' }}>
                 <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#166534' }}>✅ Connected to Jira</div>
-                <div style={{ fontSize: '14px', color: '#166534' }}>
+                <div style={{ fontSize: '14px', color: '#166534', marginBottom: '12px' }}>
                   URL: {jiraConfig.url}<br/>
                   Project: {jiraConfig.defaultProject}
                 </div>
+                
+                {/* Auto-Sync Settings */}
+                <div style={{ padding: '12px', backgroundColor: '#f0fdf4', borderRadius: '4px', marginBottom: '12px', border: '1px solid #bbf7d0' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '8px', fontSize: '14px', color: '#166534' }}>
+                    Auto-Sync from Jira
+                  </div>
+                  
+                  <label className="checkbox-wrapper">
+                    <input
+                      type="checkbox"
+                      className="checkbox"
+                      checked={autoSyncEnabled}
+                      onChange={(e) => setAutoSyncEnabled(e.target.checked)}
+                    />
+                    <span>Enable automatic sync from Jira</span>
+                  </label>
+                  
+                  {autoSyncEnabled && (
+                    <div className="form-group" style={{ marginTop: '8px' }}>
+                      <label className="label">Sync Interval (minutes)</label>
+                      <select
+                        value={jiraConfig.autoSyncInterval}
+                        onChange={(e) => setJiraConfig({ ...jiraConfig, autoSyncInterval: parseInt(e.target.value) })}
+                        className="select"
+                      >
+                        <option value="0">Disabled</option>
+                        <option value="5">Every 5 minutes</option>
+                        <option value="10">Every 10 minutes</option>
+                        <option value="15">Every 15 minutes</option>
+                        <option value="30">Every 30 minutes</option>
+                        <option value="60">Every hour</option>
+                      </select>
+                      <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+                        {jiraConfig.autoSyncInterval > 0 
+                          ? `Will sync all Jira-linked items every ${jiraConfig.autoSyncInterval} minutes`
+                          : 'Select an interval to enable auto-sync'}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
                 <button 
                   onClick={() => {
                     setJiraConfig({ 
@@ -2453,13 +2645,15 @@ const ProjectManager = () => {
                         epicLink: '',
                         sprint: '',
                         labels: ''
-                      }
+                      },
+                      autoSyncInterval: 0
                     });
+                    setAutoSyncEnabled(false);
                     localStorage.removeItem('jiraConfig');
                     setShowJiraSettingsModal(false);
                   }}
                   className="btn btn-danger" 
-                  style={{ marginTop: '12px', width: '100%' }}
+                  style={{ width: '100%' }}
                 >
                   Disconnect
                 </button>
