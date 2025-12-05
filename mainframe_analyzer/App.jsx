@@ -501,7 +501,7 @@ const ProjectManager = () => {
     }
   };
   
- 
+  
   
   const importSelectedEpics = async () => {
     if (selectedEpics.length === 0) {
@@ -640,10 +640,10 @@ const ProjectManager = () => {
         const updated = updatedProjects.find(p => p.id === selectedProject.id);
         if (updated) setSelectedProject(updated);
         
-        alert('✅ Synced from Jira');
+        console.log('✅ Synced from Jira:', item.jira.issueKey);
       }
     } catch (error) {
-      alert('Error syncing from Jira');
+      console.error('Error syncing from Jira:', error);
     }
   };
   
@@ -1098,23 +1098,57 @@ const ProjectManager = () => {
             <span style={{ fontSize: '18px' }}>{getItemIcon(item.type)}</span>
             
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 'bold' }}>
-                {item.name}
+              <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span>{item.name}</span>
                 {isOverdue(item) && (
-                  <span style={{ marginLeft: '8px', fontSize: '12px', color: '#dc2626' }}>
-                    ({getDaysOverdue(item)} days overdue)
+                  <span style={{ 
+                    padding: '2px 6px', 
+                    fontSize: '11px', 
+                    backgroundColor: '#fee2e2', 
+                    color: '#dc2626',
+                    borderRadius: '4px',
+                    fontWeight: 'bold'
+                  }}>
+                    {getDaysOverdue(item)} days overdue
                   </span>
                 )}
-                {item.jira && (
-                  <a 
-                    href={item.jira.issueUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    style={{ marginLeft: '8px', color: '#9333ea', fontSize: '12px' }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {item.jira.issueKey}
-                  </a>
+                {item.jira ? (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '2px 8px',
+                    backgroundColor: '#f3e8ff',
+                    color: '#7c3aed',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    border: '1px solid #c084fc'
+                  }}>
+                    <ExternalLink size={12} />
+                    <a 
+                      href={item.jira.issueUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      style={{ color: '#7c3aed', textDecoration: 'none' }}
+                      onClick={(e) => e.stopPropagation()}
+                      title="Open in Jira"
+                    >
+                      {item.jira.issueKey}
+                    </a>
+                  </span>
+                ) : (
+                  <span style={{
+                    padding: '2px 8px',
+                    backgroundColor: '#f3f4f6',
+                    color: '#6b7280',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    border: '1px solid #d1d5db'
+                  }}>
+                    Not in Jira
+                  </span>
                 )}
               </div>
               <div style={{ fontSize: '12px', color: '#6b7280' }}>
@@ -1348,8 +1382,17 @@ const ProjectManager = () => {
                 {project.name}
               </h3>
               <p style={{ color: '#6b7280', marginBottom: '12px' }}>{project.description}</p>
-              <div style={{ display: 'flex', gap: '16px', fontSize: '14px', color: '#6b7280' }}>
+              <div style={{ display: 'flex', gap: '16px', fontSize: '14px', color: '#6b7280', flexWrap: 'wrap' }}>
                 <span>{project.items.length} items</span>
+                <span>
+                  {project.items.filter(i => i.jira).length > 0 ? (
+                    <span style={{ color: '#7c3aed', fontWeight: 'bold' }}>
+                      🔗 {project.items.filter(i => i.jira).length} in Jira
+                    </span>
+                  ) : (
+                    <span style={{ color: '#9ca3af' }}>No Jira items</span>
+                  )}
+                </span>
                 <span>Start: {new Date(project.startDate).toLocaleDateString()}</span>
                 <span>End: {new Date(project.endDate).toLocaleDateString()}</span>
               </div>
