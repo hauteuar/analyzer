@@ -235,36 +235,81 @@ app.post('/api/jira/get-epics', async (req, res) => {
   const { jiraConfig } = req.body;
   
   try {
-    const jql = `project = ${jiraConfig.defaultProject} AND issuetype = Epic ORDER BY created DESC`;
+    // Try Greenhopper API first (Jira Agile / BofA Jira 3)
+    let response;
+    let epics = [];
     
-    const response = await axios.get(
-      `${jiraConfig.url}/rest/api/2/search`,
-      {
-        params: {
-          jql: jql,
-          maxResults: 50,
-          fields: 'summary,status,priority,assignee,created,updated'
-        },
-        headers: {
-          'Authorization': `Bearer ${jiraConfig.apiToken}`,
-          'Accept': 'application/json'
+    try {
+      // Greenhopper API endpoint
+      response = await axios.get(
+        `${jiraConfig.url}/rest/greenhopper/1.0/epics`,
+        {
+          params: {
+            searchQuery: '',
+            projectKey: jiraConfig.defaultProject,
+            maxResults: 100,
+            hideDone: false
+          },
+          headers: {
+            'Authorization': `Bearer ${jiraConfig.apiToken}`,
+            'Accept': 'application/json'
+          }
         }
+      );
+      
+      // Greenhopper API response format
+      if (response.data.epicLists) {
+        const allEpics = [];
+        response.data.epicLists.forEach(list => {
+          if (list.epicNames) {
+            list.epicNames.forEach(epic => {
+              allEpics.push({
+                key: epic.key,
+                id: epic.epicId || epic.key,
+                name: epic.name,
+                done: epic.isDone || false
+              });
+            });
+          }
+        });
+        epics = allEpics;
       }
-    );
+    } catch (greenhopperError) {
+      console.log('Greenhopper API failed, trying standard Jira API v2...');
+      
+      // Fallback to standard Jira API v2
+      const jql = `project = ${jiraConfig.defaultProject} AND issuetype = Epic ORDER BY created DESC`;
+      
+      response = await axios.get(
+        `${jiraConfig.url}/rest/api/2/search`,
+        {
+          params: {
+            jql: jql,
+            maxResults: 50,
+            fields: 'summary,status,priority,assignee,created,updated'
+          },
+          headers: {
+            'Authorization': `Bearer ${jiraConfig.apiToken}`,
+            'Accept': 'application/json'
+          }
+        }
+      );
 
-    const epics = response.data.issues.map(issue => ({
-      key: issue.key,
-      id: issue.id,
-      name: issue.fields.summary,
-      status: issue.fields.status.name,
-      assignee: issue.fields.assignee?.displayName || 'Unassigned',
-      created: issue.fields.created,
-      hasChildren: false
-    }));
+      epics = response.data.issues.map(issue => ({
+        key: issue.key,
+        id: issue.id,
+        name: issue.fields.summary,
+        status: issue.fields.status.name,
+        assignee: issue.fields.assignee?.displayName || 'Unassigned',
+        created: issue.fields.created,
+        hasChildren: false
+      }));
+    }
 
     res.json({ epics });
   } catch (error) {
     console.error('Error getting epics from Jira:', error.message);
+    console.error('Error details:', error.response?.data);
     res.status(400).json({ 
       error: error.response?.data?.message || error.message 
     });
