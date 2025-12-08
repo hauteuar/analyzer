@@ -156,57 +156,8 @@ app.post('/api/jira/test-connection', async (req, res) => {
   }
 });
 
-app.post('/api/jira/create-issue', async (req, res) => {
-  const { jiraConfig, item } = req.body;
-  
-  try {
-    const issueData = {
-      fields: {
-        project: {
-          key: jiraConfig.defaultProject
-        },
-        summary: item.name,
-        description: `Created from Project Manager Pro\n\nPriority: ${item.priority}\nDue Date: ${item.duedate}`,
-        issuetype: {
-          name: item.type
-        },
-        priority: {
-          name: item.priority
-        }
-      }
-    };
-
-    if (item.duedate) {
-      issueData.fields.duedate = item.duedate;
-    }
-
-    const response = await axios.post(
-      `${jiraConfig.url}/rest/api/2/issue`,
-      issueData,
-      {
-        headers: {
-          'Authorization': `Bearer ${jiraConfig.apiToken}`,
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    res.json({
-      key: response.data.key,
-      id: response.data.id,
-      self: response.data.self
-    });
-  } catch (error) {
-    console.error('Error creating Jira issue:', error.message);
-    res.status(400).json({ 
-      error: error.response?.data?.errors || error.message 
-    });
-  }
-});
-
 // Create Jira issue
-app.post('/api/jira/create-issue-1', async (req, res) => {
+app.post('/api/jira/create-issue', async (req, res) => {
   const { jiraConfig, item } = req.body;
   
   try {
@@ -363,7 +314,7 @@ app.post('/api/jira/create-issue-1', async (req, res) => {
 
 // Get epics from Jira for selective import
 app.post('/api/jira/get-epics', async (req, res) => {
-  const { jiraConfig } = req.body;
+  const { jiraConfig, searchQuery = '' } = req.body;
   
   try {
     // Try Greenhopper API first (Jira Agile / BofA Jira 3)
@@ -371,14 +322,14 @@ app.post('/api/jira/get-epics', async (req, res) => {
     let epics = [];
     
     try {
-      // Greenhopper API endpoint
+      // Greenhopper API endpoint with search
       response = await axios.get(
         `${jiraConfig.url}/rest/greenhopper/1.0/epics`,
         {
           params: {
-            searchQuery: '',
+            searchQuery: searchQuery,  // Search query for server-side filtering
             projectKey: jiraConfig.defaultProject,
-            maxResults: 100,
+            maxResults: 1000,  // Increased to get more results
             hideDone: false
           },
           headers: {
@@ -398,25 +349,34 @@ app.post('/api/jira/get-epics', async (req, res) => {
                 key: epic.key,
                 id: epic.epicId || epic.key,
                 name: epic.name,
-                done: epic.isDone || false
+                done: epic.isDone || false,
+                created: epic.created || new Date().toISOString() // Use epic created date if available
               });
             });
           }
         });
-        epics = allEpics;
+        // Sort by created date, newest first
+        epics = allEpics.sort((a, b) => new Date(b.created) - new Date(a.created));
       }
     } catch (greenhopperError) {
       console.log('Greenhopper API failed, trying standard Jira API v2...');
       
-      // Fallback to standard Jira API v2
-      const jql = `project = ${jiraConfig.defaultProject} AND issuetype = Epic ORDER BY created DESC`;
+      // Fallback to standard Jira API v2 with JQL search
+      let jql = `project = ${jiraConfig.defaultProject} AND issuetype = Epic`;
+      
+      // Add search filter to JQL if provided
+      if (searchQuery && searchQuery.trim()) {
+        jql += ` AND (summary ~ "${searchQuery}" OR key ~ "${searchQuery}")`;
+      }
+      
+      jql += ` ORDER BY created DESC`;
       
       response = await axios.get(
         `${jiraConfig.url}/rest/api/2/search`,
         {
           params: {
             jql: jql,
-            maxResults: 50,
+            maxResults: 1000,  // Increased to get more results
             fields: 'summary,status,priority,assignee,created,updated'
           },
           headers: {
@@ -440,6 +400,85 @@ app.post('/api/jira/get-epics', async (req, res) => {
     res.json({ epics });
   } catch (error) {
     console.error('Error getting epics from Jira:', error.message);
+    console.error('Error details:', error.response?.data);
+    res.status(400).json({ 
+      error: error.response?.data?.message || error.message 
+    });
+  }
+});
+
+// Get stories by epic from Jira
+app.post('/api/jira/get-stories-by-epic', async (req, res) => {
+  const { jiraConfig, epicKey } = req.body;
+  
+  try {
+    let stories = [];
+    
+    // Try Greenhopper custom field first (BofA Jira)
+    try {
+      const jql = `cf[10014] = ${epicKey} AND issuetype in (Story, Task) ORDER BY created DESC`;
+      
+      const response = await axios.get(
+        `${jiraConfig.url}/rest/api/2/search`,
+        {
+          params: {
+            jql: jql,
+            maxResults: 1000,
+            fields: 'summary,status,priority,assignee,created,updated,issuetype'
+          },
+          headers: {
+            'Authorization': `Bearer ${jiraConfig.apiToken}`,
+            'Accept': 'application/json'
+          }
+        }
+      );
+      
+      stories = response.data.issues.map(issue => ({
+        key: issue.key,
+        id: issue.id,
+        name: issue.fields.summary,
+        type: issue.fields.issuetype.name.toLowerCase(),
+        status: issue.fields.status.name,
+        assignee: issue.fields.assignee?.displayName || 'Unassigned',
+        created: issue.fields.created,
+        updated: issue.fields.updated
+      }));
+    } catch (greenhopperError) {
+      console.log('Greenhopper custom field failed, trying standard Epic Link...');
+      
+      // Fallback to standard Epic Link field
+      const jql = `"Epic Link" = ${epicKey} AND issuetype in (Story, Task) ORDER BY created DESC`;
+      
+      const response = await axios.get(
+        `${jiraConfig.url}/rest/api/2/search`,
+        {
+          params: {
+            jql: jql,
+            maxResults: 1000,
+            fields: 'summary,status,priority,assignee,created,updated,issuetype'
+          },
+          headers: {
+            'Authorization': `Bearer ${jiraConfig.apiToken}`,
+            'Accept': 'application/json'
+          }
+        }
+      );
+      
+      stories = response.data.issues.map(issue => ({
+        key: issue.key,
+        id: issue.id,
+        name: issue.fields.summary,
+        type: issue.fields.issuetype.name.toLowerCase(),
+        status: issue.fields.status.name,
+        assignee: issue.fields.assignee?.displayName || 'Unassigned',
+        created: issue.fields.created,
+        updated: issue.fields.updated
+      }));
+    }
+    
+    res.json({ stories, epicKey });
+  } catch (error) {
+    console.error('Error getting stories from Jira:', error.message);
     console.error('Error details:', error.response?.data);
     res.status(400).json({ 
       error: error.response?.data?.message || error.message 

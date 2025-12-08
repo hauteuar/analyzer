@@ -121,6 +121,10 @@ const ProjectManager = () => {
   const [showItemDetailsModal, setShowItemDetailsModal] = useState(false);
   const [showEditItemModal, setShowEditItemModal] = useState(false);
   const [showEpicSelectorModal, setShowEpicSelectorModal] = useState(false);
+  const [showStoryImportModal, setShowStoryImportModal] = useState(false);
+  const [storyImportEpicFilter, setStoryImportEpicFilter] = useState('');
+  const [availableStories, setAvailableStories] = useState([]);
+  const [selectedStories, setSelectedStories] = useState([]);
   const [epicSearchQuery, setEpicSearchQuery] = useState('');
   const [showExportModal, setShowExportModal] = useState(false);
   
@@ -131,10 +135,14 @@ const ProjectManager = () => {
   const [selectedEpics, setSelectedEpics] = useState([]);
   const [projectEpics, setProjectEpics] = useState([]); // Epics from current project
   const [selectedJiraEpic, setSelectedJiraEpic] = useState(''); // Selected epic for linking
+  const [epicDropdownSearch, setEpicDropdownSearch] = useState('');
+  const [showEpicDropdown, setShowEpicDropdown] = useState(false);
   
   // Calendar & Timeline
   const [calendarView, setCalendarView] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date());
+  const [calendarEpicFilter, setCalendarEpicFilter] = useState(''); // Filter calendar by epic
+  const [hierarchyAssigneeFilter, setHierarchyAssigneeFilter] = useState(''); // Filter hierarchy by assignee
   const [holidays, setHolidays] = useState([]);
   
   // Filters
@@ -419,29 +427,6 @@ const ProjectManager = () => {
     }
   };
   
-  const loadEpicsFromJira = async () => {
-    if (!jiraConfig.connected) {
-      alert('Please connect to Jira first');
-      return;
-    }
-    
-    try {
-      const response = await fetch(`${backendUrl}/jira/get-epics`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jiraConfig })
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableEpics(data.epics);
-        setSelectedEpics([]);
-        setShowEpicSelectorModal(true);
-      }
-    } catch (error) {
-      alert('Error loading epics from Jira');
-    }
-  };
   
   const loadProjectEpics = async () => {
     if (!selectedProject) return;
@@ -502,7 +487,178 @@ const ProjectManager = () => {
     }
   };
   
+  const loadEpicsFromJira = async (searchQuery = '') => {
+    if (!jiraConfig.connected) {
+      alert('Please connect to Jira first');
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${backendUrl}/jira/get-epics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jiraConfig, searchQuery })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableEpics(data.epics);
+        if (!searchQuery) {
+          // Only reset selection when doing initial load
+          setSelectedEpics([]);
+          setShowEpicSelectorModal(true);
+        }
+      }
+    } catch (error) {
+      alert('Error loading epics from Jira');
+    }
+  };
   
+  const loadStoriesFromJira = async (epicKey = '') => {
+    if (!jiraConfig.connected) {
+      alert('Please connect to Jira first');
+      return;
+    }
+    
+    if (!epicKey) {
+      alert('Please select an epic first');
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${backendUrl}/jira/get-stories-by-epic`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jiraConfig, epicKey })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableStories(data.stories);
+        setSelectedStories([]);
+      } else {
+        alert('Error loading stories from Jira');
+      }
+    } catch (error) {
+      console.error('Error loading stories:', error);
+      alert('Error loading stories from Jira');
+    }
+  };
+  
+  const openStoryImportModal = async () => {
+    if (!jiraConfig.connected) {
+      alert('Please connect to Jira first');
+      return;
+    }
+    
+    // Load epics for the filter dropdown
+    try {
+      const response = await fetch(`${backendUrl}/jira/get-epics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jiraConfig, searchQuery: '' })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableEpics(data.epics);
+        setShowStoryImportModal(true);
+        setAvailableStories([]);
+        setStoryImportEpicFilter('');
+      }
+    } catch (error) {
+      alert('Error loading epics from Jira');
+    }
+  };
+  
+  const importSelectedStories = async () => {
+    if (selectedStories.length === 0) {
+      alert('Please select at least one story');
+      return;
+    }
+    
+    if (!storyImportEpicFilter) {
+      alert('Please select an epic first');
+      return;
+    }
+    
+    try {
+      // Find the epic in the current project to link stories to it
+      const epicInProject = selectedProject.items.find(
+        item => item.jira && item.jira.issueKey === storyImportEpicFilter
+      );
+      
+      if (!epicInProject) {
+        alert(`Epic ${storyImportEpicFilter} not found in project. Please import the epic first.`);
+        return;
+      }
+      
+      const response = await fetch(`${backendUrl}/jira/import-epics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jiraConfig,
+          epicKeys: selectedStories.map(s => s.key)
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to import stories');
+      }
+      
+      const data = await response.json();
+      
+      // Process imported items and link to epic
+      const processedItems = [];
+      data.items.forEach(epic => {
+        // For stories, add them under the epic
+        if (epic.type === 'story' || epic.type === 'task') {
+          const newItem = {
+            ...epic,
+            id: Date.now() + Math.random(),
+            parentId: epicInProject.id,
+            level: 2,
+            children: epic.children || []
+          };
+          processedItems.push(newItem);
+          
+          // Process children (tasks/subtasks)
+          if (epic.children && epic.children.length > 0) {
+            epic.children.forEach(child => {
+              processedItems.push({
+                ...child,
+                id: Date.now() + Math.random(),
+                parentId: newItem.id,
+                level: 3
+              });
+            });
+          }
+        }
+      });
+      
+      const updatedProjects = projects.map(p => {
+        if (p.id === selectedProject.id) {
+          return {
+            ...p,
+            items: [...p.items, ...processedItems]
+          };
+        }
+        return p;
+      });
+      
+      setProjects(updatedProjects);
+      setSelectedProject({
+        ...selectedProject,
+        items: [...selectedProject.items, ...processedItems]
+      });
+      
+      setShowStoryImportModal(false);
+      alert(`✅ Imported ${processedItems.length} item(s) under ${epicInProject.name}`);
+    } catch (error) {
+      console.error('Error importing stories:', error);
+      alert('Error importing stories from Jira');
+    }
+  };
   
   const importSelectedEpics = async () => {
     if (selectedEpics.length === 0) {
@@ -962,69 +1118,267 @@ const ProjectManager = () => {
       return;
     }
     
-    const XLSX = window.XLSX;
-    const worksheet = XLSX.utils.json_to_sheet(
-      selectedProject.items.map(item => ({
-        Name: item.name,
-        Type: item.type,
-        Status: item.status,
-        Priority: item.priority,
-        Assignee: item.assignee,
-        'Start Date': item.startDate,
-        'End Date': item.endDate,
-        'Estimated Hours': item.estimatedHours,
-        'Actual Hours': item.actualHours,
-        'Jira Key': item.jira?.issueKey || ''
-      }))
-    );
-    
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Tasks');
-    XLSX.writeFile(workbook, `${selectedProject.name}_export.xlsx`);
+    try {
+      if (!window.XLSX) {
+        alert('❌ Excel library not loaded. Please refresh the page.');
+        return;
+      }
+      
+      const XLSX = window.XLSX;
+      
+      if (selectedProject.items.length === 0) {
+        alert('⚠️ No items to export');
+        return;
+      }
+      
+      const worksheet = XLSX.utils.json_to_sheet(
+        selectedProject.items.map(item => ({
+          Name: item.name,
+          Type: item.type,
+          Status: item.status,
+          Priority: item.priority,
+          Assignee: item.assignee,
+          'Start Date': item.startDate,
+          'End Date': item.endDate,
+          'Estimated Hours': item.estimatedHours,
+          'Actual Hours': item.actualHours,
+          'Jira Key': item.jira?.issueKey || '',
+          'Parent Type': item.parentId ? selectedProject.items.find(i => i.id === item.parentId)?.type : ''
+        }))
+      );
+      
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Tasks');
+      XLSX.writeFile(workbook, `${selectedProject.name.replace(/[^a-z0-9]/gi, '_')}_export.xlsx`);
+      
+      console.log('✅ Export successful');
+    } catch (error) {
+      console.error('Export error:', error);
+      alert(`❌ Export failed: ${error.message}`);
+    }
+  };
+  
+  const downloadTemplate = () => {
+    try {
+      if (!window.XLSX) {
+        alert('❌ Excel library not loaded. Please refresh the page.');
+        return;
+      }
+      
+      const XLSX = window.XLSX;
+      
+      // Create template with sample data
+      const templateData = [
+        {
+          Name: 'Example Epic',
+          Type: 'epic',
+          Status: 'pending',
+          Priority: 'high',
+          Assignee: 'John Doe',
+          'Start Date': '2024-01-01',
+          'End Date': '2024-03-31',
+          'Estimated Hours': 160,
+          'Actual Hours': 0,
+          'Jira Key': '',
+          'Parent Type': ''
+        },
+        {
+          Name: 'Example Story',
+          Type: 'story',
+          Status: 'in-progress',
+          Priority: 'medium',
+          Assignee: 'Jane Smith',
+          'Start Date': '2024-01-01',
+          'End Date': '2024-01-31',
+          'Estimated Hours': 40,
+          'Actual Hours': 10,
+          'Jira Key': '',
+          'Parent Type': 'epic'
+        },
+        {
+          Name: 'Example Task',
+          Type: 'task',
+          Status: 'review',
+          Priority: 'low',
+          Assignee: 'Bob Jones',
+          'Start Date': '2024-01-01',
+          'End Date': '2024-01-15',
+          'Estimated Hours': 8,
+          'Actual Hours': 8,
+          'Jira Key': '',
+          'Parent Type': 'story'
+        }
+      ];
+      
+      const worksheet = XLSX.utils.json_to_sheet(templateData);
+      
+      // Add column widths
+      worksheet['!cols'] = [
+        { wch: 30 }, // Name
+        { wch: 10 }, // Type
+        { wch: 12 }, // Status
+        { wch: 10 }, // Priority
+        { wch: 15 }, // Assignee
+        { wch: 12 }, // Start Date
+        { wch: 12 }, // End Date
+        { wch: 15 }, // Estimated Hours
+        { wch: 15 }, // Actual Hours
+        { wch: 12 }, // Jira Key
+        { wch: 12 }  // Parent Type
+      ];
+      
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Template');
+      
+      // Add instructions sheet
+      const instructions = [
+        { Instruction: 'HOW TO USE THIS TEMPLATE' },
+        { Instruction: '' },
+        { Instruction: '1. Fill in your tasks in the Template sheet' },
+        { Instruction: '2. Required columns: Name, Type' },
+        { Instruction: '3. Type must be: epic, story, task, or subtask' },
+        { Instruction: '4. Status must be: pending, in-progress, or review' },
+        { Instruction: '5. Priority must be: low, medium, or high' },
+        { Instruction: '6. Dates format: YYYY-MM-DD (e.g., 2024-01-15)' },
+        { Instruction: '7. Parent Type: Leave blank for top-level, or specify epic/story' },
+        { Instruction: '8. Save and import into Project Manager Pro' },
+        { Instruction: '' },
+        { Instruction: 'COLUMN DESCRIPTIONS:' },
+        { Instruction: 'Name: Task name (required)' },
+        { Instruction: 'Type: epic/story/task/subtask (required)' },
+        { Instruction: 'Status: pending/in-progress/review' },
+        { Instruction: 'Priority: low/medium/high' },
+        { Instruction: 'Assignee: Person assigned to task' },
+        { Instruction: 'Start Date: Task start date' },
+        { Instruction: 'End Date: Task end date' },
+        { Instruction: 'Estimated Hours: Time estimate' },
+        { Instruction: 'Actual Hours: Time spent' },
+        { Instruction: 'Jira Key: Leave blank (filled after Jira sync)' },
+        { Instruction: 'Parent Type: epic/story (for hierarchy)' }
+      ];
+      
+      const instructionsSheet = XLSX.utils.json_to_sheet(instructions);
+      instructionsSheet['!cols'] = [{ wch: 80 }];
+      XLSX.utils.book_append_sheet(workbook, instructionsSheet, 'Instructions');
+      
+      XLSX.writeFile(workbook, 'ProjectManager_Import_Template.xlsx');
+      
+      console.log('✅ Template downloaded');
+    } catch (error) {
+      console.error('Template download error:', error);
+      alert(`❌ Template download failed: ${error.message}`);
+    }
   };
   
   const importFromExcel = (event) => {
     const file = event.target.files[0];
     if (!file) return;
     
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const XLSX = window.XLSX;
-      const data = new Uint8Array(e.target.result);
-      const workbook = XLSX.read(data, { type: 'array' });
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet);
+    try {
+      if (!window.XLSX) {
+        alert('❌ Excel library not loaded. Please refresh the page.');
+        return;
+      }
       
-      const importedItems = jsonData.map((row, index) => ({
-        id: Date.now() + index,
-        name: row.Name || 'Unnamed',
-        type: row.Type || 'task',
-        level: row.Type === 'epic' ? 1 : row.Type === 'story' ? 2 : 3,
-        parentId: null,
-        children: [],
-        status: row.Status || 'pending',
-        priority: row.Priority || 'medium',
-        startDate: row['Start Date'] || new Date().toISOString().split('T')[0],
-        endDate: row['End Date'] || new Date().toISOString().split('T')[0],
-        assignee: row.Assignee || '',
-        estimatedHours: parseInt(row['Estimated Hours']) || 0,
-        actualHours: parseInt(row['Actual Hours']) || 0,
-        comments: [],
-        jira: null
-      }));
-      
-      const updatedProjects = projects.map(p => {
-        if (p.id === selectedProject.id) {
-          return { ...p, items: [...p.items, ...importedItems] };
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const XLSX = window.XLSX;
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          
+          if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+            alert('❌ No sheets found in Excel file');
+            return;
+          }
+          
+          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+          
+          if (jsonData.length === 0) {
+            alert('❌ No data found in Excel file');
+            return;
+          }
+          
+          // Validate required columns
+          const firstRow = jsonData[0];
+          if (!firstRow.Name || !firstRow.Type) {
+            alert('❌ Missing required columns: Name and Type');
+            return;
+          }
+          
+          const importedItems = jsonData.map((row, index) => {
+            // Validate type
+            const validTypes = ['epic', 'story', 'task', 'subtask'];
+            const type = row.Type?.toLowerCase();
+            if (!validTypes.includes(type)) {
+              console.warn(`Invalid type "${row.Type}" for row ${index + 1}, defaulting to "task"`);
+            }
+            
+            // Validate status
+            const validStatuses = ['pending', 'in-progress', 'review'];
+            const status = row.Status?.toLowerCase();
+            if (status && !validStatuses.includes(status)) {
+              console.warn(`Invalid status "${row.Status}" for row ${index + 1}, defaulting to "pending"`);
+            }
+            
+            // Validate priority
+            const validPriorities = ['low', 'medium', 'high'];
+            const priority = row.Priority?.toLowerCase();
+            if (priority && !validPriorities.includes(priority)) {
+              console.warn(`Invalid priority "${row.Priority}" for row ${index + 1}, defaulting to "medium"`);
+            }
+            
+            return {
+              id: Date.now() + index,
+              name: row.Name || 'Unnamed',
+              type: validTypes.includes(type) ? type : 'task',
+              level: type === 'epic' ? 1 : type === 'story' ? 2 : type === 'task' ? 3 : 4,
+              parentId: null,
+              children: [],
+              status: validStatuses.includes(status) ? status : 'pending',
+              priority: validPriorities.includes(priority) ? priority : 'medium',
+              startDate: row['Start Date'] || new Date().toISOString().split('T')[0],
+              endDate: row['End Date'] || new Date().toISOString().split('T')[0],
+              assignee: row.Assignee || '',
+              estimatedHours: parseInt(row['Estimated Hours']) || 0,
+              actualHours: parseInt(row['Actual Hours']) || 0,
+              comments: [],
+              jira: null
+            };
+          });
+          
+          const updatedProjects = projects.map(p => {
+            if (p.id === selectedProject.id) {
+              return { ...p, items: [...p.items, ...importedItems] };
+            }
+            return p;
+          });
+          
+          setProjects(updatedProjects);
+          setSelectedProject({ ...selectedProject, items: [...selectedProject.items, ...importedItems] });
+          
+          alert(`✅ Successfully imported ${importedItems.length} items!`);
+          
+          // Reset file input
+          event.target.value = '';
+        } catch (error) {
+          console.error('Import processing error:', error);
+          alert(`❌ Failed to process file: ${error.message}`);
         }
-        return p;
-      });
+      };
       
-      setProjects(updatedProjects);
-      alert(`✅ Imported ${importedItems.length} items`);
-    };
-    reader.readAsArrayBuffer(file);
+      reader.onerror = () => {
+        alert('❌ Failed to read file');
+      };
+      
+      reader.readAsArrayBuffer(file);
+    } catch (error) {
+      console.error('Import error:', error);
+      alert(`❌ Import failed: ${error.message}`);
+    }
   };
+
   
   // Utility Functions
   const getItemIcon = (type) => {
@@ -1324,78 +1678,84 @@ const ProjectManager = () => {
     );
   };
   
-  const renderDashboard = () => {
-    const stats = getStatusCounts();
+  // Progress Chart - Overall completion percentage
+  const renderProgressChart = () => {
+    if (!selectedProject) return null;
+    
+    const items = selectedProject.items;
+    const total = items.length;
+    const completed = items.filter(i => i.status === 'review').length;
+    const inProgress = items.filter(i => i.status === 'in-progress').length;
+    const pending = items.filter(i => i.status === 'pending').length;
+    const completionPercent = total > 0 ? Math.round((completed / total) * 100) : 0;
     
     return (
-      <div>
-        <div className="grid grid-4" style={{ marginBottom: '24px' }}>
-          <div className="stat-card blue">
-            <div style={{ fontSize: '12px', fontWeight: '600', marginBottom: '8px', color: '#2563eb' }}>
-              TOTAL PROJECTS
-            </div>
-            <div style={{ fontSize: '30px', fontWeight: 'bold', color: '#1e40af' }}>
-              {stats.total}
-            </div>
-          </div>
-          
-          <div className="stat-card green">
-            <div style={{ fontSize: '12px', fontWeight: '600', marginBottom: '8px', color: '#16a34a' }}>
-              IN REVIEW
-            </div>
-            <div style={{ fontSize: '30px', fontWeight: 'bold', color: '#166534' }}>
-              {stats.review}
-            </div>
-          </div>
-          
-          <div className="stat-card yellow">
-            <div style={{ fontSize: '12px', fontWeight: '600', marginBottom: '8px', color: '#ca8a04' }}>
-              IN PROGRESS
-            </div>
-            <div style={{ fontSize: '30px', fontWeight: 'bold', color: '#a16207' }}>
-              {stats.inProgress}
-            </div>
-          </div>
-          
-          <div className="stat-card red">
-            <div style={{ fontSize: '12px', fontWeight: '600', marginBottom: '8px', color: '#dc2626' }}>
-              OVERDUE
-            </div>
-            <div style={{ fontSize: '30px', fontWeight: 'bold', color: '#991b1b' }}>
-              {stats.overdue}
+      <div className="chart-container">
+        <h3 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '24px', textAlign: 'center' }}>Project Completion Progress</h3>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '32px' }}>
+          <div style={{ position: 'relative', width: '200px', height: '200px' }}>
+            <svg width="200" height="200" style={{ transform: 'rotate(-90deg)' }}>
+              <circle cx="100" cy="100" r="80" fill="none" stroke="#e5e7eb" strokeWidth="20" />
+              <circle cx="100" cy="100" r="80" fill="none" stroke={completionPercent > 50 ? '#2563eb' : '#eab308'} strokeWidth="20"
+                strokeDasharray={`${(completionPercent / 100) * 502.4} 502.4`} strokeLinecap="round" />
+            </svg>
+            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' }}>
+              <div style={{ fontSize: '48px', fontWeight: 'bold' }}>{completionPercent}%</div>
+              <div style={{ fontSize: '14px', color: '#6b7280' }}>Complete</div>
             </div>
           </div>
         </div>
-        
-        <div className="card">
-          <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Active Projects</h2>
-          {projects.map(project => (
-            <div 
-              key={project.id}
-              className="card"
-              style={{ marginBottom: '16px', cursor: 'pointer' }}
-              onClick={() => {
-                setSelectedProject(project);
-                setActiveView('hierarchy');
-              }}
-            >
-              <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
-                {project.name}
-              </h3>
-              <p style={{ color: '#6b7280', marginBottom: '12px' }}>{project.description}</p>
-              <div style={{ display: 'flex', gap: '16px', fontSize: '14px', color: '#6b7280', flexWrap: 'wrap' }}>
-                <span>{project.items.length} items</span>
-                <span>
-                  {project.items.filter(i => i.jira).length > 0 ? (
-                    <span style={{ color: '#7c3aed', fontWeight: 'bold' }}>
-                      🔗 {project.items.filter(i => i.jira).length} in Jira
-                    </span>
-                  ) : (
-                    <span style={{ color: '#9ca3af' }}>No Jira items</span>
-                  )}
-                </span>
-                <span>Start: {new Date(project.startDate).toLocaleDateString()}</span>
-                <span>End: {new Date(project.endDate).toLocaleDateString()}</span>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+          <div style={{ textAlign: 'center', padding: '16px', backgroundColor: '#f3f4f6', borderRadius: '8px' }}>
+            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>TOTAL</div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{total}</div>
+          </div>
+          <div style={{ textAlign: 'center', padding: '16px', backgroundColor: '#dcfce7', borderRadius: '8px' }}>
+            <div style={{ fontSize: '12px', color: '#166534', marginBottom: '4px' }}>COMPLETED</div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#16a34a' }}>{completed}</div>
+          </div>
+          <div style={{ textAlign: 'center', padding: '16px', backgroundColor: '#dbeafe', borderRadius: '8px' }}>
+            <div style={{ fontSize: '12px', color: '#1e40af', marginBottom: '4px' }}>IN PROGRESS</div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>{inProgress}</div>
+          </div>
+          <div style={{ textAlign: 'center', padding: '16px', backgroundColor: '#fef3c7', borderRadius: '8px' }}>
+            <div style={{ fontSize: '12px', color: '#92400e', marginBottom: '4px' }}>PENDING</div>
+            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#ca8a04' }}>{pending}</div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
+  const renderWorkloadChart = () => {
+    if (!selectedProject) return null;
+    const items = selectedProject.items;
+    const wMap = {};
+    items.forEach(item => {
+      const a = item.assignee || 'Unassigned';
+      if (!wMap[a]) wMap[a] = { total: 0, pending: 0, inProgress: 0, review: 0, hours: 0 };
+      wMap[a].total++; wMap[a].hours += item.estimatedHours || 0;
+      if (item.status === 'pending') wMap[a].pending++;
+      if (item.status === 'in-progress') wMap[a].inProgress++;
+      if (item.status === 'review') wMap[a].review++;
+    });
+    const wData = Object.entries(wMap).sort((a, b) => b[1].total - a[1].total);
+    
+    return (
+      <div className="chart-container">
+        <h3 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '24px' }}>Team Workload</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {wData.map(([a, d]) => (
+            <div key={a} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ width: '150px', fontSize: '14px', fontWeight: '600' }}>{a}</div>
+              <div style={{ flex: 1 }}><div style={{ display: 'flex', height: '32px', borderRadius: '4px', overflow: 'hidden', backgroundColor: '#f3f4f6' }}>
+                {d.review > 0 && <div style={{ width: `${(d.review/d.total)*100}%`, backgroundColor: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '12px', fontWeight: 'bold' }}>{d.review}</div>}
+                {d.inProgress > 0 && <div style={{ width: `${(d.inProgress/d.total)*100}%`, backgroundColor: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '12px', fontWeight: 'bold' }}>{d.inProgress}</div>}
+                {d.pending > 0 && <div style={{ width: `${(d.pending/d.total)*100}%`, backgroundColor: '#ca8a04', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '12px', fontWeight: 'bold' }}>{d.pending}</div>}
+              </div></div>
+              <div style={{ width: '120px', textAlign: 'right' }}>
+                <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{d.total} items</div>
+                <div style={{ fontSize: '12px', color: '#6b7280' }}>{d.hours}h</div>
               </div>
             </div>
           ))}
@@ -1404,8 +1764,221 @@ const ProjectManager = () => {
     );
   };
   
+  const renderEpicProgressChart = () => {
+    if (!selectedProject) return null;
+    const items = selectedProject.items;
+    const epics = items.filter(i => i.type === 'epic');
+    if (epics.length === 0) return (<div className="chart-container" style={{ textAlign: 'center', padding: '48px' }}>
+      <div style={{ fontSize: '48px' }}>🟣</div><h3>No Epics</h3><p style={{ color: '#6b7280' }}>Create epics to see progress</p></div>);
+    
+    return (<div className="chart-container"><h3 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '24px' }}>Epic Progress</h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        {epics.map(e => {
+          const c = items.filter(i => i.parentId === e.id || (items.find(x => x.id === i.parentId)?.parentId === e.id));
+          const t = c.length; const co = c.filter(i => i.status === 'review').length;
+          const ip = c.filter(i => i.status === 'in-progress').length; const p = c.filter(i => i.status === 'pending').length;
+          const pc = t > 0 ? Math.round((co/t)*100) : 0;
+          return (<div key={e.id} style={{ padding: '20px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>{e.jira && <span style={{ color: '#7c3aed', marginRight: '8px' }}>{e.jira.issueKey}</span>}{e.name}</div>
+              <div style={{ fontSize: '12px', color: '#6b7280' }}>{t} items • {e.assignee}</div></div>
+              <div style={{ textAlign: 'right' }}><div style={{ fontSize: '32px', fontWeight: 'bold', color: pc === 100 ? '#16a34a' : '#1f2937' }}>{pc}%</div></div>
+            </div>
+            <div style={{ height: '24px', display: 'flex', borderRadius: '6px', overflow: 'hidden', backgroundColor: '#e5e7eb' }}>
+              {co > 0 && <div style={{ width: `${(co/t)*100}%`, backgroundColor: '#16a34a' }} />}
+              {ip > 0 && <div style={{ width: `${(ip/t)*100}%`, backgroundColor: '#2563eb' }} />}
+              {p > 0 && <div style={{ width: `${(p/t)*100}%`, backgroundColor: '#ca8a04' }} />}
+            </div>
+            <div style={{ display: 'flex', gap: '16px', marginTop: '12px', fontSize: '12px' }}>
+              <span style={{ color: '#16a34a' }}>✓ {co}</span><span style={{ color: '#2563eb' }}>⟳ {ip}</span><span style={{ color: '#ca8a04' }}>○ {p}</span>
+            </div>
+          </div>);
+        })}
+      </div>
+    </div>);
+  };
+  
+  const renderDashboard = () => {
+    const stats = getStatusCounts();
+    
+    // Helper function to get project stats
+    const getProjectStats = (project) => {
+      const items = project.items;
+      return {
+        total: items.length,
+        pending: items.filter(i => i.status === 'pending').length,
+        inProgress: items.filter(i => i.status === 'in-progress').length,
+        review: items.filter(i => i.status === 'review').length,
+        overdue: items.filter(i => isOverdue(i)).length
+      };
+    };
+    
+    return (
+      <div>
+        {/* Overall Stats - Smaller */}
+        <div className="grid grid-4" style={{ marginBottom: '24px' }}>
+          <div className="stat-card blue" style={{ padding: '12px' }}>
+            <div style={{ fontSize: '10px', fontWeight: '600', marginBottom: '4px', color: '#2563eb' }}>
+              TOTAL ITEMS
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1e40af' }}>
+              {stats.total}
+            </div>
+          </div>
+          
+          <div className="stat-card green" style={{ padding: '12px' }}>
+            <div style={{ fontSize: '10px', fontWeight: '600', marginBottom: '4px', color: '#16a34a' }}>
+              IN REVIEW
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#166534' }}>
+              {stats.review}
+            </div>
+          </div>
+          
+          <div className="stat-card yellow" style={{ padding: '12px' }}>
+            <div style={{ fontSize: '10px', fontWeight: '600', marginBottom: '4px', color: '#ca8a04' }}>
+              IN PROGRESS
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#a16207' }}>
+              {stats.inProgress}
+            </div>
+          </div>
+          
+          <div className="stat-card red" style={{ padding: '12px' }}>
+            <div style={{ fontSize: '10px', fontWeight: '600', marginBottom: '4px', color: '#dc2626' }}>
+              OVERDUE
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#991b1b' }}>
+              {stats.overdue}
+            </div>
+          </div>
+        </div>
+        
+        {/* Project List with Stats */}
+        <div className="card">
+          <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>Active Projects</h2>
+          {projects.map(project => {
+            const projectStats = getProjectStats(project);
+            return (
+              <div 
+                key={project.id}
+                className="card"
+                style={{ marginBottom: '16px', cursor: 'pointer' }}
+                onClick={() => {
+                  setSelectedProject(project);
+                  setActiveView('hierarchy');
+                }}
+              >
+                <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
+                  {project.name}
+                </h3>
+                <p style={{ color: '#6b7280', marginBottom: '12px' }}>{project.description}</p>
+                
+                {/* Project-Level Stats */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', marginBottom: '12px' }}>
+                  <div style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#dbeafe', 
+                    borderRadius: '6px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '9px', fontWeight: '600', color: '#1e40af', marginBottom: '2px' }}>
+                      TOTAL
+                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#1e40af' }}>
+                      {projectStats.total}
+                    </div>
+                  </div>
+                  
+                  <div style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#fef3c7', 
+                    borderRadius: '6px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '9px', fontWeight: '600', color: '#92400e', marginBottom: '2px' }}>
+                      PENDING
+                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#92400e' }}>
+                      {projectStats.pending}
+                    </div>
+                  </div>
+                  
+                  <div style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#fed7aa', 
+                    borderRadius: '6px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '9px', fontWeight: '600', color: '#9a3412', marginBottom: '2px' }}>
+                      PROGRESS
+                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#9a3412' }}>
+                      {projectStats.inProgress}
+                    </div>
+                  </div>
+                  
+                  <div style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#d1fae5', 
+                    borderRadius: '6px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '9px', fontWeight: '600', color: '#065f46', marginBottom: '2px' }}>
+                      REVIEW
+                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#065f46' }}>
+                      {projectStats.review}
+                    </div>
+                  </div>
+                  
+                  <div style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#fecaca', 
+                    borderRadius: '6px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '9px', fontWeight: '600', color: '#991b1b', marginBottom: '2px' }}>
+                      OVERDUE
+                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#991b1b' }}>
+                      {projectStats.overdue}
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Additional Info */}
+                <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#6b7280', flexWrap: 'wrap' }}>
+                  <span>
+                    {project.items.filter(i => i.jira).length > 0 ? (
+                      <span style={{ color: '#7c3aed', fontWeight: 'bold' }}>
+                        🔗 {project.items.filter(i => i.jira).length} in Jira
+                      </span>
+                    ) : (
+                      <span style={{ color: '#9ca3af' }}>No Jira items</span>
+                    )}
+                  </span>
+                  <span>Start: {new Date(project.startDate).toLocaleDateString()}</span>
+                  <span>End: {new Date(project.endDate).toLocaleDateString()}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  
   const renderHierarchy = () => {
     if (!selectedProject) return <div className="card">Select a project to view items</div>;
+    
+    // Get unique assignees
+    const uniqueAssignees = [...new Set(selectedProject.items.map(item => item.assignee))].filter(Boolean).sort();
+    
+    // Filter items by assignee
+    const filteredItems = hierarchyAssigneeFilter 
+      ? selectedProject.items.filter(item => item.assignee === hierarchyAssigneeFilter)
+      : selectedProject.items;
     
     return (
       <div>
@@ -1420,7 +1993,11 @@ const ProjectManager = () => {
                 <>
                   <button onClick={loadEpicsFromJira} className="btn btn-purple">
                     <Download size={20} />
-                    Import from Jira
+                    Import Epics
+                  </button>
+                  <button onClick={openStoryImportModal} className="btn btn-purple" title="Import stories from existing epics in Jira">
+                    <Download size={20} />
+                    Import Stories
                   </button>
                   <button 
                     onClick={syncAllFromJira} 
@@ -1435,6 +2012,10 @@ const ProjectManager = () => {
               <button onClick={exportToExcel} className="btn btn-success">
                 <Download size={20} />
                 Export
+              </button>
+              <button onClick={downloadTemplate} className="btn btn-outline" title="Download Excel template for importing tasks">
+                <Download size={20} />
+                Template
               </button>
               <label className="btn btn-secondary" style={{ cursor: 'pointer' }}>
                 <Upload size={20} />
@@ -1456,11 +2037,47 @@ const ProjectManager = () => {
             </div>
           </div>
           
-          {selectedProject.items.length > 0 ? (
-            renderHierarchyTree(selectedProject.items, null, 0)
+          {/* Assignee Filter */}
+          {uniqueAssignees.length > 0 && (
+            <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <label style={{ fontSize: '14px', fontWeight: '600', color: '#6b7280' }}>
+                Filter by Assignee:
+              </label>
+              <select
+                value={hierarchyAssigneeFilter}
+                onChange={(e) => setHierarchyAssigneeFilter(e.target.value)}
+                className="select"
+                style={{ minWidth: '200px' }}
+              >
+                <option value="">All Assignees ({selectedProject.items.length} items)</option>
+                {uniqueAssignees.map(assignee => (
+                  <option key={assignee} value={assignee}>
+                    {assignee} ({selectedProject.items.filter(i => i.assignee === assignee).length} items)
+                  </option>
+                ))}
+              </select>
+              {hierarchyAssigneeFilter && (
+                <button
+                  onClick={() => setHierarchyAssigneeFilter('')}
+                  className="icon-btn"
+                  title="Clear filter"
+                >
+                  ✕
+                </button>
+              )}
+              {hierarchyAssigneeFilter && (
+                <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                  Showing {filteredItems.length} item(s) for {hierarchyAssigneeFilter}
+                </span>
+              )}
+            </div>
+          )}
+          
+          {filteredItems.length > 0 ? (
+            renderHierarchyTree(filteredItems, null, 0)
           ) : (
             <div style={{ textAlign: 'center', padding: '48px', color: '#6b7280' }}>
-              No items yet. Click "Add Item" to create your first item.
+              {hierarchyAssigneeFilter ? `No items assigned to ${hierarchyAssigneeFilter}` : 'No items yet. Click "Add Item" to create your first item.'}
             </div>
           )}
         </div>
@@ -1682,6 +2299,9 @@ const ProjectManager = () => {
     const daysInMonth = lastDay.getDate();
     const startingDayOfWeek = firstDay.getDay();
     
+    // Get epics for filter dropdown
+    const projectEpics = selectedProject.items.filter(item => item.type === 'epic');
+    
     // Create calendar grid
     const calendarDays = [];
     
@@ -1712,11 +2332,33 @@ const ProjectManager = () => {
     const getItemsForDate = (date) => {
       if (!date) return [];
       const dateStr = date.toISOString().split('T')[0];
-      return selectedProject.items.filter(item => {
+      let items = selectedProject.items.filter(item => {
         const itemStart = item.startDate;
         const itemEnd = item.endDate;
         return dateStr >= itemStart && dateStr <= itemEnd;
       });
+      
+      // Filter by epic if selected
+      if (calendarEpicFilter) {
+        items = items.filter(item => {
+          // Show the epic itself
+          if (item.id === calendarEpicFilter) return true;
+          // Show children of the epic
+          return item.parentId === calendarEpicFilter || 
+                 hasParentEpic(item, calendarEpicFilter);
+        });
+      }
+      
+      return items;
+    };
+    
+    // Helper to check if item has parent epic
+    const hasParentEpic = (item, epicId) => {
+      if (!item.parentId) return false;
+      const parent = selectedProject.items.find(i => i.id === item.parentId);
+      if (!parent) return false;
+      if (parent.id === epicId) return true;
+      return hasParentEpic(parent, epicId);
     };
     
     const changeMonth = (delta) => {
@@ -1726,25 +2368,56 @@ const ProjectManager = () => {
     return (
       <div>
         <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-            <button onClick={() => changeMonth(-1)} className="btn btn-outline">
-              &larr; Previous
-            </button>
-            <h2 style={{ fontSize: '24px', fontWeight: 'bold' }}>
-              {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-            </h2>
-            <button onClick={() => changeMonth(1)} className="btn btn-outline">
-              Next &rarr;
-            </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button onClick={() => changeMonth(-1)} className="btn btn-outline">
+                &larr; Previous
+              </button>
+              <h2 style={{ fontSize: '20px', fontWeight: 'bold' }}>
+                {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+              </h2>
+              <button onClick={() => changeMonth(1)} className="btn btn-outline">
+                Next &rarr;
+              </button>
+            </div>
+            
+            {/* Epic Filter */}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <label style={{ fontSize: '12px', fontWeight: '600', color: '#6b7280' }}>
+                Filter by Epic:
+              </label>
+              <select
+                value={calendarEpicFilter}
+                onChange={(e) => setCalendarEpicFilter(e.target.value)}
+                className="select"
+                style={{ minWidth: '200px' }}
+              >
+                <option value="">All Items</option>
+                {projectEpics.map(epic => (
+                  <option key={epic.id} value={epic.id}>
+                    {epic.jira ? `${epic.jira.issueKey} - ` : ''}{epic.name}
+                  </option>
+                ))}
+              </select>
+              {calendarEpicFilter && (
+                <button
+                  onClick={() => setCalendarEpicFilter('')}
+                  className="icon-btn"
+                  title="Clear filter"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
           
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px' }}>
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
               <div key={day} style={{ 
-                padding: '8px', 
+                padding: '6px', 
                 textAlign: 'center', 
                 fontWeight: 'bold', 
-                fontSize: '12px',
+                fontSize: '11px',
                 color: '#6b7280',
                 backgroundColor: '#f9fafb'
               }}>
@@ -1754,24 +2427,24 @@ const ProjectManager = () => {
             
             {calendarDays.map((date, index) => {
               if (!date) {
-                return <div key={`empty-${index}`} style={{ minHeight: '100px', backgroundColor: '#f9fafb' }} />;
+                return <div key={`empty-${index}`} style={{ minHeight: '80px', backgroundColor: '#f9fafb' }} />;
               }
               
               const items = getItemsForDate(date);
               const dayClass = isToday(date) ? 'today' : isWeekend(date) ? 'weekend' : 'normal';
               
               return (
-                <div key={index} className={`calendar-day ${dayClass}`}>
-                  <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                <div key={index} className={`calendar-day ${dayClass}`} style={{ minHeight: '80px' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '2px', fontSize: '11px' }}>
                     {date.getDate()}
                   </div>
-                  <div style={{ fontSize: '10px' }}>
+                  <div style={{ fontSize: '9px' }}>
                     {items.slice(0, 3).map(item => (
                       <div 
                         key={item.id}
                         style={{
-                          padding: '2px 4px',
-                          marginBottom: '2px',
+                          padding: '1px 3px',
+                          marginBottom: '1px',
                           borderRadius: '2px',
                           backgroundColor: item.status === 'review' ? '#dcfce7' :
                                          item.status === 'in-progress' ? '#dbeafe' : '#f3f4f6',
@@ -1779,15 +2452,20 @@ const ProjectManager = () => {
                                 item.status === 'in-progress' ? '#1e40af' : '#374151',
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
-                          textOverflow: 'ellipsis'
+                          textOverflow: 'ellipsis',
+                          cursor: 'pointer'
                         }}
-                        title={item.name}
+                        title={`${item.name} (${item.assignee})`}
+                        onClick={() => {
+                          setSelectedItem(item);
+                          setShowItemDetailsModal(true);
+                        }}
                       >
-                        {getItemIcon(item.type)} {item.name}
+                        {getItemIcon(item.type)} {item.name.length > 15 ? item.name.substring(0, 15) + '...' : item.name}
                       </div>
                     ))}
                     {items.length > 3 && (
-                      <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '2px' }}>
+                      <div style={{ fontSize: '9px', color: '#6b7280', marginTop: '1px' }}>
                         +{items.length - 3} more
                       </div>
                     )}
@@ -1800,6 +2478,7 @@ const ProjectManager = () => {
       </div>
     );
   };
+       
   
   const renderTimeline = () => {
     if (!selectedProject) return <div className="card">Select a project to view timeline</div>;
@@ -1849,7 +2528,7 @@ const ProjectManager = () => {
             </div>
           </div>
           
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button 
               onClick={() => setSelectedChartType('gantt')}
               className={`btn ${selectedChartType === 'gantt' ? 'btn-primary' : 'btn-outline'}`}
@@ -1864,11 +2543,40 @@ const ProjectManager = () => {
               <TrendingUp size={16} />
               Burndown
             </button>
+            <button 
+              onClick={() => setSelectedChartType('progress')}
+              className={`btn ${selectedChartType === 'progress' ? 'btn-primary' : 'btn-outline'}`}
+            >
+              📊 Progress
+            </button>
+            <button 
+              onClick={() => setSelectedChartType('status')}
+              className={`btn ${selectedChartType === 'status' ? 'btn-primary' : 'btn-outline'}`}
+            >
+              🥧 Status
+            </button>
+            <button 
+              onClick={() => setSelectedChartType('workload')}
+              className={`btn ${selectedChartType === 'workload' ? 'btn-primary' : 'btn-outline'}`}
+            >
+              👥 Workload
+            </button>
+            <button 
+              onClick={() => setSelectedChartType('epic')}
+              className={`btn ${selectedChartType === 'epic' ? 'btn-primary' : 'btn-outline'}`}
+            >
+              🟣 Epic Progress
+            </button>
           </div>
         </div>
         
         <div className="card">
-          {selectedChartType === 'gantt' ? renderGanttChart() : renderBurndownChart()}
+          {selectedChartType === 'gantt' && renderGanttChart()}
+          {selectedChartType === 'burndown' && renderBurndownChart()}
+          {selectedChartType === 'progress' && renderProgressChart()}
+          {selectedChartType === 'status' && renderStatusChart()}
+          {selectedChartType === 'workload' && renderWorkloadChart()}
+          {selectedChartType === 'epic' && renderEpicProgressChart()}
         </div>
       </div>
     );
@@ -2359,31 +3067,192 @@ const ProjectManager = () => {
                         <div className="custom-field-label">
                           Link to Epic {newItem.type === 'story' ? '(Required for Stories)' : '(Optional)'}
                         </div>
-                        <select
-                          value={selectedJiraEpic}
-                          onChange={(e) => setSelectedJiraEpic(e.target.value)}
-                          className="select"
-                        >
-                          <option value="">-- Select an Epic --</option>
-                          <optgroup label="Project Epics">
-                            {projectEpics.filter(e => e.isLocal).map(epic => (
-                              <option key={epic.id} value={epic.key}>
-                                {epic.name} ({epic.key})
-                              </option>
-                            ))}
-                          </optgroup>
-                          {projectEpics.some(e => !e.isLocal) && (
-                            <optgroup label="Jira Epics">
-                              {projectEpics.filter(e => !e.isLocal).map(epic => (
-                                <option key={epic.id} value={epic.key}>
-                                  {epic.name} ({epic.key})
-                                </option>
-                              ))}
-                            </optgroup>
+                        
+                        {/* Searchable Epic Dropdown */}
+                        <div style={{ position: 'relative' }}>
+                          <input
+                            type="text"
+                            value={epicDropdownSearch}
+                            onChange={(e) => {
+                              setEpicDropdownSearch(e.target.value);
+                              setShowEpicDropdown(true);
+                            }}
+                            onFocus={() => setShowEpicDropdown(true)}
+                            placeholder="🔍 Search epics by key or name..."
+                            className="input"
+                            style={{ width: '100%' }}
+                          />
+                          
+                          {/* Selected Epic Display */}
+                          {selectedJiraEpic && !showEpicDropdown && (
+                            <div style={{
+                              padding: '8px',
+                              backgroundColor: '#f3f4f6',
+                              borderRadius: '4px',
+                              marginTop: '4px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>
+                                Selected: {projectEpics.find(e => e.key === selectedJiraEpic)?.name} ({selectedJiraEpic})
+                              </span>
+                              <button
+                                onClick={() => {
+                                  setSelectedJiraEpic('');
+                                  setEpicDropdownSearch('');
+                                }}
+                                className="icon-btn red"
+                                style={{ fontSize: '12px' }}
+                              >
+                                ✕
+                              </button>
+                            </div>
                           )}
-                        </select>
+                          
+                          {/* Dropdown Results */}
+                          {showEpicDropdown && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '100%',
+                              left: 0,
+                              right: 0,
+                              maxHeight: '300px',
+                              overflowY: 'auto',
+                              backgroundColor: 'white',
+                              border: '1px solid #d1d5db',
+                              borderRadius: '4px',
+                              marginTop: '4px',
+                              zIndex: 1000,
+                              boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                            }}>
+                              {/* Close button */}
+                              <div style={{
+                                padding: '8px',
+                                borderBottom: '1px solid #e5e7eb',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                backgroundColor: '#f9fafb'
+                              }}>
+                                <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#6b7280' }}>
+                                  Select an Epic
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    setShowEpicDropdown(false);
+                                    setEpicDropdownSearch('');
+                                  }}
+                                  style={{
+                                    border: 'none',
+                                    background: 'none',
+                                    cursor: 'pointer',
+                                    fontSize: '16px',
+                                    color: '#9ca3af'
+                                  }}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              
+                              {/* Filtered epics */}
+                              {(() => {
+                                const filteredEpics = projectEpics.filter(epic => {
+                                  if (!epicDropdownSearch) return true;
+                                  const query = epicDropdownSearch.toLowerCase();
+                                  return epic.key.toLowerCase().includes(query) || 
+                                         epic.name.toLowerCase().includes(query);
+                                });
+                                
+                                const localEpics = filteredEpics.filter(e => e.isLocal);
+                                const jiraEpics = filteredEpics.filter(e => !e.isLocal);
+                                
+                                return (
+                                  <>
+                                    {localEpics.length > 0 && (
+                                      <>
+                                        <div style={{
+                                          padding: '8px',
+                                          fontSize: '11px',
+                                          fontWeight: 'bold',
+                                          color: '#6b7280',
+                                          backgroundColor: '#f9fafb'
+                                        }}>
+                                          Project Epics ({localEpics.length})
+                                        </div>
+                                        {localEpics.map(epic => (
+                                          <div
+                                            key={epic.id}
+                                            onClick={() => {
+                                              setSelectedJiraEpic(epic.key);
+                                              setShowEpicDropdown(false);
+                                              setEpicDropdownSearch('');
+                                            }}
+                                            style={{
+                                              padding: '10px',
+                                              cursor: 'pointer',
+                                              borderBottom: '1px solid #f3f4f6',
+                                              backgroundColor: selectedJiraEpic === epic.key ? '#dbeafe' : 'white'
+                                            }}
+                                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedJiraEpic === epic.key ? '#dbeafe' : 'white'}
+                                          >
+                                            <div style={{ fontWeight: 'bold', fontSize: '13px' }}>{epic.key}</div>
+                                            <div style={{ fontSize: '12px', color: '#6b7280' }}>{epic.name}</div>
+                                          </div>
+                                        ))}
+                                      </>
+                                    )}
+                                    
+                                    {jiraEpics.length > 0 && (
+                                      <>
+                                        <div style={{
+                                          padding: '8px',
+                                          fontSize: '11px',
+                                          fontWeight: 'bold',
+                                          color: '#6b7280',
+                                          backgroundColor: '#f9fafb'
+                                        }}>
+                                          Jira Epics ({jiraEpics.length})
+                                        </div>
+                                        {jiraEpics.map(epic => (
+                                          <div
+                                            key={epic.id}
+                                            onClick={() => {
+                                              setSelectedJiraEpic(epic.key);
+                                              setShowEpicDropdown(false);
+                                              setEpicDropdownSearch('');
+                                            }}
+                                            style={{
+                                              padding: '10px',
+                                              cursor: 'pointer',
+                                              borderBottom: '1px solid #f3f4f6',
+                                              backgroundColor: selectedJiraEpic === epic.key ? '#dbeafe' : 'white'
+                                            }}
+                                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f3f4f6'}
+                                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedJiraEpic === epic.key ? '#dbeafe' : 'white'}
+                                          >
+                                            <div style={{ fontWeight: 'bold', fontSize: '13px' }}>{epic.key}</div>
+                                            <div style={{ fontSize: '12px', color: '#6b7280' }}>{epic.name}</div>
+                                          </div>
+                                        ))}
+                                      </>
+                                    )}
+                                    
+                                    {filteredEpics.length === 0 && (
+                                      <div style={{ padding: '16px', textAlign: 'center', color: '#9ca3af', fontSize: '12px' }}>
+                                        {epicDropdownSearch ? `No epics found matching "${epicDropdownSearch}"` : 'No epics available'}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          )}
+                        </div>
+                        
                         <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
-                          {selectedJiraEpic ? `Will be created under: ${selectedJiraEpic}` : 'Select an epic from the dropdown'}
+                          {selectedJiraEpic ? `Will be created under: ${selectedJiraEpic}` : 'Type to search and select an epic'}
                         </div>
                       </div>
                     )}
@@ -2819,24 +3688,27 @@ const ProjectManager = () => {
             <div style={{ marginBottom: '16px' }}>
               <input
                 type="text"
-                placeholder="🔍 Search epics by key or name..."
+                placeholder="🔍 Search epics by key or name (searches all epics in Jira)..."
                 value={epicSearchQuery}
-                onChange={(e) => setEpicSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setEpicSearchQuery(e.target.value);
+                  // Debounce server search
+                  clearTimeout(window.epicSearchTimeout);
+                  window.epicSearchTimeout = setTimeout(() => {
+                    loadEpicsFromJira(e.target.value);
+                  }, 500);
+                }}
                 className="input"
                 style={{ width: '100%' }}
               />
+              <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                Showing {availableEpics.length} epic(s)
+              </div>
             </div>
             
-            {/* Filtered Epic List */}
+            {/* Epic List */}
             <div className="epic-selector">
-              {availableEpics
-                .filter(epic => {
-                  if (!epicSearchQuery) return true;
-                  const query = epicSearchQuery.toLowerCase();
-                  return epic.key.toLowerCase().includes(query) || 
-                         epic.name.toLowerCase().includes(query);
-                })
-                .map(epic => (
+              {availableEpics.map(epic => (
                   <div 
                     key={epic.key}
                     className={`epic-item ${selectedEpics.includes(epic.key) ? 'selected' : ''}`}
@@ -2862,14 +3734,9 @@ const ProjectManager = () => {
                     </div>
                   </div>
                 ))}
-              {availableEpics.filter(epic => {
-                if (!epicSearchQuery) return true;
-                const query = epicSearchQuery.toLowerCase();
-                return epic.key.toLowerCase().includes(query) || 
-                       epic.name.toLowerCase().includes(query);
-              }).length === 0 && (
+              {availableEpics.length === 0 && (
                 <div style={{ textAlign: 'center', padding: '24px', color: '#9ca3af' }}>
-                  No epics found matching "{epicSearchQuery}"
+                  {epicSearchQuery ? `No epics found matching "${epicSearchQuery}"` : 'No epics available'}
                 </div>
               )}
             </div>
@@ -2887,6 +3754,139 @@ const ProjectManager = () => {
                 onClick={() => {
                   setShowEpicSelectorModal(false);
                   setEpicSearchQuery('');
+                }} 
+                className="btn btn-secondary" 
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Story Import Modal */}
+      {showStoryImportModal && (
+        <div className="modal-overlay" onClick={() => setShowStoryImportModal(false)}>
+          <div className="modal modal-large" onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>
+              Import Stories from Jira
+            </h2>
+            <p style={{ marginBottom: '16px', color: '#6b7280' }}>
+              Select an epic to see its stories, then choose which stories to import.
+            </p>
+            
+            {/* Epic Filter */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ fontSize: '14px', fontWeight: '600', marginBottom: '8px', display: 'block' }}>
+                Select Epic
+              </label>
+              <select
+                value={storyImportEpicFilter}
+                onChange={(e) => {
+                  setStoryImportEpicFilter(e.target.value);
+                  if (e.target.value) {
+                    loadStoriesFromJira(e.target.value);
+                  } else {
+                    setAvailableStories([]);
+                    setSelectedStories([]);
+                  }
+                }}
+                className="select"
+                style={{ width: '100%' }}
+              >
+                <option value="">-- Select an Epic --</option>
+                {availableEpics.map(epic => (
+                  <option key={epic.key} value={epic.key}>
+                    {epic.key} - {epic.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {/* Story List */}
+            {storyImportEpicFilter && (
+              <>
+                <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: '600' }}>
+                  Stories in {storyImportEpicFilter} ({availableStories.length})
+                </div>
+                
+                <div className="epic-selector" style={{ maxHeight: '400px' }}>
+                  {availableStories.map(story => (
+                    <div 
+                      key={story.key}
+                      className={`epic-item ${selectedStories.some(s => s.key === story.key) ? 'selected' : ''}`}
+                      onClick={() => {
+                        if (selectedStories.some(s => s.key === story.key)) {
+                          setSelectedStories(selectedStories.filter(s => s.key !== story.key));
+                        } else {
+                          setSelectedStories([...selectedStories, story]);
+                        }
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedStories.some(s => s.key === story.key)}
+                        onChange={() => {}}
+                        className="checkbox"
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 'bold' }}>
+                          {story.type === 'story' ? '📘' : '✓'} {story.key}: {story.name}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                          Type: {story.type} • Status: {story.status} • Assignee: {story.assignee}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px' }}>
+                          Created: {new Date(story.created).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {availableStories.length === 0 && (
+                    <div style={{ textAlign: 'center', padding: '24px', color: '#9ca3af' }}>
+                      {storyImportEpicFilter ? 'No stories found in this epic' : 'Select an epic to see stories'}
+                    </div>
+                  )}
+                </div>
+                
+                {/* Select All / None */}
+                {availableStories.length > 0 && (
+                  <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
+                    <button 
+                      onClick={() => setSelectedStories(availableStories)}
+                      className="btn btn-outline"
+                      style={{ fontSize: '12px', padding: '4px 12px' }}
+                    >
+                      Select All
+                    </button>
+                    <button 
+                      onClick={() => setSelectedStories([])}
+                      className="btn btn-outline"
+                      style={{ fontSize: '12px', padding: '4px 12px' }}
+                    >
+                      Select None
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+            
+            <div style={{ display: 'flex', gap: '8px', marginTop: '24px' }}>
+              <button 
+                onClick={importSelectedStories}
+                disabled={selectedStories.length === 0 || !storyImportEpicFilter}
+                className="btn btn-primary" 
+                style={{ flex: 1 }}
+              >
+                Import {selectedStories.length} Story(ies)
+              </button>
+              <button 
+                onClick={() => {
+                  setShowStoryImportModal(false);
+                  setStoryImportEpicFilter('');
+                  setAvailableStories([]);
+                  setSelectedStories([]);
                 }} 
                 className="btn btn-secondary" 
                 style={{ flex: 1 }}
