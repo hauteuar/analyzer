@@ -493,6 +493,11 @@ const ProjectManager = () => {
       return;
     }
     
+    // Ensure searchQuery is a string, not an event object
+    if (typeof searchQuery !== 'string') {
+      searchQuery = '';
+    }
+    
     try {
       // Show loading state for initial load
       if (!searchQuery) {
@@ -783,7 +788,6 @@ const ProjectManager = () => {
       console.error('Error updating Jira status:', error);
     }
   };
-  
   
   
   // Sync ALL Jira-linked items in a project from Jira
@@ -1748,8 +1752,7 @@ const ProjectManager = () => {
     );
   };
   
-  
-  
+    
   const renderWorkloadChart = () => {
     if (!selectedProject) return null;
     const items = selectedProject.items;
@@ -2014,7 +2017,7 @@ const ProjectManager = () => {
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               {jiraConfig.connected && (
                 <>
-                  <button onClick={loadEpicsFromJira} className="btn btn-purple">
+                  <button onClick={() => loadEpicsFromJira('')} className="btn btn-purple">
                     <Download size={20} />
                     Import Epics
                   </button>
@@ -2511,7 +2514,6 @@ const ProjectManager = () => {
       </div>
     );
   };
-    
   
   const renderTimeline = () => {
     if (!selectedProject) return <div className="card">Select a project to view timeline</div>;
