@@ -676,33 +676,43 @@ const ProjectManager = () => {
         })
       });
       
-      if (response.ok) {
-        const data = await response.json();
-        
-        const updatedProjects = projects.map(p => {
-          if (p.id === selectedProject.id) {
-            return {
-              ...p,
-              items: [...p.items, ...data.items]
-            };
-          }
-          return p;
-        });
-        
-        setProjects(updatedProjects);
-        const updated = updatedProjects.find(p => p.id === selectedProject.id);
-        if (updated) {
-          setSelectedProject(updated);
-          if (useBackend) {
-            await saveProjectToBackend(updated);
-          }
-        }
-        
-        setShowEpicSelectorModal(false);
-        alert(`✅ Imported ${selectedEpics.length} epic(s) with their children`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to import epics');
       }
+      
+      const data = await response.json();
+      
+      if (!data.items || data.items.length === 0) {
+        alert('⚠️ No items were imported. The epics might be empty.');
+        setShowEpicSelectorModal(false);
+        return;
+      }
+      
+      const updatedProjects = projects.map(p => {
+        if (p.id === selectedProject.id) {
+          return {
+            ...p,
+            items: [...p.items, ...data.items]
+          };
+        }
+        return p;
+      });
+      
+      setProjects(updatedProjects);
+      const updated = updatedProjects.find(p => p.id === selectedProject.id);
+      if (updated) {
+        setSelectedProject(updated);
+        if (useBackend) {
+          await saveProjectToBackend(updated);
+        }
+      }
+      
+      setShowEpicSelectorModal(false);
+      alert(`✅ Imported ${data.items.length} item(s) from ${selectedEpics.length} epic(s)`);
     } catch (error) {
-      alert('Error importing epics');
+      console.error('Error importing epics:', error);
+      alert(`❌ Error importing epics: ${error.message}`);
     }
   };
   
@@ -760,47 +770,6 @@ const ProjectManager = () => {
       }
     } catch (error) {
       console.error('Error updating Jira status:', error);
-    }
-  };
-  
-  const syncFromJira = async (item) => {
-    if (!item.jira || !jiraConfig.connected) return;
-    
-    try {
-      const response = await fetch(`${backendUrl}/jira/sync-issue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jiraConfig,
-          issueKey: item.jira.issueKey
-        })
-      });
-      
-      if (response.ok) {
-        const syncedData = await response.json();
-        
-        const updatedProjects = projects.map(p => {
-          if (p.id === selectedProject.id) {
-            return {
-              ...p,
-              items: p.items.map(i => 
-                i.id === item.id 
-                  ? { ...i, ...syncedData, jira: { ...i.jira, lastSynced: syncedData.lastSynced } }
-                  : i
-              )
-            };
-          }
-          return p;
-        });
-        
-        setProjects(updatedProjects);
-        const updated = updatedProjects.find(p => p.id === selectedProject.id);
-        if (updated) setSelectedProject(updated);
-        
-        console.log('✅ Synced from Jira:', item.jira.issueKey);
-      }
-    } catch (error) {
-      console.error('Error syncing from Jira:', error);
     }
   };
   
@@ -867,7 +836,46 @@ const ProjectManager = () => {
     alert(`✅ Synced ${successCount} items from Jira${errorCount > 0 ? ` (${errorCount} failed)` : ''}`);
   };
   
-  
+  const syncFromJira = async (item) => {
+    if (!item.jira || !jiraConfig.connected) return;
+    
+    try {
+      const response = await fetch(`${backendUrl}/jira/sync-issue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jiraConfig,
+          issueKey: item.jira.issueKey
+        })
+      });
+      
+      if (response.ok) {
+        const syncedData = await response.json();
+        
+        const updatedProjects = projects.map(p => {
+          if (p.id === selectedProject.id) {
+            return {
+              ...p,
+              items: p.items.map(i => 
+                i.id === item.id 
+                  ? { ...i, ...syncedData, jira: { ...i.jira, lastSynced: syncedData.lastSynced } }
+                  : i
+              )
+            };
+          }
+          return p;
+        });
+        
+        setProjects(updatedProjects);
+        const updated = updatedProjects.find(p => p.id === selectedProject.id);
+        if (updated) setSelectedProject(updated);
+        
+        console.log('✅ Synced from Jira:', item.jira.issueKey);
+      }
+    } catch (error) {
+      console.error('Error syncing from Jira:', error);
+    }
+  };
   
   const syncToJira = async (item) => {
     if (!item.jira || !jiraConfig.connected) return;
@@ -2329,6 +2337,15 @@ const ProjectManager = () => {
       return day === 0 || day === 6;
     };
     
+    // Helper to check if item has parent epic (must be before getItemsForDate)
+    const hasParentEpic = (item, epicId) => {
+      if (!item.parentId) return false;
+      const parent = selectedProject.items.find(i => i.id === item.parentId);
+      if (!parent) return false;
+      if (parent.id === epicId) return true;
+      return hasParentEpic(parent, epicId);
+    };
+    
     const getItemsForDate = (date) => {
       if (!date) return [];
       const dateStr = date.toISOString().split('T')[0];
@@ -2350,15 +2367,6 @@ const ProjectManager = () => {
       }
       
       return items;
-    };
-    
-    // Helper to check if item has parent epic
-    const hasParentEpic = (item, epicId) => {
-      if (!item.parentId) return false;
-      const parent = selectedProject.items.find(i => i.id === item.parentId);
-      if (!parent) return false;
-      if (parent.id === epicId) return true;
-      return hasParentEpic(parent, epicId);
     };
     
     const changeMonth = (delta) => {
@@ -2478,7 +2486,7 @@ const ProjectManager = () => {
       </div>
     );
   };
-       
+    
   
   const renderTimeline = () => {
     if (!selectedProject) return <div className="card">Select a project to view timeline</div>;

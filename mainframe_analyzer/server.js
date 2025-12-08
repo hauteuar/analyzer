@@ -490,39 +490,22 @@ app.post('/api/jira/get-stories-by-epic', async (req, res) => {
 app.post('/api/jira/import-epics', async (req, res) => {
   const { jiraConfig, epicKeys } = req.body;
   
+  if (!jiraConfig || !epicKeys || epicKeys.length === 0) {
+    return res.status(400).json({ error: 'Missing jiraConfig or epicKeys' });
+  }
+  
   try {
     const allItems = [];
     
     for (const epicKey of epicKeys) {
-      const epicResponse = await axios.get(
-        `${jiraConfig.url}/rest/api/2/issue/${epicKey}`,
-        {
-          params: {
-            fields: 'summary,status,priority,assignee,duedate,created,updated,timetracking'
-          },
-          headers: {
-            'Authorization': `Bearer ${jiraConfig.apiToken}`,
-            'Accept': 'application/json'
-          }
-        }
-      );
-      
-      const epic = epicResponse.data;
-      const epicItem = formatJiraIssue(epic, 'epic');
-      allItems.push(epicItem);
-      
-      // Try to get children using multiple methods (for different Jira versions)
-      // Method 1: Greenhopper/BofA Jira custom field
-      let childrenResponse;
       try {
-        const greenhopperJql = `cf[10014] = ${epicKey} OR parent = ${epicKey}`;
-        childrenResponse = await axios.get(
-          `${jiraConfig.url}/rest/api/2/search`,
+        console.log(`Importing epic: ${epicKey}`);
+        
+        const epicResponse = await axios.get(
+          `${jiraConfig.url}/rest/api/2/issue/${epicKey}`,
           {
             params: {
-              jql: greenhopperJql,
-              maxResults: 100,
-              fields: 'summary,status,priority,assignee,duedate,issuetype,created,updated,timetracking,customfield_10014'
+              fields: 'summary,status,priority,assignee,duedate,created,updated,timetracking,issuetype'
             },
             headers: {
               'Authorization': `Bearer ${jiraConfig.apiToken}`,
@@ -530,38 +513,75 @@ app.post('/api/jira/import-epics', async (req, res) => {
             }
           }
         );
-      } catch (error) {
-        // Method 2: Standard Jira Epic Link field name
-        console.log('Greenhopper query failed, trying standard Epic Link...');
-        const standardJql = `"Epic Link" = ${epicKey} OR parent = ${epicKey}`;
-        childrenResponse = await axios.get(
-          `${jiraConfig.url}/rest/api/2/search`,
-          {
-            params: {
-              jql: standardJql,
-              maxResults: 100,
-              fields: 'summary,status,priority,assignee,duedate,issuetype,created,updated,timetracking'
-            },
-            headers: {
-              'Authorization': `Bearer ${jiraConfig.apiToken}`,
-              'Accept': 'application/json'
+        
+        const epic = epicResponse.data;
+        const epicItem = formatJiraIssue(epic, 'epic');
+        allItems.push(epicItem);
+        
+        console.log(`Imported epic ${epicKey}, now fetching children...`);
+        
+        // Try to get children using multiple methods (for different Jira versions)
+        // Method 1: Greenhopper/BofA Jira custom field
+        let childrenResponse;
+        try {
+          const greenhopperJql = `cf[10014] = ${epicKey} OR parent = ${epicKey}`;
+          childrenResponse = await axios.get(
+            `${jiraConfig.url}/rest/api/2/search`,
+            {
+              params: {
+                jql: greenhopperJql,
+                maxResults: 100,
+                fields: 'summary,status,priority,assignee,duedate,issuetype,created,updated,timetracking,customfield_10014'
+              },
+              headers: {
+                'Authorization': `Bearer ${jiraConfig.apiToken}`,
+                'Accept': 'application/json'
+              }
             }
-          }
-        );
+          );
+          console.log(`Found ${childrenResponse.data.issues.length} children via Greenhopper`);
+        } catch (error) {
+          // Method 2: Standard Jira Epic Link field name
+          console.log('Greenhopper query failed, trying standard Epic Link...');
+          const standardJql = `"Epic Link" = ${epicKey} OR parent = ${epicKey}`;
+          childrenResponse = await axios.get(
+            `${jiraConfig.url}/rest/api/2/search`,
+            {
+              params: {
+                jql: standardJql,
+                maxResults: 100,
+                fields: 'summary,status,priority,assignee,duedate,issuetype,created,updated,timetracking'
+              },
+              headers: {
+                'Authorization': `Bearer ${jiraConfig.apiToken}`,
+                'Accept': 'application/json'
+              }
+            }
+          );
+          console.log(`Found ${childrenResponse.data.issues.length} children via standard API`);
+        }
+        
+        childrenResponse.data.issues.forEach(child => {
+          const childItem = formatJiraIssue(child, null, epicItem.id);
+          epicItem.children.push(childItem.id);
+          allItems.push(childItem);
+        });
+        
+        console.log(`Successfully imported epic ${epicKey} with ${childrenResponse.data.issues.length} children`);
+      } catch (epicError) {
+        console.error(`Error importing epic ${epicKey}:`, epicError.message);
+        // Continue with other epics even if one fails
+        continue;
       }
-      
-      childrenResponse.data.issues.forEach(child => {
-        const childItem = formatJiraIssue(child, null, epicItem.id);
-        epicItem.children.push(childItem.id);
-        allItems.push(childItem);
-      });
     }
     
+    console.log(`Total items imported: ${allItems.length}`);
     res.json({ items: allItems });
   } catch (error) {
     console.error('Error importing epics from Jira:', error.message);
+    console.error('Stack:', error.stack);
     res.status(400).json({ 
-      error: error.response?.data?.message || error.message 
+      error: error.response?.data?.errorMessages?.[0] || error.response?.data?.message || error.message 
     });
   }
 });
