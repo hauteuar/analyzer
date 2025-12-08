@@ -494,23 +494,34 @@ const ProjectManager = () => {
     }
     
     try {
+      // Show loading state for initial load
+      if (!searchQuery) {
+        setAvailableEpics([]);
+        setShowEpicSelectorModal(true);
+      }
+      
       const response = await fetch(`${backendUrl}/jira/get-epics`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jiraConfig, searchQuery })
       });
       
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableEpics(data.epics);
-        if (!searchQuery) {
-          // Only reset selection when doing initial load
-          setSelectedEpics([]);
-          setShowEpicSelectorModal(true);
-        }
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to load epics');
+      }
+      
+      const data = await response.json();
+      setAvailableEpics(data.epics);
+      
+      if (!searchQuery) {
+        // Only reset selection when doing initial load
+        setSelectedEpics([]);
       }
     } catch (error) {
-      alert('Error loading epics from Jira');
+      console.error('Error loading epics from Jira:', error);
+      alert(`❌ Error loading epics: ${error.message}`);
+      setShowEpicSelectorModal(false);
     }
   };
   
@@ -772,6 +783,8 @@ const ProjectManager = () => {
       console.error('Error updating Jira status:', error);
     }
   };
+  
+  
   
   // Sync ALL Jira-linked items in a project from Jira
   const syncAllFromJira = async () => {
@@ -1735,6 +1748,7 @@ const ProjectManager = () => {
     );
   };
   
+  
   const renderWorkloadChart = () => {
     if (!selectedProject) return null;
     const items = selectedProject.items;
@@ -2342,7 +2356,12 @@ const ProjectManager = () => {
       if (!item.parentId) return false;
       const parent = selectedProject.items.find(i => i.id === item.parentId);
       if (!parent) return false;
-      if (parent.id === epicId) return true;
+      
+      // Handle string vs number comparison
+      const epicIdNum = typeof epicId === 'string' ? parseInt(epicId) : epicId;
+      const parentIdNum = typeof parent.id === 'string' ? parseInt(parent.id) : parent.id;
+      
+      if (parent.id === epicId || parentIdNum === epicIdNum) return true;
       return hasParentEpic(parent, epicId);
     };
     
@@ -2357,12 +2376,17 @@ const ProjectManager = () => {
       
       // Filter by epic if selected
       if (calendarEpicFilter) {
+        // Convert filter to number if it's a string number
+        const filterIdNum = typeof calendarEpicFilter === 'string' ? 
+          parseInt(calendarEpicFilter) : calendarEpicFilter;
+        
         items = items.filter(item => {
           // Show the epic itself
-          if (item.id === calendarEpicFilter) return true;
+          if (item.id === filterIdNum || item.id === calendarEpicFilter) return true;
           // Show children of the epic
-          return item.parentId === calendarEpicFilter || 
-                 hasParentEpic(item, calendarEpicFilter);
+          if (item.parentId === filterIdNum || item.parentId === calendarEpicFilter) return true;
+          // Check parent hierarchy
+          return hasParentEpic(item, filterIdNum) || hasParentEpic(item, calendarEpicFilter);
         });
       }
       
@@ -2486,7 +2510,6 @@ const ProjectManager = () => {
       </div>
     );
   };
-    
   
   const renderTimeline = () => {
     if (!selectedProject) return <div className="card">Select a project to view timeline</div>;
