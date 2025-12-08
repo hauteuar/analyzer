@@ -156,8 +156,57 @@ app.post('/api/jira/test-connection', async (req, res) => {
   }
 });
 
-// Create Jira issue
 app.post('/api/jira/create-issue', async (req, res) => {
+  const { jiraConfig, item } = req.body;
+  
+  try {
+    const issueData = {
+      fields: {
+        project: {
+          key: jiraConfig.defaultProject
+        },
+        summary: item.name,
+        description: `Created from Project Manager Pro\n\nPriority: ${item.priority}\nDue Date: ${item.duedate}`,
+        issuetype: {
+          name: item.type
+        },
+        priority: {
+          name: item.priority
+        }
+      }
+    };
+
+    if (item.duedate) {
+      issueData.fields.duedate = item.duedate;
+    }
+
+    const response = await axios.post(
+      `${jiraConfig.url}/rest/api/2/issue`,
+      issueData,
+      {
+        headers: {
+          'Authorization': `Bearer ${jiraConfig.apiToken}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    res.json({
+      key: response.data.key,
+      id: response.data.id,
+      self: response.data.self
+    });
+  } catch (error) {
+    console.error('Error creating Jira issue:', error.message);
+    res.status(400).json({ 
+      error: error.response?.data?.errors || error.message 
+    });
+  }
+});
+
+// Create Jira issue
+app.post('/api/jira/create-issue-1', async (req, res) => {
   const { jiraConfig, item } = req.body;
   
   try {
