@@ -1749,6 +1749,7 @@ const ProjectManager = () => {
   };
   
   
+  
   const renderWorkloadChart = () => {
     if (!selectedProject) return null;
     const items = selectedProject.items;
@@ -2510,6 +2511,7 @@ const ProjectManager = () => {
       </div>
     );
   };
+    
   
   const renderTimeline = () => {
     if (!selectedProject) return <div className="card">Select a project to view timeline</div>;
@@ -3722,11 +3724,12 @@ const ProjectManager = () => {
                 placeholder="🔍 Search epics by key or name (searches all epics in Jira)..."
                 value={epicSearchQuery}
                 onChange={(e) => {
-                  setEpicSearchQuery(e.target.value);
+                  const searchValue = e.target.value; // Capture value immediately
+                  setEpicSearchQuery(searchValue);
                   // Debounce server search
                   clearTimeout(window.epicSearchTimeout);
                   window.epicSearchTimeout = setTimeout(() => {
-                    loadEpicsFromJira(e.target.value);
+                    loadEpicsFromJira(searchValue); // Use captured value, not event
                   }, 500);
                 }}
                 className="input"
