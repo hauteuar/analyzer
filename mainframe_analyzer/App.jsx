@@ -1756,7 +1756,7 @@ const ProjectManager = () => {
           {/* Legend */}
           <div style={{ marginTop: '24px', display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ width: '20px', height: '12px', backgroundColor: '#fbbf24', borderRadius: '2px' }}></div>
+              <div style={{ width: '20px', height: '12px', backgroundColor: '#9ca3af', borderRadius: '2px' }}></div>
               <span style={{ fontSize: '12px', color: '#6b7280' }}>Pending</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1840,6 +1840,7 @@ const ProjectManager = () => {
     const completed = items.filter(i => i.status === 'review').length;
     const inProgress = items.filter(i => i.status === 'in-progress').length;
     const pending = items.filter(i => i.status === 'pending').length;
+    const overdue = items.filter(i => isOverdue(i)).length;
     const completionPercent = total > 0 ? Math.round((completed / total) * 100) : 0;
     
     return (
@@ -1858,22 +1859,26 @@ const ProjectManager = () => {
             </div>
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
-          <div style={{ textAlign: 'center', padding: '16px', backgroundColor: '#f3f4f6', borderRadius: '8px' }}>
-            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>TOTAL</div>
-            <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{total}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
+          <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#f3f4f6', borderRadius: '8px' }}>
+            <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '4px' }}>TOTAL</div>
+            <div style={{ fontSize: '22px', fontWeight: 'bold' }}>{total}</div>
           </div>
-          <div style={{ textAlign: 'center', padding: '16px', backgroundColor: '#dcfce7', borderRadius: '8px' }}>
-            <div style={{ fontSize: '12px', color: '#166534', marginBottom: '4px' }}>COMPLETED</div>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#16a34a' }}>{completed}</div>
+          <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#f3f4f6', borderRadius: '8px' }}>
+            <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '4px' }}>PENDING</div>
+            <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#6b7280' }}>{pending}</div>
           </div>
-          <div style={{ textAlign: 'center', padding: '16px', backgroundColor: '#dbeafe', borderRadius: '8px' }}>
-            <div style={{ fontSize: '12px', color: '#1e40af', marginBottom: '4px' }}>IN PROGRESS</div>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2563eb' }}>{inProgress}</div>
+          <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#dbeafe', borderRadius: '8px' }}>
+            <div style={{ fontSize: '11px', color: '#1e40af', marginBottom: '4px' }}>PROGRESS</div>
+            <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#2563eb' }}>{inProgress}</div>
           </div>
-          <div style={{ textAlign: 'center', padding: '16px', backgroundColor: '#fef3c7', borderRadius: '8px' }}>
-            <div style={{ fontSize: '12px', color: '#92400e', marginBottom: '4px' }}>PENDING</div>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#ca8a04' }}>{pending}</div>
+          <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#dcfce7', borderRadius: '8px' }}>
+            <div style={{ fontSize: '11px', color: '#166534', marginBottom: '4px' }}>REVIEW</div>
+            <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#16a34a' }}>{completed}</div>
+          </div>
+          <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#fee2e2', borderRadius: '8px' }}>
+            <div style={{ fontSize: '11px', color: '#991b1b', marginBottom: '4px' }}>OVERDUE</div>
+            <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#dc2626' }}>{overdue}</div>
           </div>
         </div>
       </div>
@@ -1970,40 +1975,49 @@ const ProjectManager = () => {
     
     return (
       <div>
-        {/* Overall Stats - Smaller */}
-        <div className="grid grid-4" style={{ marginBottom: '24px' }}>
-          <div className="stat-card blue" style={{ padding: '12px' }}>
-            <div style={{ fontSize: '10px', fontWeight: '600', marginBottom: '4px', color: '#2563eb' }}>
-              TOTAL ITEMS
+        {/* Overall Stats - 5 boxes in one line */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', marginBottom: '24px' }}>
+          <div className="stat-card blue" style={{ padding: '8px' }}>
+            <div style={{ fontSize: '9px', fontWeight: '600', marginBottom: '2px', color: '#2563eb', textTransform: 'uppercase' }}>
+              Total
             </div>
-            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1e40af' }}>
+            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#1e40af' }}>
               {stats.total}
             </div>
           </div>
           
-          <div className="stat-card green" style={{ padding: '12px' }}>
-            <div style={{ fontSize: '10px', fontWeight: '600', marginBottom: '4px', color: '#16a34a' }}>
-              IN REVIEW
+          <div className="stat-card" style={{ padding: '8px', backgroundColor: '#f3f4f6' }}>
+            <div style={{ fontSize: '9px', fontWeight: '600', marginBottom: '2px', color: '#6b7280', textTransform: 'uppercase' }}>
+              Pending
             </div>
-            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#166534' }}>
-              {stats.review}
+            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#4b5563' }}>
+              {stats.pending}
             </div>
           </div>
           
-          <div className="stat-card yellow" style={{ padding: '12px' }}>
-            <div style={{ fontSize: '10px', fontWeight: '600', marginBottom: '4px', color: '#ca8a04' }}>
-              IN PROGRESS
+          <div className="stat-card yellow" style={{ padding: '8px' }}>
+            <div style={{ fontSize: '9px', fontWeight: '600', marginBottom: '2px', color: '#ca8a04', textTransform: 'uppercase' }}>
+              Progress
             </div>
-            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#a16207' }}>
+            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#a16207' }}>
               {stats.inProgress}
             </div>
           </div>
           
-          <div className="stat-card red" style={{ padding: '12px' }}>
-            <div style={{ fontSize: '10px', fontWeight: '600', marginBottom: '4px', color: '#dc2626' }}>
-              OVERDUE
+          <div className="stat-card green" style={{ padding: '8px' }}>
+            <div style={{ fontSize: '9px', fontWeight: '600', marginBottom: '2px', color: '#16a34a', textTransform: 'uppercase' }}>
+              Review
             </div>
-            <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#991b1b' }}>
+            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#166534' }}>
+              {stats.review}
+            </div>
+          </div>
+          
+          <div className="stat-card red" style={{ padding: '8px' }}>
+            <div style={{ fontSize: '9px', fontWeight: '600', marginBottom: '2px', color: '#dc2626', textTransform: 'uppercase' }}>
+              Overdue
+            </div>
+            <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#991b1b' }}>
               {stats.overdue}
             </div>
           </div>
@@ -2643,8 +2657,7 @@ const ProjectManager = () => {
       </div>
     );
   };
-    
-  
+        
   const renderTimeline = () => {
     if (!selectedProject) return <div className="card">Select a project to view timeline</div>;
     
