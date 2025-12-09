@@ -1608,6 +1608,39 @@ const ProjectManager = () => {
     const items = getFilteredItems();
     if (items.length === 0) return <div style={{ textAlign: 'center', padding: '48px', color: '#6b7280' }}>No items to display</div>;
     
+    // Build hierarchy structure
+    const buildHierarchy = () => {
+      const hierarchy = [];
+      const epics = items.filter(i => i.type === 'epic');
+      
+      epics.forEach(epic => {
+        hierarchy.push({ ...epic, level: 0 });
+        const stories = items.filter(i => i.parentId === epic.id);
+        stories.forEach(story => {
+          hierarchy.push({ ...story, level: 1 });
+          const tasks = items.filter(i => i.parentId === story.id);
+          tasks.forEach(task => {
+            hierarchy.push({ ...task, level: 2 });
+            const subtasks = items.filter(i => i.parentId === task.id);
+            subtasks.forEach(subtask => {
+              hierarchy.push({ ...subtask, level: 3 });
+            });
+          });
+        });
+      });
+      
+      // Add orphaned items
+      items.forEach(item => {
+        if (!hierarchy.find(h => h.id === item.id)) {
+          hierarchy.push({ ...item, level: 0 });
+        }
+      });
+      
+      return hierarchy;
+    };
+    
+    const hierarchyItems = buildHierarchy();
+    
     const startDate = new Date(Math.min(...items.map(i => new Date(i.startDate))));
     const endDate = new Date(Math.max(...items.map(i => new Date(i.endDate))));
     const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
@@ -1615,35 +1648,130 @@ const ProjectManager = () => {
     const today = new Date();
     const todayPosition = ((today - startDate) / (1000 * 60 * 60 * 24)) / totalDays * 100;
     
+    const formatDate = (dateStr) => {
+      const date = new Date(dateStr);
+      return `${date.getMonth() + 1}/${date.getDate()}`;
+    };
+    
     return (
-      <div className="gantt-container">
-        <div style={{ minWidth: '800px', position: 'relative' }}>
-          {items.map(item => {
-            const itemStart = new Date(item.startDate);
-            const itemEnd = new Date(item.endDate);
-            const startPos = ((itemStart - startDate) / (1000 * 60 * 60 * 24)) / totalDays * 100;
-            const width = ((itemEnd - itemStart) / (1000 * 60 * 60 * 24) + 1) / totalDays * 100;
-            
-            return (
-              <div key={item.id} className="gantt-row">
-                <div style={{ position: 'absolute', left: 0, top: 10, fontSize: '12px', fontWeight: 'bold' }}>
-                  {getItemIcon(item.type)} {item.name}
-                </div>
-                <div 
-                  className={`gantt-bar ${isOverdue(item) ? 'overdue' : item.status}`}
-                  style={{ left: `${startPos}%`, width: `${width}%`, marginLeft: '150px' }}
-                  title={`${item.name} (${item.startDate} to ${item.endDate})`}
-                >
-                  {item.status.toUpperCase()}
-                </div>
-              </div>
-            );
-          })}
-          {todayPosition >= 0 && todayPosition <= 100 && (
-            <div className="today-marker" style={{ left: `calc(150px + ${todayPosition}%)` }}>
-              <div className="today-dot" />
+      <div>
+        {/* Export Button */}
+        <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+          <button 
+            onClick={() => {
+              // Export chart as data
+              const csvContent = hierarchyItems.map(item => 
+                `${item.name},${item.type},${item.status},${item.startDate},${item.endDate},${item.assignee}`
+              ).join('\n');
+              const blob = new Blob([`Name,Type,Status,Start Date,End Date,Assignee\n${csvContent}`], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${selectedProject.name}_gantt.csv`;
+              a.click();
+            }}
+            className="btn btn-outline"
+            style={{ fontSize: '12px' }}
+          >
+            <Download size={16} /> Export Chart
+          </button>
+        </div>
+        
+        <div className="gantt-container">
+          <div style={{ minWidth: '1000px', position: 'relative' }}>
+            {/* Timeline Header */}
+            <div style={{ marginBottom: '8px', marginLeft: '300px', display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#6b7280', fontWeight: '600' }}>
+              <span>{startDate.toLocaleDateString()}</span>
+              <span>TODAY</span>
+              <span>{endDate.toLocaleDateString()}</span>
             </div>
-          )}
+            
+            {hierarchyItems.map(item => {
+              const itemStart = new Date(item.startDate);
+              const itemEnd = new Date(item.endDate);
+              const startPos = ((itemStart - startDate) / (1000 * 60 * 60 * 24)) / totalDays * 100;
+              const width = ((itemEnd - itemStart) / (1000 * 60 * 60 * 24) + 1) / totalDays * 100;
+              const indent = item.level * 20;
+              
+              return (
+                <div key={item.id} className="gantt-row" style={{ minHeight: '40px' }}>
+                  <div 
+                    style={{ 
+                      position: 'absolute', 
+                      left: 0, 
+                      top: 10, 
+                      fontSize: '12px', 
+                      fontWeight: item.level === 0 ? 'bold' : 'normal',
+                      paddingLeft: `${indent}px`,
+                      width: '280px',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      cursor: 'pointer',
+                      color: '#2563eb'
+                    }}
+                    onClick={() => {
+                      setEditingItem(item);
+                      setShowEditItemModal(true);
+                    }}
+                    title={`Click to edit: ${item.name}`}
+                  >
+                    {getItemIcon(item.type)} {item.name}
+                    {item.jira && <span style={{ fontSize: '10px', color: '#6b7280', marginLeft: '4px' }}>({item.jira.issueKey})</span>}
+                  </div>
+                  <div 
+                    className={`gantt-bar ${isOverdue(item) ? 'overdue' : item.status}`}
+                    style={{ 
+                      left: `${startPos}%`, 
+                      width: `${width}%`, 
+                      marginLeft: '300px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0 8px',
+                      fontSize: '11px',
+                      fontWeight: '600'
+                    }}
+                    onClick={() => {
+                      setEditingItem(item);
+                      setShowEditItemModal(true);
+                    }}
+                    title={`${item.name}\n${item.startDate} to ${item.endDate}\nClick to edit`}
+                  >
+                    <span>{formatDate(item.startDate)}</span>
+                    <span>{item.status.toUpperCase()}</span>
+                    <span>{formatDate(item.endDate)}</span>
+                  </div>
+                </div>
+              );
+            })}
+            {todayPosition >= 0 && todayPosition <= 100 && (
+              <div className="today-marker" style={{ left: `calc(300px + ${todayPosition}%)` }}>
+                <div className="today-dot" />
+              </div>
+            )}
+          </div>
+          
+          {/* Legend */}
+          <div style={{ marginTop: '24px', display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '20px', height: '12px', backgroundColor: '#fbbf24', borderRadius: '2px' }}></div>
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>Pending</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '20px', height: '12px', backgroundColor: '#3b82f6', borderRadius: '2px' }}></div>
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>In Progress</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '20px', height: '12px', backgroundColor: '#10b981', borderRadius: '2px' }}></div>
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>Review</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '20px', height: '12px', backgroundColor: '#ef4444', borderRadius: '2px' }}></div>
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>Overdue</span>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1752,7 +1880,8 @@ const ProjectManager = () => {
     );
   };
   
-    
+  
+  
   const renderWorkloadChart = () => {
     if (!selectedProject) return null;
     const items = selectedProject.items;
@@ -2514,6 +2643,7 @@ const ProjectManager = () => {
       </div>
     );
   };
+    
   
   const renderTimeline = () => {
     if (!selectedProject) return <div className="card">Select a project to view timeline</div>;
@@ -2899,6 +3029,60 @@ const ProjectManager = () => {
                   />
                   <span>Sync changes to Jira after saving</span>
                 </label>
+              </div>
+            )}
+            
+            {!editingItem.jira && jiraConfig.connected && (
+              <div style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px', marginTop: '16px', backgroundColor: '#fef3c7' }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#92400e' }}>
+                  📝 Not in Jira
+                </div>
+                <p style={{ fontSize: '14px', color: '#78350f', marginBottom: '12px' }}>
+                  This item exists only in Project Manager. Add it to Jira to track it there.
+                </p>
+                <button 
+                  onClick={async () => {
+                    if (!editingItem.name) {
+                      alert('Please add an item name first');
+                      return;
+                    }
+                    
+                    const confirmed = confirm(`Add "${editingItem.name}" to Jira?`);
+                    if (!confirmed) return;
+                    
+                    const jiraData = await createItemInJira(editingItem);
+                    if (jiraData) {
+                      const updatedItem = { ...editingItem, jira: jiraData };
+                      setEditingItem(updatedItem);
+                      
+                      // Update in projects
+                      const updatedProjects = projects.map(p => {
+                        if (p.id === selectedProject.id) {
+                          return {
+                            ...p,
+                            items: p.items.map(i => i.id === editingItem.id ? updatedItem : i)
+                          };
+                        }
+                        return p;
+                      });
+                      
+                      setProjects(updatedProjects);
+                      const updated = updatedProjects.find(p => p.id === selectedProject.id);
+                      if (updated) {
+                        setSelectedProject(updated);
+                        if (useBackend) {
+                          await saveProjectToBackend(updated);
+                        }
+                      }
+                      
+                      alert(`✅ Created in Jira: ${jiraData.issueKey}`);
+                    }
+                  }}
+                  className="btn btn-purple"
+                  style={{ width: '100%' }}
+                >
+                  <Link2 size={16} /> Add to Jira
+                </button>
               </div>
             )}
             
