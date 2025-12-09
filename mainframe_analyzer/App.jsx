@@ -1441,6 +1441,7 @@ const ProjectManager = () => {
     const allItems = projects.flatMap(p => p.items);
     return {
       total: projects.length,
+      pending: allItems.filter(i => i.status === 'pending').length,
       review: allItems.filter(i => i.status === 'review').length,
       inProgress: allItems.filter(i => i.status === 'in-progress').length,
       overdue: allItems.filter(i => isOverdue(i)).length
