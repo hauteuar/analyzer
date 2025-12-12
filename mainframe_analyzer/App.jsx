@@ -61,7 +61,7 @@ const styles = `
   .hierarchy-item.subtask { background-color: #f3f4f6; color: #374151; border-color: #d1d5db; }
   
   .status-select { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; }
-  .status-select.review { background-color: #dcfce7; color: #166534; }
+  .status-select.closed { background-color: #dcfce7; color: #166534; }
   .status-select.in-progress { background-color: #dbeafe; color: #1e40af; }
   .status-select.pending { background-color: #f3f4f6; color: #374151; }
   
@@ -83,7 +83,7 @@ const styles = `
   .gantt-row { position: relative; height: 40px; border-bottom: 1px solid #e5e7eb; }
   .gantt-bar { position: absolute; height: 30px; top: 5px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 600; padding: 0 8px; white-space: nowrap; overflow: hidden; }
   .gantt-bar.overdue { background-color: #dc2626; }
-  .gantt-bar.review { background-color: #16a34a; }
+  .gantt-bar.closed { background-color: #16a34a; }
   .gantt-bar.in-progress { background-color: #2563eb; }
   .gantt-bar.pending { background-color: #6b7280; }
   
@@ -143,7 +143,11 @@ const ProjectManager = () => {
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [calendarEpicFilter, setCalendarEpicFilter] = useState(''); // Filter calendar by epic
   const [hierarchyAssigneeFilter, setHierarchyAssigneeFilter] = useState(''); // Filter hierarchy by assignee
+  const [hierarchyStatusFilter, setHierarchyStatusFilter] = useState(''); // Filter hierarchy by status
   const [holidays, setHolidays] = useState([]);
+  const [showCalendarOverflowModal, setShowCalendarOverflowModal] = useState(false);
+  const [calendarOverflowDate, setCalendarOverflowDate] = useState(null);
+  const [calendarOverflowItems, setCalendarOverflowItems] = useState([]);
   
   // Filters
   const [timelineFilters, setTimelineFilters] = useState({
@@ -790,6 +794,7 @@ const ProjectManager = () => {
   };
   
   
+  
   // Sync ALL Jira-linked items in a project from Jira
   const syncAllFromJira = async () => {
     if (!selectedProject || !jiraConfig.connected) {
@@ -1223,7 +1228,7 @@ const ProjectManager = () => {
         {
           Name: 'Example Task',
           Type: 'task',
-          Status: 'review',
+          Status: 'closed',
           Priority: 'low',
           Assignee: 'Bob Jones',
           'Start Date': '2024-01-01',
@@ -1341,7 +1346,7 @@ const ProjectManager = () => {
             }
             
             // Validate status
-            const validStatuses = ['pending', 'in-progress', 'review'];
+            const validStatuses = ['pending', 'in-progress', 'closed'];
             const status = row.Status?.toLowerCase();
             if (status && !validStatuses.includes(status)) {
               console.warn(`Invalid status "${row.Status}" for row ${index + 1}, defaulting to "pending"`);
@@ -1416,7 +1421,7 @@ const ProjectManager = () => {
     today.setHours(0, 0, 0, 0);
     const endDate = new Date(item.endDate);
     endDate.setHours(0, 0, 0, 0);
-    return endDate < today && item.status !== 'review';
+    return endDate < today && item.status !== 'closed';
   };
   
   const getDaysOverdue = (item) => {
@@ -1442,7 +1447,7 @@ const ProjectManager = () => {
     return {
       total: projects.length,
       pending: allItems.filter(i => i.status === 'pending').length,
-      review: allItems.filter(i => i.status === 'review').length,
+      review: allItems.filter(i => i.status === 'closed').length,
       inProgress: allItems.filter(i => i.status === 'in-progress').length,
       overdue: allItems.filter(i => isOverdue(i)).length
     };
@@ -1545,7 +1550,7 @@ const ProjectManager = () => {
             >
               <option value="pending">Pending</option>
               <option value="in-progress">In Progress</option>
-              <option value="review">Review</option>
+              <option value="closed">Closed</option>
             </select>
             
             <div style={{ display: 'flex', gap: '4px' }}>
@@ -1766,7 +1771,7 @@ const ProjectManager = () => {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '20px', height: '12px', backgroundColor: '#10b981', borderRadius: '2px' }}></div>
-              <span style={{ fontSize: '12px', color: '#6b7280' }}>Review</span>
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>Closed</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '20px', height: '12px', backgroundColor: '#ef4444', borderRadius: '2px' }}></div>
@@ -1783,7 +1788,7 @@ const ProjectManager = () => {
     
     const items = selectedProject.items;
     const totalHours = items.reduce((sum, item) => sum + item.estimatedHours, 0);
-    const completedHours = items.filter(i => i.status === 'review').reduce((sum, item) => sum + item.estimatedHours, 0);
+    const completedHours = items.filter(i => i.status === 'closed').reduce((sum, item) => sum + item.estimatedHours, 0);
     const inProgressHours = items.filter(i => i.status === 'in-progress').reduce((sum, item) => sum + item.estimatedHours, 0);
     const pendingHours = items.filter(i => i.status === 'pending').reduce((sum, item) => sum + item.estimatedHours, 0);
     
@@ -1838,7 +1843,7 @@ const ProjectManager = () => {
     
     const items = selectedProject.items;
     const total = items.length;
-    const completed = items.filter(i => i.status === 'review').length;
+    const completed = items.filter(i => i.status === 'closed').length;
     const inProgress = items.filter(i => i.status === 'in-progress').length;
     const pending = items.filter(i => i.status === 'pending').length;
     const overdue = items.filter(i => isOverdue(i)).length;
@@ -1863,7 +1868,10 @@ const ProjectManager = () => {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
           <div 
             style={{ textAlign: 'center', padding: '12px', backgroundColor: '#f3f4f6', borderRadius: '8px', cursor: 'pointer', transition: 'transform 0.2s' }}
-            onClick={() => setActiveView('hierarchy')}
+            onClick={() => {
+              setActiveView('hierarchy');
+              setHierarchyStatusFilter('');
+            }}
             onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
             onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
             title="Click to view all items"
@@ -1875,7 +1883,7 @@ const ProjectManager = () => {
             style={{ textAlign: 'center', padding: '12px', backgroundColor: '#f3f4f6', borderRadius: '8px', cursor: 'pointer', transition: 'transform 0.2s' }}
             onClick={() => {
               setActiveView('hierarchy');
-              setFilterStatus('pending');
+              setHierarchyStatusFilter('pending');
             }}
             onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
             onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
@@ -1888,7 +1896,7 @@ const ProjectManager = () => {
             style={{ textAlign: 'center', padding: '12px', backgroundColor: '#dbeafe', borderRadius: '8px', cursor: 'pointer', transition: 'transform 0.2s' }}
             onClick={() => {
               setActiveView('hierarchy');
-              setFilterStatus('in-progress');
+              setHierarchyStatusFilter('in-progress');
             }}
             onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
             onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
@@ -1901,20 +1909,20 @@ const ProjectManager = () => {
             style={{ textAlign: 'center', padding: '12px', backgroundColor: '#dcfce7', borderRadius: '8px', cursor: 'pointer', transition: 'transform 0.2s' }}
             onClick={() => {
               setActiveView('hierarchy');
-              setFilterStatus('review');
+              setHierarchyStatusFilter('closed');
             }}
             onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
             onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
             title="Click to view review items"
           >
-            <div style={{ fontSize: '11px', color: '#166534', marginBottom: '4px' }}>REVIEW</div>
+            <div style={{ fontSize: '11px', color: '#166534', marginBottom: '4px' }}>CLOSED</div>
             <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#16a34a' }}>{completed}</div>
           </div>
           <div 
             style={{ textAlign: 'center', padding: '12px', backgroundColor: '#fee2e2', borderRadius: '8px', cursor: 'pointer', transition: 'transform 0.2s' }}
             onClick={() => {
               setActiveView('hierarchy');
-              setFilterStatus('all');
+              setHierarchyStatusFilter('');
               // Expand all items to show overdue
               const allItemIds = selectedProject.items.map(i => i.id);
               setExpandedItems(new Set(allItemIds));
@@ -1937,13 +1945,13 @@ const ProjectManager = () => {
     const statusCounts = { 
       pending: items.filter(i => i.status === 'pending').length, 
       inProgress: items.filter(i => i.status === 'in-progress').length, 
-      review: items.filter(i => i.status === 'review').length,
+      review: items.filter(i => i.status === 'closed').length,
       overdue: items.filter(i => isOverdue(i)).length
     };
     const total = items.length;
     const pPercent = total > 0 ? (statusCounts.pending / total) * 100 : 0;
     const iPercent = total > 0 ? (statusCounts.inProgress / total) * 100 : 0;
-    const rPercent = total > 0 ? (statusCounts.review / total) * 100 : 0;
+    const rPercent = total > 0 ? (statusCounts.closed / total) * 100 : 0;
     const oPercent = total > 0 ? (statusCounts.overdue / total) * 100 : 0;
     
     return (
@@ -1969,8 +1977,8 @@ const ProjectManager = () => {
             </div>
             <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
               <div style={{ width: '24px', height: '24px', backgroundColor: '#16a34a', borderRadius: '4px' }} />
-              <div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>Review</div>
-              <div style={{ fontSize: '14px', color: '#6b7280' }}>{statusCounts.review} ({Math.round(rPercent)}%)</div></div>
+              <div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>Closed</div>
+              <div style={{ fontSize: '14px', color: '#6b7280' }}>{statusCounts.closed} ({Math.round(rPercent)}%)</div></div>
             </div>
             <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
               <div style={{ width: '24px', height: '24px', backgroundColor: '#ef4444', borderRadius: '4px' }} />
@@ -1993,7 +2001,7 @@ const ProjectManager = () => {
       wMap[a].total++; wMap[a].hours += item.estimatedHours || 0;
       if (item.status === 'pending') wMap[a].pending++;
       if (item.status === 'in-progress') wMap[a].inProgress++;
-      if (item.status === 'review') wMap[a].review++;
+      if (item.status === 'closed') wMap[a].closed++;
     });
     const wData = Object.entries(wMap).sort((a, b) => b[1].total - a[1].total);
     
@@ -2005,7 +2013,7 @@ const ProjectManager = () => {
             <div key={a} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <div style={{ width: '150px', fontSize: '14px', fontWeight: '600' }}>{a}</div>
               <div style={{ flex: 1 }}><div style={{ display: 'flex', height: '32px', borderRadius: '4px', overflow: 'hidden', backgroundColor: '#f3f4f6' }}>
-                {d.review > 0 && <div style={{ width: `${(d.review/d.total)*100}%`, backgroundColor: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '12px', fontWeight: 'bold' }}>{d.review}</div>}
+                {d.closed > 0 && <div style={{ width: `${(d.closed/d.total)*100}%`, backgroundColor: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '12px', fontWeight: 'bold' }}>{d.closed}</div>}
                 {d.inProgress > 0 && <div style={{ width: `${(d.inProgress/d.total)*100}%`, backgroundColor: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '12px', fontWeight: 'bold' }}>{d.inProgress}</div>}
                 {d.pending > 0 && <div style={{ width: `${(d.pending/d.total)*100}%`, backgroundColor: '#9ca3af', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '12px', fontWeight: 'bold' }}>{d.pending}</div>}
               </div></div>
@@ -2031,7 +2039,7 @@ const ProjectManager = () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
         {epics.map(e => {
           const c = items.filter(i => i.parentId === e.id || (items.find(x => x.id === i.parentId)?.parentId === e.id));
-          const t = c.length; const co = c.filter(i => i.status === 'review').length;
+          const t = c.length; const co = c.filter(i => i.status === 'closed').length;
           const ip = c.filter(i => i.status === 'in-progress').length; const p = c.filter(i => i.status === 'pending').length;
           const pc = t > 0 ? Math.round((co/t)*100) : 0;
           return (<div key={e.id} style={{ padding: '20px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
@@ -2064,7 +2072,7 @@ const ProjectManager = () => {
         total: items.length,
         pending: items.filter(i => i.status === 'pending').length,
         inProgress: items.filter(i => i.status === 'in-progress').length,
-        review: items.filter(i => i.status === 'review').length,
+        review: items.filter(i => i.status === 'closed').length,
         overdue: items.filter(i => isOverdue(i)).length
       };
     };
@@ -2105,7 +2113,7 @@ const ProjectManager = () => {
               Review
             </div>
             <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#166534' }}>
-              {stats.review}
+              {stats.closed}
             </div>
           </div>
           
@@ -2190,10 +2198,10 @@ const ProjectManager = () => {
                     textAlign: 'center'
                   }}>
                     <div style={{ fontSize: '9px', fontWeight: '600', color: '#065f46', marginBottom: '2px' }}>
-                      REVIEW
+                      CLOSED
                     </div>
                     <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#065f46' }}>
-                      {projectStats.review}
+                      {projectStats.closed}
                     </div>
                   </div>
                   
@@ -2240,10 +2248,16 @@ const ProjectManager = () => {
     // Get unique assignees
     const uniqueAssignees = [...new Set(selectedProject.items.map(item => item.assignee))].filter(Boolean).sort();
     
-    // Filter items by assignee
-    const filteredItems = hierarchyAssigneeFilter 
-      ? selectedProject.items.filter(item => item.assignee === hierarchyAssigneeFilter)
-      : selectedProject.items;
+    // Filter items by assignee and status
+    let filteredItems = selectedProject.items;
+    
+    if (hierarchyAssigneeFilter) {
+      filteredItems = filteredItems.filter(item => item.assignee === hierarchyAssigneeFilter);
+    }
+    
+    if (hierarchyStatusFilter) {
+      filteredItems = filteredItems.filter(item => item.status === hierarchyStatusFilter);
+    }
     
     return (
       <div>
@@ -2338,6 +2352,38 @@ const ProjectManager = () => {
             </div>
           )}
           
+          {/* Status Filter */}
+          <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <label style={{ fontSize: '14px', fontWeight: '600', color: '#6b7280' }}>
+              Filter by Status:
+            </label>
+            <select
+              value={hierarchyStatusFilter}
+              onChange={(e) => setHierarchyStatusFilter(e.target.value)}
+              className="select"
+              style={{ minWidth: '200px' }}
+            >
+              <option value="">All Statuses ({selectedProject.items.length} items)</option>
+              <option value="pending">Pending ({selectedProject.items.filter(i => i.status === 'pending').length} items)</option>
+              <option value="in-progress">In Progress ({selectedProject.items.filter(i => i.status === 'in-progress').length} items)</option>
+              <option value="closed">Review ({selectedProject.items.filter(i => i.status === 'closed').length} items)</option>
+            </select>
+            {hierarchyStatusFilter && (
+              <button
+                onClick={() => setHierarchyStatusFilter('')}
+                className="icon-btn"
+                title="Clear filter"
+              >
+                ✕
+              </button>
+            )}
+            {hierarchyStatusFilter && (
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                Showing {filteredItems.length} {hierarchyStatusFilter} item(s)
+              </span>
+            )}
+          </div>
+          
           {filteredItems.length > 0 ? (
             renderHierarchyTree(filteredItems, null, 0)
           ) : (
@@ -2354,7 +2400,7 @@ const ProjectManager = () => {
     if (!selectedProject) return null;
     
     const items = selectedProject.items;
-    const completedItems = items.filter(i => i.status === 'review');
+    const completedItems = items.filter(i => i.status === 'closed');
     const inProgressItems = items.filter(i => i.status === 'in-progress');
     
     // Group by type
@@ -2448,7 +2494,7 @@ const ProjectManager = () => {
     );
   };
   
-  
+ 
   
   const renderCalendar = () => {
     if (!selectedProject) return <div className="card">Select a project to view calendar</div>;
@@ -2620,9 +2666,9 @@ const ProjectManager = () => {
                           padding: '1px 3px',
                           marginBottom: '1px',
                           borderRadius: '2px',
-                          backgroundColor: item.status === 'review' ? '#dcfce7' :
+                          backgroundColor: item.status === 'closed' ? '#dcfce7' :
                                          item.status === 'in-progress' ? '#dbeafe' : '#f3f4f6',
-                          color: item.status === 'review' ? '#166534' :
+                          color: item.status === 'closed' ? '#166534' :
                                 item.status === 'in-progress' ? '#1e40af' : '#374151',
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
@@ -2639,7 +2685,23 @@ const ProjectManager = () => {
                       </div>
                     ))}
                     {items.length > 3 && (
-                      <div style={{ fontSize: '9px', color: '#6b7280', marginTop: '1px' }}>
+                      <div 
+                        style={{ 
+                          fontSize: '10px', 
+                          color: '#2563eb', 
+                          marginTop: '2px', 
+                          cursor: 'pointer',
+                          fontWeight: '600',
+                          textDecoration: 'underline'
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCalendarOverflowDate(dateStr);
+                          setCalendarOverflowItems(items);
+                          setShowCalendarOverflowModal(true);
+                        }}
+                        title="Click to see all items"
+                      >
                         +{items.length - 3} more
                       </div>
                     )}
@@ -2652,7 +2714,6 @@ const ProjectManager = () => {
       </div>
     );
   };
-    
   
   const renderTimeline = () => {
     if (!selectedProject) return <div className="card">Select a project to view timeline</div>;
@@ -2946,7 +3007,7 @@ const ProjectManager = () => {
                 >
                   <option value="pending">Pending</option>
                   <option value="in-progress">In Progress</option>
-                  <option value="review">Review</option>
+                  <option value="closed">Closed</option>
                 </select>
               </div>
             </div>
@@ -3210,7 +3271,7 @@ const ProjectManager = () => {
                 >
                   <option value="pending">Pending</option>
                   <option value="in-progress">In Progress</option>
-                  <option value="review">Review</option>
+                  <option value="closed">Closed</option>
                 </select>
               </div>
               
@@ -4121,6 +4182,79 @@ const ProjectManager = () => {
                 style={{ flex: 1 }}
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Calendar Overflow Modal - Show all items for a date */}
+      {showCalendarOverflowModal && (
+        <div className="modal-overlay" onClick={() => setShowCalendarOverflowModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px' }}>
+              Items on {calendarOverflowDate ? new Date(calendarOverflowDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) : ''}
+            </h2>
+            
+            <div style={{ marginBottom: '12px', fontSize: '14px', color: '#6b7280' }}>
+              {calendarOverflowItems.length} total item(s)
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '400px', overflowY: 'auto' }}>
+              {calendarOverflowItems.map(item => (
+                <div 
+                  key={item.id}
+                  style={{
+                    padding: '12px',
+                    borderRadius: '6px',
+                    backgroundColor: item.status === 'pending' ? '#f3f4f6' :
+                                   item.status === 'in-progress' ? '#dbeafe' :
+                                   item.status === 'closed' ? '#dcfce7' :
+                                   '#fee2e2',
+                    border: '1px solid',
+                    borderColor: item.status === 'pending' ? '#d1d5db' :
+                               item.status === 'in-progress' ? '#93c5fd' :
+                               item.status === 'closed' ? '#86efac' :
+                               '#fca5a5',
+                    cursor: 'pointer',
+                    transition: 'transform 0.1s'
+                  }}
+                  onClick={() => {
+                    setSelectedItem(item);
+                    setShowItemDetailsModal(true);
+                    setShowCalendarOverflowModal(false);
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                  title="Click to view details"
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '16px' }}>{getItemIcon(item.type)}</span>
+                    <span style={{ fontWeight: '600', fontSize: '14px' }}>{item.name}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#6b7280', marginLeft: '24px' }}>
+                    <span style={{ marginRight: '12px' }}>📌 {item.type}</span>
+                    <span style={{ marginRight: '12px' }}>👤 {item.assignee || 'Unassigned'}</span>
+                    <span style={{ marginRight: '12px' }}>
+                      🚦 {item.status === 'pending' ? 'Pending' : 
+                          item.status === 'in-progress' ? 'In Progress' : 
+                          item.status === 'closed' ? 'Closed' : item.status}
+                    </span>
+                    {item.jira && (
+                      <span style={{ color: '#9333ea' }}>🔗 {item.jira.issueKey}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div style={{ marginTop: '24px' }}>
+              <button 
+                onClick={() => setShowCalendarOverflowModal(false)}
+                className="btn btn-secondary"
+                style={{ width: '100%' }}
+              >
+                Close
               </button>
             </div>
           </div>
