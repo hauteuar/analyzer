@@ -794,6 +794,7 @@ const ProjectManager = () => {
   };
   
   
+  
   // Sync ALL Jira-linked items in a project from Jira
   const syncAllFromJira = async () => {
     if (!selectedProject || !jiraConfig.connected) {
@@ -948,6 +949,33 @@ const ProjectManager = () => {
     
     setNewProject({ name: '', description: '', startDate: '', endDate: '', status: 'planning' });
     setShowProjectModal(false);
+  };
+  
+  const deleteProject = async (projectId) => {
+    if (!confirm('Are you sure you want to delete this project? This action cannot be undone.')) {
+      return;
+    }
+    
+    const updatedProjects = projects.filter(p => p.id !== projectId);
+    setProjects(updatedProjects);
+    
+    // If deleting the currently selected project, clear selection
+    if (selectedProject && selectedProject.id === projectId) {
+      setSelectedProject(null);
+      setActiveView('dashboard');
+    }
+    
+    if (useBackend) {
+      try {
+        await fetch(`${backendUrl}/projects/${projectId}`, {
+          method: 'DELETE'
+        });
+      } catch (error) {
+        console.error('Error deleting project from backend:', error);
+      }
+    }
+    
+    alert('Project deleted successfully');
   };
   
   const addItem = async () => {
@@ -1938,6 +1966,8 @@ const ProjectManager = () => {
     );
   };
   
+  
+  
   const renderWorkloadChart = () => {
     if (!selectedProject) return null;
     const items = selectedProject.items;
@@ -2083,19 +2113,48 @@ const ProjectManager = () => {
               <div 
                 key={project.id}
                 className="card"
-                style={{ marginBottom: '16px', cursor: 'pointer' }}
-                onClick={() => {
-                  setSelectedProject(project);
-                  setActiveView('hierarchy');
-                }}
+                style={{ marginBottom: '16px' }}
               >
-                <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
-                  {project.name}
-                </h3>
-                <p style={{ color: '#6b7280', marginBottom: '12px' }}>{project.description}</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                  <div 
+                    style={{ flex: 1, cursor: 'pointer' }}
+                    onClick={() => {
+                      setSelectedProject(project);
+                      setActiveView('hierarchy');
+                    }}
+                  >
+                    <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
+                      {project.name}
+                    </h3>
+                    <p style={{ color: '#6b7280', marginBottom: '12px' }}>{project.description}</p>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteProject(project.id);
+                    }}
+                    className="icon-btn"
+                    style={{ 
+                      color: '#dc2626', 
+                      marginLeft: '12px',
+                      padding: '8px',
+                      fontSize: '18px'
+                    }}
+                    title="Delete project"
+                  >
+                    🗑️
+                  </button>
+                </div>
                 
                 {/* Project-Level Stats */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', marginBottom: '12px' }}>
+                <div 
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    setSelectedProject(project);
+                    setActiveView('hierarchy');
+                  }}
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', marginBottom: '12px' }}>
                   <div style={{ 
                     padding: '8px', 
                     backgroundColor: '#dbeafe', 
@@ -2166,9 +2225,16 @@ const ProjectManager = () => {
                     </div>
                   </div>
                 </div>
+                </div>
                 
                 {/* Additional Info */}
-                <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#6b7280', flexWrap: 'wrap' }}>
+                <div 
+                  style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#6b7280', flexWrap: 'wrap', cursor: 'pointer' }}
+                  onClick={() => {
+                    setSelectedProject(project);
+                    setActiveView('hierarchy');
+                  }}
+                >
                   <span>
                     {project.items.filter(i => i.jira).length > 0 ? (
                       <span style={{ color: '#7c3aed', fontWeight: 'bold' }}>
@@ -2744,7 +2810,7 @@ const ProjectManager = () => {
                         }}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setCalendarOverflowDate(dateStr);
+                          setCalendarOverflowDate(date.toISOString());
                           setCalendarOverflowItems(items);
                           setShowCalendarOverflowModal(true);
                         }}
@@ -2762,6 +2828,7 @@ const ProjectManager = () => {
       </div>
     );
   };
+    
   
   const renderTimeline = () => {
     if (!selectedProject) return <div className="card">Select a project to view timeline</div>;
