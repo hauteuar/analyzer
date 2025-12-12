@@ -1861,23 +1861,68 @@ const ProjectManager = () => {
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
-          <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#f3f4f6', borderRadius: '8px' }}>
+          <div 
+            style={{ textAlign: 'center', padding: '12px', backgroundColor: '#f3f4f6', borderRadius: '8px', cursor: 'pointer', transition: 'transform 0.2s' }}
+            onClick={() => setActiveView('hierarchy')}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+            title="Click to view all items"
+          >
             <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '4px' }}>TOTAL</div>
             <div style={{ fontSize: '22px', fontWeight: 'bold' }}>{total}</div>
           </div>
-          <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#f3f4f6', borderRadius: '8px' }}>
+          <div 
+            style={{ textAlign: 'center', padding: '12px', backgroundColor: '#f3f4f6', borderRadius: '8px', cursor: 'pointer', transition: 'transform 0.2s' }}
+            onClick={() => {
+              setActiveView('hierarchy');
+              setFilterStatus('pending');
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+            title="Click to view pending items"
+          >
             <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '4px' }}>PENDING</div>
             <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#6b7280' }}>{pending}</div>
           </div>
-          <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#dbeafe', borderRadius: '8px' }}>
+          <div 
+            style={{ textAlign: 'center', padding: '12px', backgroundColor: '#dbeafe', borderRadius: '8px', cursor: 'pointer', transition: 'transform 0.2s' }}
+            onClick={() => {
+              setActiveView('hierarchy');
+              setFilterStatus('in-progress');
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+            title="Click to view in-progress items"
+          >
             <div style={{ fontSize: '11px', color: '#1e40af', marginBottom: '4px' }}>PROGRESS</div>
             <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#2563eb' }}>{inProgress}</div>
           </div>
-          <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#dcfce7', borderRadius: '8px' }}>
+          <div 
+            style={{ textAlign: 'center', padding: '12px', backgroundColor: '#dcfce7', borderRadius: '8px', cursor: 'pointer', transition: 'transform 0.2s' }}
+            onClick={() => {
+              setActiveView('hierarchy');
+              setFilterStatus('review');
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+            title="Click to view review items"
+          >
             <div style={{ fontSize: '11px', color: '#166534', marginBottom: '4px' }}>REVIEW</div>
             <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#16a34a' }}>{completed}</div>
           </div>
-          <div style={{ textAlign: 'center', padding: '12px', backgroundColor: '#fee2e2', borderRadius: '8px' }}>
+          <div 
+            style={{ textAlign: 'center', padding: '12px', backgroundColor: '#fee2e2', borderRadius: '8px', cursor: 'pointer', transition: 'transform 0.2s' }}
+            onClick={() => {
+              setActiveView('hierarchy');
+              setFilterStatus('all');
+              // Expand all items to show overdue
+              const allItemIds = selectedProject.items.map(i => i.id);
+              setExpandedItems(new Set(allItemIds));
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+            title="Click to view overdue items (expanded)"
+          >
             <div style={{ fontSize: '11px', color: '#991b1b', marginBottom: '4px' }}>OVERDUE</div>
             <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#dc2626' }}>{overdue}</div>
           </div>
@@ -1886,7 +1931,57 @@ const ProjectManager = () => {
     );
   };
   
-  
+  const renderStatusChart = () => {
+    if (!selectedProject) return null;
+    const items = selectedProject.items;
+    const statusCounts = { 
+      pending: items.filter(i => i.status === 'pending').length, 
+      inProgress: items.filter(i => i.status === 'in-progress').length, 
+      review: items.filter(i => i.status === 'review').length,
+      overdue: items.filter(i => isOverdue(i)).length
+    };
+    const total = items.length;
+    const pPercent = total > 0 ? (statusCounts.pending / total) * 100 : 0;
+    const iPercent = total > 0 ? (statusCounts.inProgress / total) * 100 : 0;
+    const rPercent = total > 0 ? (statusCounts.review / total) * 100 : 0;
+    const oPercent = total > 0 ? (statusCounts.overdue / total) * 100 : 0;
+    
+    return (
+      <div className="chart-container">
+        <h3 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '24px', textAlign: 'center' }}>Status Distribution</h3>
+        <div style={{ display: 'flex', gap: '48px', alignItems: 'center', justifyContent: 'center' }}>
+          <div><svg width="250" height="250" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="40" fill="transparent" stroke="#9ca3af" strokeWidth="80" strokeDasharray={`${pPercent * 2.513} 251.3`} transform="rotate(-90 50 50)" />
+            <circle cx="50" cy="50" r="40" fill="transparent" stroke="#2563eb" strokeWidth="80" strokeDasharray={`${iPercent * 2.513} 251.3`} strokeDashoffset={`-${pPercent * 2.513}`} transform="rotate(-90 50 50)" />
+            <circle cx="50" cy="50" r="40" fill="transparent" stroke="#16a34a" strokeWidth="80" strokeDasharray={`${rPercent * 2.513} 251.3`} strokeDashoffset={`-${(pPercent + iPercent) * 2.513}`} transform="rotate(-90 50 50)" />
+            <circle cx="50" cy="50" r="40" fill="transparent" stroke="#ef4444" strokeWidth="80" strokeDasharray={`${oPercent * 2.513} 251.3`} strokeDashoffset={`-${(pPercent + iPercent + rPercent) * 2.513}`} transform="rotate(-90 50 50)" />
+          </svg></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <div style={{ width: '24px', height: '24px', backgroundColor: '#9ca3af', borderRadius: '4px' }} />
+              <div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>Pending</div>
+              <div style={{ fontSize: '14px', color: '#6b7280' }}>{statusCounts.pending} ({Math.round(pPercent)}%)</div></div>
+            </div>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <div style={{ width: '24px', height: '24px', backgroundColor: '#2563eb', borderRadius: '4px' }} />
+              <div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>In Progress</div>
+              <div style={{ fontSize: '14px', color: '#6b7280' }}>{statusCounts.inProgress} ({Math.round(iPercent)}%)</div></div>
+            </div>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <div style={{ width: '24px', height: '24px', backgroundColor: '#16a34a', borderRadius: '4px' }} />
+              <div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>Review</div>
+              <div style={{ fontSize: '14px', color: '#6b7280' }}>{statusCounts.review} ({Math.round(rPercent)}%)</div></div>
+            </div>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <div style={{ width: '24px', height: '24px', backgroundColor: '#ef4444', borderRadius: '4px' }} />
+              <div><div style={{ fontSize: '16px', fontWeight: 'bold' }}>Overdue</div>
+              <div style={{ fontSize: '14px', color: '#6b7280' }}>{statusCounts.overdue} ({Math.round(oPercent)}%)</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
   
   const renderWorkloadChart = () => {
     if (!selectedProject) return null;
@@ -1912,7 +2007,7 @@ const ProjectManager = () => {
               <div style={{ flex: 1 }}><div style={{ display: 'flex', height: '32px', borderRadius: '4px', overflow: 'hidden', backgroundColor: '#f3f4f6' }}>
                 {d.review > 0 && <div style={{ width: `${(d.review/d.total)*100}%`, backgroundColor: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '12px', fontWeight: 'bold' }}>{d.review}</div>}
                 {d.inProgress > 0 && <div style={{ width: `${(d.inProgress/d.total)*100}%`, backgroundColor: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '12px', fontWeight: 'bold' }}>{d.inProgress}</div>}
-                {d.pending > 0 && <div style={{ width: `${(d.pending/d.total)*100}%`, backgroundColor: '#ca8a04', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '12px', fontWeight: 'bold' }}>{d.pending}</div>}
+                {d.pending > 0 && <div style={{ width: `${(d.pending/d.total)*100}%`, backgroundColor: '#9ca3af', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '12px', fontWeight: 'bold' }}>{d.pending}</div>}
               </div></div>
               <div style={{ width: '120px', textAlign: 'right' }}>
                 <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{d.total} items</div>
@@ -1948,10 +2043,10 @@ const ProjectManager = () => {
             <div style={{ height: '24px', display: 'flex', borderRadius: '6px', overflow: 'hidden', backgroundColor: '#e5e7eb' }}>
               {co > 0 && <div style={{ width: `${(co/t)*100}%`, backgroundColor: '#16a34a' }} />}
               {ip > 0 && <div style={{ width: `${(ip/t)*100}%`, backgroundColor: '#2563eb' }} />}
-              {p > 0 && <div style={{ width: `${(p/t)*100}%`, backgroundColor: '#ca8a04' }} />}
+              {p > 0 && <div style={{ width: `${(p/t)*100}%`, backgroundColor: '#9ca3af' }} />}
             </div>
             <div style={{ display: 'flex', gap: '16px', marginTop: '12px', fontSize: '12px' }}>
-              <span style={{ color: '#16a34a' }}>✓ {co}</span><span style={{ color: '#2563eb' }}>⟳ {ip}</span><span style={{ color: '#ca8a04' }}>○ {p}</span>
+              <span style={{ color: '#16a34a' }}>✓ {co}</span><span style={{ color: '#2563eb' }}>⟳ {ip}</span><span style={{ color: '#9ca3af' }}>○ {p}</span>
             </div>
           </div>);
         })}
@@ -2062,14 +2157,14 @@ const ProjectManager = () => {
                   
                   <div style={{ 
                     padding: '8px', 
-                    backgroundColor: '#fef3c7', 
+                    backgroundColor: '#f3f4f6', 
                     borderRadius: '6px',
                     textAlign: 'center'
                   }}>
-                    <div style={{ fontSize: '9px', fontWeight: '600', color: '#92400e', marginBottom: '2px' }}>
+                    <div style={{ fontSize: '9px', fontWeight: '600', color: '#6b7280', marginBottom: '2px' }}>
                       PENDING
                     </div>
-                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#92400e' }}>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#4b5563' }}>
                       {projectStats.pending}
                     </div>
                   </div>
@@ -2353,108 +2448,7 @@ const ProjectManager = () => {
     );
   };
   
-  const renderStatusChart = () => {
-    if (!selectedProject) return null;
-    
-    const items = selectedProject.items;
-    const pending = items.filter(i => i.status === 'pending').length;
-    const inProgress = items.filter(i => i.status === 'in-progress').length;
-    const review = items.filter(i => i.status === 'review').length;
-    const total = items.length;
-    
-    const pendingPercent = total > 0 ? (pending / total) * 100 : 0;
-    const inProgressPercent = total > 0 ? (inProgress / total) * 100 : 0;
-    const reviewPercent = total > 0 ? (review / total) * 100 : 0;
-    
-    return (
-      <div className="chart-container">
-        <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '16px' }}>Status Distribution</h3>
-        
-        <div style={{ display: 'flex', gap: '48px', alignItems: 'center' }}>
-          <div style={{ position: 'relative', width: '200px', height: '200px' }}>
-            <svg viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
-              <circle cx="50" cy="50" r="40" fill="none" stroke="#f3f4f6" strokeWidth="20" />
-              <circle 
-                cx="50" 
-                cy="50" 
-                r="40" 
-                fill="none" 
-                stroke="#6b7280" 
-                strokeWidth="20"
-                strokeDasharray={`${pendingPercent * 2.51} ${251 - pendingPercent * 2.51}`}
-                strokeDashoffset="0"
-              />
-              <circle 
-                cx="50" 
-                cy="50" 
-                r="40" 
-                fill="none" 
-                stroke="#2563eb" 
-                strokeWidth="20"
-                strokeDasharray={`${inProgressPercent * 2.51} ${251 - inProgressPercent * 2.51}`}
-                strokeDashoffset={`-${pendingPercent * 2.51}`}
-              />
-              <circle 
-                cx="50" 
-                cy="50" 
-                r="40" 
-                fill="none" 
-                stroke="#16a34a" 
-                strokeWidth="20"
-                strokeDasharray={`${reviewPercent * 2.51} ${251 - reviewPercent * 2.51}`}
-                strokeDashoffset={`-${(pendingPercent + inProgressPercent) * 2.51}`}
-              />
-            </svg>
-            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' }}>
-              <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{total}</div>
-              <div style={{ fontSize: '12px', color: '#6b7280' }}>Items</div>
-            </div>
-          </div>
-          
-          <div style={{ flex: 1 }}>
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ width: '16px', height: '16px', backgroundColor: '#6b7280', borderRadius: '2px' }} />
-                  <span style={{ fontSize: '14px' }}>Pending</span>
-                </div>
-                <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{pending} ({pendingPercent.toFixed(0)}%)</span>
-              </div>
-              <div style={{ height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                <div style={{ width: `${pendingPercent}%`, height: '100%', backgroundColor: '#6b7280' }} />
-              </div>
-            </div>
-            
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ width: '16px', height: '16px', backgroundColor: '#2563eb', borderRadius: '2px' }} />
-                  <span style={{ fontSize: '14px' }}>In Progress</span>
-                </div>
-                <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{inProgress} ({inProgressPercent.toFixed(0)}%)</span>
-              </div>
-              <div style={{ height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                <div style={{ width: `${inProgressPercent}%`, height: '100%', backgroundColor: '#2563eb' }} />
-              </div>
-            </div>
-            
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ width: '16px', height: '16px', backgroundColor: '#16a34a', borderRadius: '2px' }} />
-                  <span style={{ fontSize: '14px' }}>Review/Done</span>
-                </div>
-                <span style={{ fontSize: '14px', fontWeight: 'bold' }}>{review} ({reviewPercent.toFixed(0)}%)</span>
-              </div>
-              <div style={{ height: '8px', backgroundColor: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
-                <div style={{ width: `${reviewPercent}%`, height: '100%', backgroundColor: '#16a34a' }} />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  
   
   const renderCalendar = () => {
     if (!selectedProject) return <div className="card">Select a project to view calendar</div>;
@@ -2658,7 +2652,8 @@ const ProjectManager = () => {
       </div>
     );
   };
-        
+    
+  
   const renderTimeline = () => {
     if (!selectedProject) return <div className="card">Select a project to view timeline</div>;
     
