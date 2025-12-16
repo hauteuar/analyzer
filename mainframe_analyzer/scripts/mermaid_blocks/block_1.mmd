@@ -1,0 +1,53 @@
+graph TB
+    subgraph PRES[PRESENTATION LAYER]
+        UI[Visual Flow Builder]
+        CHAT[Chat Interface]
+        DASH[Operations Dashboard]
+        PROMPT[NL Prompt Builder]
+    end
+    
+    subgraph GW[API GATEWAY]
+        AUTH[Auth OAuth2 SAML]
+        RATE[Rate Limiting]
+        ROUTE[API Router]
+    end
+    
+    subgraph ORCH[ORCHESTRATION]
+        ENGINE[Workflow Engine]
+        SCHEDULER[Job Scheduler]
+        STATE[State Manager]
+        QUEUE[Message Queue]
+    end
+    
+    subgraph AILLM[AI LLM LAYER]
+        LLM[LLM Generate API]
+        NLP[NLP Processor]
+        AGENT[AI Agent]
+    end
+    
+    subgraph MCPL[MCP SERVERS]
+        DB_MCP[Database MCPs]
+        INFRA_MCP[Infra MCPs]
+        APP_MCP[App MCPs]
+    end
+    
+    subgraph DATA[DATA LAYER]
+        PG[(PostgreSQL)]
+        REDIS[(Redis)]
+        S3[(S3 MinIO)]
+        VAULT[(Vault)]
+    end
+    
+    subgraph K8S[KUBERNETES]
+        PODS[Workflow Pods]
+        HELM[Helm Charts]
+        ISTIO[Service Mesh]
+    end
+    
+    PRES --> GW
+    GW --> ORCH
+    ORCH --> AILLM
+    ORCH --> MCPL
+    AILLM --> MCPL
+    MCPL --> DATA
+    ORCH --> K8S

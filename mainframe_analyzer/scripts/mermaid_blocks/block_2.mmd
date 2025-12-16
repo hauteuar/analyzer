@@ -1,0 +1,177 @@
+classDiagram
+    class WorkflowDefinition {
+        +String id
+        +String name
+        +String version
+        +String status
+        +List nodes
+        +List edges
+        +Map variables
+        +TriggerConfig trigger
+        +create()
+        +validate()
+        +deploy()
+        +getExecutionHistory()
+    }
+    
+    class Node {
+        +String id
+        +String type
+        +String mcpServerId
+        +Map config
+        +List inputPorts
+        +List outputPorts
+        +execute()
+        +validate()
+    }
+    
+    class Edge {
+        +String id
+        +String sourceNodeId
+        +String targetNodeId
+        +String sourcePort
+        +String targetPort
+        +Condition condition
+    }
+    
+    class TriggerConfig {
+        +String type
+        +String cronExpression
+        +String webhookPath
+        +String eventPattern
+        +activate()
+        +deactivate()
+    }
+    
+    class WorkflowExecution {
+        +String executionId
+        +String workflowId
+        +String status
+        +DateTime startTime
+        +DateTime endTime
+        +Map context
+        +List nodeExecutions
+        +start()
+        +pause()
+        +resume()
+        +cancel()
+        +getMetrics()
+    }
+    
+    class NodeExecution {
+        +String id
+        +String nodeId
+        +String status
+        +DateTime startTime
+        +DateTime endTime
+        +Object input
+        +Object output
+        +String errorMessage
+    }
+    
+    class MCPServer {
+        +String serverId
+        +String serverType
+        +Object connection
+        +connect()
+        +disconnect()
+        +executeAction()
+        +listActions()
+        +healthCheck()
+    }
+    
+    class DatabaseMCP {
+        +String dbType
+        +String connectionString
+        +executeQuery()
+        +executeStoredProc()
+        +bulkInsert()
+        +getSchema()
+    }
+    
+    class UnixMCP {
+        +String hostname
+        +Object sshConfig
+        +executeCommand()
+        +uploadFile()
+        +downloadFile()
+        +listDirectory()
+    }
+    
+    class JiraMCP {
+        +String baseUrl
+        +String apiToken
+        +createIssue()
+        +updateIssue()
+        +searchIssues()
+        +addComment()
+    }
+    
+    class SharePointMCP {
+        +String siteUrl
+        +String tenantId
+        +uploadDocument()
+        +downloadDocument()
+        +searchDocuments()
+        +listFolder()
+    }
+    
+    class LLMService {
+        +String endpoint
+        +String modelId
+        +generate()
+        +parseIntent()
+        +generateWorkflowDSL()
+        +summarizeResults()
+    }
+    
+    class BotConnector {
+        +String connectorId
+        +String platform
+        +receiveMessage()
+        +sendMessage()
+        +sendInteractiveMsg()
+        +registerWebhook()
+    }
+    
+    class ExecutionEngine {
+        +Object registry
+        +Object mcpRegistry
+        +Object stateStore
+        +startExecution()
+        +processNode()
+        +handleError()
+        +checkpoint()
+    }
+    
+    class StateStore {
+        +save()
+        +load()
+        +delete()
+        +listByStatus()
+    }
+    
+    class AuditLog {
+        +String logId
+        +DateTime timestamp
+        +String userId
+        +String action
+        +String resourceType
+        +log()
+        +query()
+    }
+    
+    WorkflowDefinition "1" o-- "*" Node : contains
+    WorkflowDefinition "1" o-- "*" Edge : contains
+    WorkflowDefinition "1" o-- "1" TriggerConfig : has
+    WorkflowExecution "1" o-- "*" NodeExecution : contains
+    WorkflowExecution --> WorkflowDefinition : references
+    MCPServer <|-- DatabaseMCP : extends
+    MCPServer <|-- UnixMCP : extends
+    MCPServer <|-- JiraMCP : extends
+    MCPServer <|-- SharePointMCP : extends
+    ExecutionEngine --> MCPServer : uses
+    ExecutionEngine --> LLMService : uses
+    ExecutionEngine --> StateStore : uses
+    ExecutionEngine --> AuditLog : logs to
+    Node --> MCPServer : calls

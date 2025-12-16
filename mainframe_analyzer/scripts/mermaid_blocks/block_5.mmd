@@ -1,0 +1,40 @@
+flowchart LR
+    subgraph JAVA[JAVA STACK]
+        SPRING[Spring Boot Microservices]
+        KAFKA_J[Kafka Consumers]
+        REST[REST APIs]
+        BATCH[Spring Batch Jobs]
+    end
+    
+    subgraph MAINFRAME[MAINFRAME STACK]
+        COBOL[COBOL Batch Jobs]
+        JCL[JCL Scripts]
+        CICS[CICS Transactions]
+        IMS[IMS DB Hierarchical]
+    end
+    
+    subgraph ETL[ETL STACK]
+        INFO[Informatica DI]
+        TALEND[Talend Batch ETL]
+        KAFKA_S[Kafka Streams RT]
+        SPARK[Spark Processing]
+    end
+    
+    subgraph DBS[DATABASE STACK]
+        DB2_E[(DB2 Enterprise)]
+        ORA_E[(Oracle 19c RAC)]
+        CR_E[(CockroachDB Distributed)]
+        SQL_E[(SQL Server 2019)]
+    end
+    
+    subgraph INTEG[INTEGRATION LAYER]
+        MQ[IBM MQ Messaging]
+        ESB[Enterprise Service Bus]
+        GW[API Gateway]
+        CDC[Change Data Capture]
+    end
+    
+    JAVA --> INTEG
+    MAINFRAME --> INTEG
+    ETL --> INTEG
+    INTEG --> DBS

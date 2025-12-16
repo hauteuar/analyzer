@@ -1,0 +1,43 @@
+flowchart TB
+    subgraph FRONTEND[POC FRONTEND]
+        UI_S[Simple Web UI React Vite]
+        CHAT_W[Chat Widget WebSocket]
+    end
+    
+    subgraph BACKEND[POC BACKEND DOCKER COMPOSE]
+        subgraph CORE_C[CORE SERVICES]
+            API_S[API Service NodeJS FastAPI Port 8080]
+            WF_S[Workflow Engine Temporal Lite Port 7233]
+            BOT_S[Bot Service Slack Teams SDK Port 3000]
+        end
+        
+        subgraph MCP_C[MCP SERVERS]
+            DB_MCP_P[Database MCP DB2 Oracle Port 9001]
+            UNIX_MCP_P[Unix MCP SSH Client Port 9002]
+            DOC_MCP_P[Document MCP SharePoint Port 9003]
+        end
+        
+        subgraph DATA_C[DATA LAYER]
+            PG_P[(PostgreSQL Workflow Store)]
+            REDIS_P[(Redis Cache)]
+        end
+    end
+    
+    subgraph LLM_EXT[LLM SERVICE EXTERNAL]
+        GPU[GPU Server generate API Already Running]
+    end
+    
+    subgraph ENT[ENTERPRISE SYSTEMS EXISTING]
+        E_DB2[(DB2 Production)]
+        E_ORA[(Oracle Production)]
+        E_UNIX[Unix Servers]
+        E_SP[SharePoint]
+    end
+    
+    FRONTEND --> BACKEND
+    API_S --> WF_S
+    WF_S --> MCP_C
+    BOT_S --> API_S
+    API_S --> GPU
+    MCP_C --> ENT
+    CORE_C --> DATA_C

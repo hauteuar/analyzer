@@ -1,0 +1,66 @@
+flowchart TB
+    subgraph INGRESS[INGRESS LAYER]
+        NGINX[NGINX Ingress TLS]
+        WAF[Web Application Firewall]
+    end
+    
+    subgraph API[API LAYER]
+        API_GW[API Gateway Kong]
+        AUTH_S[Auth Service OAuth2 JWT]
+        RATE_L[Rate Limiter Redis]
+    end
+    
+    subgraph CORE[CORE MICROSERVICES]
+        subgraph WF_SVC[WORKFLOW SERVICE]
+            WF_API[Workflow API CRUD]
+            WF_VAL[Workflow Validator]
+            WF_VER[Version Manager]
+        end
+        
+        subgraph EXEC_SVC[EXECUTION SERVICE]
+            EXEC_ENG[Execution Engine Temporal]
+            STATE_M[State Manager]
+            CHKPT[Checkpoint Handler]
+        end
+        
+        subgraph MCP_SVC[MCP GATEWAY SERVICE]
+            MCP_RT[MCP Router]
+            MCP_POOL[Connection Pool]
+            MCP_CACHE[Result Cache]
+        end
+        
+        subgraph BOT_SVC[BOT CONNECTOR SERVICE]
+            BOT_AD[Platform Adapters]
+            MSG_Q[Message Queue]
+            WH_MGR[Webhook Manager]
+        end
+        
+        subgraph LLM_SVC[LLM SERVICE]
+            LLM_PX[LLM Proxy GPU Server]
+            PROMPT_M[Prompt Manager]
+            RESP_P[Response Parser]
+        end
+    end
+    
+    subgraph DATA_SVC[DATA SERVICES]
+        PG_SVC[(PostgreSQL Workflow Store)]
+        REDIS_SVC[(Redis Cluster Cache)]
+        MONGO_SVC[(MongoDB Audit Logs)]
+        S3_SVC[(S3 MinIO Documents)]
+    end
+    
+    subgraph INFRA_SVC[INFRASTRUCTURE SERVICES]
+        VAULT_SVC[HashiCorp Vault Secrets]
+        CONSUL_SVC[Consul Service Discovery]
+        KAFKA_SVC[Kafka Event Bus]
+    end
+    
+    INGRESS --> API
+    API --> CORE
+    CORE --> DATA_SVC
+    CORE --> INFRA_SVC
+    
+    WF_SVC <--> EXEC_SVC
+    EXEC_SVC <--> MCP_SVC
+    BOT_SVC <--> LLM_SVC
+    LLM_SVC <--> MCP_SVC

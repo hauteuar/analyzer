@@ -1,0 +1,76 @@
+flowchart TB
+    subgraph REGISTRY[MCP SERVER REGISTRY]
+        REG_API[Registry API Service Discovery]
+        HEALTH[Health Monitor Heartbeat]
+        CFG_ST[Config Store Connection Details]
+    end
+    
+    subgraph GATEWAY[MCP GATEWAY]
+        ROUTER_M[Request Router]
+        AUTH_H[Auth Handler Credential Injection]
+        CB[Circuit Breaker Resilience4j]
+        RETRY[Retry Handler Exponential Backoff]
+        CACHE_M[Result Cache Redis TTL]
+    end
+    
+    subgraph DB_MCP[DATABASE MCP SERVERS]
+        subgraph DB2_MCP[DB2 MCP SERVER]
+            DB2_CONN[Connection Pool HikariCP]
+            DB2_QUERY[Query Executor]
+            DB2_SP[Stored Proc Caller]
+        end
+        
+        subgraph ORA_MCP[ORACLE MCP SERVER]
+            ORA_CONN[Connection Pool UCP]
+            ORA_QUERY[Query Executor]
+            ORA_PKG[Package Executor]
+        end
+        
+        subgraph CR_MCP[COCKROACHDB MCP SERVER]
+            CR_CONN[Connection Pool pgx]
+            CR_QUERY[Distributed Query]
+            CR_TXN[Transaction Handler]
+        end
+        
+        subgraph SQL_MCP[SQL SERVER MCP]
+            SQL_CONN[Connection Pool JDBC]
+            SQL_QUERY[Query Executor]
+            SQL_SP[Stored Proc Caller]
+        end
+    end
+    
+    subgraph INFRA_MCP[INFRASTRUCTURE MCP SERVERS]
+        subgraph UNIX_MCP[UNIX LINUX MCP]
+            SSH_POOL[SSH Pool JSch]
+            CMD_EXEC[Command Executor]
+            FILE_OPS[File Operations]
+        end
+        
+        subgraph MF_MCP[MAINFRAME MCP]
+            TN3270[TN3270 Client]
+            JES[JES2 JES3 Client]
+            FTP[FTP SFTP Client]
+        end
+    end
+    
+    subgraph APP_MCP[APPLICATION MCP SERVERS]
+        subgraph JIRA_MCP[JIRA MCP SERVER]
+            JIRA_CLI[Jira REST Client]
+            JQL_ENG[JQL Query Engine]
+        end
+        
+        subgraph SP_MCP[SHAREPOINT MCP]
+            SP_CLI[Graph API Client]
+            SP_SEARCH[Search API]
+        end
+        
+        subgraph SNOW_MCP[SERVICENOW MCP]
+            SNOW_CLI[REST API Client]
+            TABLE_API[Table API]
+        end
+    end
+    
+    REGISTRY --> GATEWAY
+    GATEWAY --> DB_MCP
+    GATEWAY --> INFRA_MCP
+    GATEWAY --> APP_MCP

@@ -1,0 +1,34 @@
+sequenceDiagram
+    participant User
+    participant Bot as Existing AI Bot
+    participant Conn as Bot Connector API
+    participant Engine as Workflow Engine
+    participant MCP as MCP Servers
+    participant LLM as LLM Service
+    
+    User->>Bot: Check violations for account 12345
+    Bot->>Conn: POST /api/v1/connector/trigger
+    Note over Conn: Authenticate and Validate
+    
+    Conn->>LLM: Parse Intent and Entities
+    LLM-->>Conn: intent check_violations account 12345
+    
+    Conn->>Engine: Start Workflow Execution
+    Engine->>MCP: Execute DB2 Query
+    MCP-->>Engine: Violation Data
+    Engine->>MCP: Execute SQL Server Query
+    MCP-->>Engine: Additional Data
+    
+    Engine->>LLM: Generate Summary
+    LLM-->>Engine: Natural Language Summary
+    
+    Engine-->>Conn: Execution Result
+    
+    alt Synchronous Response
+        Conn-->>Bot: 200 OK with Result
+        Bot-->>User: Display Result Card
+    else Async with Callback
+        Conn-->>Bot: 202 Accepted with execution_id
+        Conn->>Bot: POST callback_url with Result
+        Bot-->>User: Display Result Card
+    end

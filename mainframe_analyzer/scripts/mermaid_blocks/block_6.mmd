@@ -1,0 +1,114 @@
+flowchart TB
+    subgraph DEV[DEVELOPMENT]
+        LOCAL[Local Dev - Docker Compose]
+        IDE[IDE - IntelliJ VSCode]
+        UNIT[Unit Tests - JUnit Jest]
+    end
+    
+    subgraph VCS[BITBUCKET VERSION CONTROL]
+        FEAT[Feature Branches]
+        DEVELOP[Develop Branch]
+        RELEASE[Release Branches]
+        MAIN[Main Branch]
+        HOTFIX[Hotfix Branches]
+    end
+    
+    subgraph PIPELINE[BITBUCKET PIPELINES]
+        TRIGGER[Pipeline Trigger]
+        
+        subgraph BUILD[BUILD STAGE]
+            CHECKOUT[Git Checkout]
+            DEPS[Install Dependencies]
+            COMPILE[Compile Build]
+            LINT[SonarQube Lint]
+        end
+        
+        subgraph TEST[TEST STAGE]
+            UNIT_T[Unit Tests]
+            INT_T[Integration Tests]
+            SEC[Security Scan SAST]
+            COV[Code Coverage]
+        end
+        
+        subgraph PKG[PACKAGE STAGE]
+            DOCKER[Docker Build Multistage]
+            HELM_P[Helm Package]
+            VER[Semantic Version Tag]
+        end
+    end
+    
+    subgraph REG[ARTIFACT REGISTRY]
+        DOCKER_R[Harbor Docker Registry]
+        HELM_R[ChartMuseum Helm Repo]
+        NEXUS[Nexus JAR npm artifacts]
+    end
+    
+    subgraph DEPLOY[DEPLOYMENT STAGES]
+        subgraph DEV_ENV[DEVELOPMENT]
+            DEV_K8S[Dev Cluster Auto]
+            DEV_TEST[Smoke Tests]
+        end
+        
+        subgraph STG_ENV[STAGING]
+            STG_K8S[Staging Cluster Manual]
+            STG_TEST[E2E Tests Selenium]
+            PERF[Performance Tests k6]
+        end
+        
+        subgraph PROD_ENV[PRODUCTION]
+            PROD_K8S[Prod Cluster Blue Green]
+            HEALTH[Health Checks]
+            ROLLBACK[Rollback Ready]
+        end
+    end
+    
+    subgraph K8S[KUBERNETES DEPLOYMENT]
+        NS[Namespace workflow-automation]
+        
+        subgraph WORKLOADS[WORKLOADS]
+            API_D[API Gateway Deployment]
+            ENG_D[Workflow Engine StatefulSet]
+            MCP_D[MCP Servers Deployments]
+            WORKER[Workers HPA Enabled]
+        end
+        
+        subgraph SERVICES[SERVICES]
+            ING[Ingress Controller nginx]
+            MESH[Service Mesh Istio]
+            LB[Load Balancer]
+        end
+        
+        subgraph CONFIG[CONFIGURATION]
+            CM[ConfigMaps Environment]
+            SEC_K[Secrets Vault Integration]
+            HPA[HPA VPA Autoscaling]
+        end
+    end
+    
+    subgraph OBS[OBSERVABILITY]
+        PROM[Prometheus Metrics]
+        GRAF[Grafana Dashboards]
+        ELK[ELK Stack Logging]
+        JAEGER[Jaeger Tracing]
+        ALERT[AlertManager PagerDuty]
+    end
+    
+    DEV --> VCS
+    FEAT --> DEVELOP
+    DEVELOP --> RELEASE
+    RELEASE --> MAIN
+    HOTFIX --> MAIN
+    
+    VCS --> PIPELINE
+    TRIGGER --> BUILD
+    BUILD --> TEST
+    TEST --> PKG
+    
+    PIPELINE --> REG
+    REG --> DEPLOY
+    
+    DEV_ENV --> STG_ENV
+    STG_ENV --> PROD_ENV
+    
+    DEPLOY --> K8S
+    K8S --> OBS

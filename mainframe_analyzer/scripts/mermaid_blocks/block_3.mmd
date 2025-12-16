@@ -1,0 +1,121 @@
+classDiagram
+    class WealthManagementDomain {
+        +String domainId
+        +List subdivisions
+        +getSubdivision()
+        +routeQuery()
+    }
+    
+    class SubDivision {
+        +String name
+        +List dataSources
+        +List templates
+        +handleQuery()
+    }
+    
+    class PricingSubdivision {
+        +getPricingData()
+        +calculateNAV()
+        +getPriceHistory()
+        +validatePricing()
+    }
+    
+    class TradingSubdivision {
+        +getTradeStatus()
+        +searchTrades()
+        +getSettlementStatus()
+        +reconcileTrades()
+    }
+    
+    class ComplianceSubdivision {
+        +checkViolations()
+        +getDayTradeViolations()
+        +get90DayViolations()
+        +generateComplianceReport()
+        +getViolationHistory()
+    }
+    
+    class DataSource {
+        +String sourceId
+        +String type
+        +query()
+        +getMetadata()
+    }
+    
+    class DB2DataSource {
+        +String schema
+        +queryMainframe()
+        +callStoredProc()
+    }
+    
+    class OracleDataSource {
+        +String serviceName
+        +queryTrading()
+        +executePackage()
+    }
+    
+    class CockroachDataSource {
+        +String cluster
+        +queryDistributed()
+        +getClusterHealth()
+    }
+    
+    class SQLServerDataSource {
+        +String database
+        +queryReporting()
+        +executeSP()
+    }
+    
+    class MainframeETL {
+        +String lpar
+        +submitJob()
+        +getJobStatus()
+        +extractData()
+        +loadData()
+    }
+    
+    class DocumentRepository {
+        +String repoType
+        +String basePath
+        +searchDocuments()
+        +getDocument()
+        +uploadDocument()
+    }
+    
+    class QueryRouter {
+        +Object llm
+        +Map subdivisions
+        +classifyQuery()
+        +routeToSubdivision()
+        +aggregateResults()
+    }
+    
+    class ReportGenerator {
+        +List templates
+        +generateReport()
+        +scheduleReport()
+        +distributeReport()
+    }
+    
+    class ViolationChecker {
+        +checkDayTrade()
+        +check90DayRule()
+        +checkGoodFaith()
+        +getViolationSummary()
+    }
+    
+    WealthManagementDomain "1" o-- "*" SubDivision : contains
+    SubDivision <|-- PricingSubdivision : extends
+    SubDivision <|-- TradingSubdivision : extends
+    SubDivision <|-- ComplianceSubdivision : extends
+    SubDivision --> DataSource : uses
+    DataSource <|-- DB2DataSource : extends
+    DataSource <|-- OracleDataSource : extends
+    DataSource <|-- CockroachDataSource : extends
+    DataSource <|-- SQLServerDataSource : extends
+    ComplianceSubdivision --> ViolationChecker : uses
+    TradingSubdivision --> MainframeETL : uses
+    SubDivision --> DocumentRepository : accesses
+    QueryRouter --> SubDivision : routes to
+    QueryRouter --> LLMService : uses
+    ReportGenerator --> SubDivision : queries

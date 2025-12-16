@@ -1,0 +1,61 @@
+flowchart TB
+    subgraph QUERIES[USER QUERY EXAMPLES]
+        Q1[Tech Team: What is the status of batch job PRICNG01]
+        Q2[Operations: Show me todays day trade violations]
+        Q3[FA Team: Get pricing history for AAPL last 30 days]
+        Q4[Downstream: Generate compliance report for account X]
+    end
+    
+    subgraph INPUT[CHATBOT INTERFACE]
+        SLACK[Slack Bot workflow-bot]
+        TEAMS[MS Teams Bot Workflow Assistant]
+        WEB[Web Chat Dashboard Widget]
+    end
+    
+    subgraph NLP[NLP PROCESSING]
+        INTENT[Intent Detection LLM generate]
+        ENTITY[Entity Extraction Account Date Symbol]
+        CTX_E[Context Enrichment User Role History]
+    end
+    
+    subgraph SELECT[WORKFLOW SELECTION]
+        MATCH[Template Matcher]
+        WF1[Workflow Batch Status to Mainframe MCP to Unix MCP]
+        WF2[Workflow Compliance Check to DB2 MCP to SQL Server MCP]
+        WF3[Workflow Pricing Query to Oracle MCP]
+        WF4[Workflow Report Gen to Multi DB Query to SharePoint MCP]
+    end
+    
+    subgraph EXEC[MCP EXECUTION]
+        M1[MCP Mainframe getJobStatus PRICNG01]
+        M2[MCP DB2 queryViolations today]
+        M3[MCP Oracle getPriceHistory AAPL]
+        M4[MCP SQL Server getAccountData X]
+    end
+    
+    subgraph RESP[RESPONSE GENERATION]
+        LLM_R[LLM Response Natural Language]
+        FMT[Response Formatter Cards Tables]
+        DELIVER[Multi channel Delivery]
+    end
+    
+    Q1 --> SLACK
+    Q2 --> TEAMS
+    Q3 --> WEB
+    Q4 --> SLACK
+    
+    INPUT --> NLP
+    NLP --> SELECT
+    
+    MATCH --> WF1
+    MATCH --> WF2
+    MATCH --> WF3
+    MATCH --> WF4
+    
+    WF1 --> M1
+    WF2 --> M2
+    WF3 --> M3
+    WF4 --> M4
+    
+    EXEC --> RESP
+    DELIVER --> INPUT

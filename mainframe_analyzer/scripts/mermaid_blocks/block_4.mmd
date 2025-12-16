@@ -1,0 +1,83 @@
+flowchart TB
+    subgraph USERS[USER CHANNELS]
+        TECH[Tech Team]
+        OPS[Operations Team]
+        FA[Financial Advisors]
+        DOWN[Downstream Systems]
+    end
+    
+    subgraph CHATBOT[AI CHATBOT INTERFACE]
+        NLP_E[NLP Engine]
+        CTX[Context Manager]
+        RESP[Response Generator]
+    end
+    
+    subgraph ROUTER[INTELLIGENT QUERY ROUTER]
+        CLASS[Query Classifier]
+        SELECT[Subdivision Selector]
+    end
+    
+    subgraph PRICING[PRICING SUBDIVISION]
+        P_ENG[Pricing Engine]
+        NAV[NAV Calculator]
+        P_VAL[Price Validator]
+        P_ORA[(Oracle Realtime)]
+        P_DB2[(DB2 Historical)]
+    end
+    
+    subgraph TRADING[TRADING SUBDIVISION]
+        T_ENG[Trade Processor]
+        SETTLE[Settlement Engine]
+        RECON[Reconciliation]
+        T_ORA[(Oracle Books)]
+        MF[Mainframe ETL]
+        T_CR[(CockroachDB)]
+    end
+    
+    subgraph COMPLIANCE[COMPLIANCE SUBDIVISION]
+        V_ENG[Violation Engine]
+        DAY[Day Trade Checker]
+        R90[90 Day Rule Checker]
+        GF[Good Faith Checker]
+        C_SQL[(SQL Server)]
+        C_DB2[(DB2 Activity)]
+    end
+    
+    subgraph DOCS[DOCUMENTATION]
+        SP[SharePoint OneDrive]
+        FS[File Servers]
+        SEARCH[Doc Search Engine]
+    end
+    
+    subgraph REPORTING[REPORTING ENGINE]
+        RPT_GEN[Report Generator]
+        SCHED[Schedule Manager]
+        DIST[Distribution Engine]
+    end
+    
+    USERS --> CHATBOT
+    CHATBOT --> ROUTER
+    ROUTER --> PRICING
+    ROUTER --> TRADING
+    ROUTER --> COMPLIANCE
+    ROUTER --> DOCS
+    ROUTER --> REPORTING
+    
+    P_ENG --> P_ORA
+    P_ENG --> P_DB2
+    NAV --> P_ORA
+    
+    T_ENG --> T_ORA
+    SETTLE --> T_ORA
+    RECON --> MF
+    
+    V_ENG --> C_SQL
+    DAY --> C_DB2
+    R90 --> C_DB2
+    
+    SEARCH --> SP
+    SEARCH --> FS
+    
+    REPORTING --> PRICING
+    REPORTING --> TRADING
+    REPORTING --> COMPLIANCE
