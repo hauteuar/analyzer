@@ -16,6 +16,7 @@
             --accent-amber: #f59e0b;
             --accent-rose: #f43f5e;
             --accent-violet: #8b5cf6;
+            --accent-pink: #ec4899;
             --text-primary: #f1f5f9;
             --text-secondary: #94a3b8;
             --border-color: #334155;
@@ -29,14 +30,14 @@
         .header-badge { display: inline-block; background: linear-gradient(135deg, var(--accent-blue), var(--accent-violet)); padding: 6px 16px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 1px; }
         .header h1 { font-size: 2.5rem; font-weight: 800; margin-bottom: 10px; background: linear-gradient(135deg, #fff, #94a3b8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
         .header .subtitle { font-size: 1.2rem; color: var(--accent-cyan); font-weight: 500; margin-bottom: 8px; }
-        .header p { color: var(--text-secondary); font-size: 1rem; max-width: 800px; margin: 0 auto; }
-        .header-features { display: flex; justify-content: center; gap: 30px; margin-top: 25px; flex-wrap: wrap; }
-        .header-feature { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 0.9rem; }
-        .header-feature span { color: var(--accent-emerald); font-size: 1.2rem; }
+        .header p { color: var(--text-secondary); font-size: 1rem; max-width: 900px; margin: 0 auto; }
+        .header-features { display: flex; justify-content: center; gap: 20px; margin-top: 25px; flex-wrap: wrap; }
+        .header-feature { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 0.85rem; background: var(--bg-secondary); padding: 8px 15px; border-radius: 20px; border: 1px solid var(--border-color); }
+        .header-feature span { color: var(--accent-emerald); }
         
         /* Tabs */
-        .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 30px; background: var(--bg-secondary); padding: 10px; border-radius: 12px; }
-        .tab { padding: 12px 20px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; border-radius: 8px; font-size: 0.85rem; font-weight: 500; transition: all 0.2s; }
+        .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 30px; background: var(--bg-secondary); padding: 10px; border-radius: 12px; }
+        .tab { padding: 10px 16px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; border-radius: 8px; font-size: 0.8rem; font-weight: 500; transition: all 0.2s; }
         .tab:hover { background: var(--bg-primary); color: var(--text-primary); }
         .tab.active { background: linear-gradient(135deg, var(--accent-blue), var(--accent-violet)); color: white; }
         
@@ -53,13 +54,15 @@
         
         /* Flow Diagrams */
         .flow-diagram { background: var(--bg-primary); border-radius: 10px; padding: 30px; overflow-x: auto; }
-        .flow-container { display: flex; flex-direction: column; gap: 20px; min-width: 900px; }
+        .flow-container { display: flex; flex-direction: column; gap: 20px; min-width: 800px; }
         .flow-row { display: flex; justify-content: center; align-items: center; gap: 15px; flex-wrap: wrap; }
         .flow-box { background: linear-gradient(135deg, #1e3a5f, #1e293b); border: 2px solid var(--accent-blue); border-radius: 10px; padding: 15px 20px; text-align: center; min-width: 140px; transition: all 0.3s; }
         .flow-box:hover { transform: translateY(-3px); box-shadow: 0 10px 30px rgba(59, 130, 246, 0.2); }
         .flow-box.highlight { background: linear-gradient(135deg, var(--accent-blue), var(--accent-violet)); border-color: var(--accent-violet); }
         .flow-box.mcp { border-color: var(--accent-emerald); background: linear-gradient(135deg, #134e4a, #1e293b); }
-        .flow-box.data { border-color: var(--accent-amber); background: linear-gradient(135deg, #78350f, #1e293b); border-radius: 50%; min-width: 100px; min-height: 100px; display: flex; align-items: center; justify-content: center; }
+        .flow-box.ai { border-color: var(--accent-pink); background: linear-gradient(135deg, #831843, #1e293b); }
+        .flow-box.skill { border-color: var(--accent-amber); background: linear-gradient(135deg, #78350f, #1e293b); }
+        .flow-box.data { border-color: var(--accent-amber); background: linear-gradient(135deg, #78350f, #1e293b); border-radius: 50%; min-width: 100px; min-height: 100px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
         .flow-box-title { font-weight: 600; font-size: 0.85rem; margin-bottom: 4px; }
         .flow-box-sub { font-size: 0.7rem; color: var(--text-secondary); }
         .flow-arrow { color: var(--accent-blue); font-size: 1.5rem; font-weight: bold; }
@@ -71,7 +74,7 @@
         .layer-content { display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; }
         
         /* Grid */
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 25px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 25px; }
         .grid-card { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 10px; padding: 20px; }
         .grid-card h4 { color: var(--accent-amber); margin-bottom: 12px; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
         .grid-card h4 span { font-size: 1.3rem; }
@@ -91,36 +94,50 @@
         .badge-green { background: rgba(16,185,129,0.2); color: var(--accent-emerald); }
         .badge-blue { background: rgba(59,130,246,0.2); color: var(--accent-blue); }
         .badge-purple { background: rgba(139,92,246,0.2); color: var(--accent-violet); }
+        .badge-pink { background: rgba(236,72,153,0.2); color: var(--accent-pink); }
+        .badge-amber { background: rgba(245,158,11,0.2); color: var(--accent-amber); }
         
         /* Code */
-        pre.code { background: #0d1117; padding: 20px; border-radius: 10px; overflow-x: auto; font-size: 0.8rem; line-height: 1.6; font-family: 'Monaco', 'Consolas', monospace; }
+        pre.code { background: #0d1117; padding: 20px; border-radius: 10px; overflow-x: auto; font-size: 0.78rem; line-height: 1.6; font-family: 'Monaco', 'Consolas', monospace; }
         .code .k { color: #ff7b72; }
         .code .s { color: #a5d6ff; }
         .code .p { color: #79c0ff; }
         .code .c { color: #8b949e; font-style: italic; }
+        .code .f { color: #d2a8ff; }
+        .code .n { color: #ffa657; }
         
         /* Value Props */
-        .value-props { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 30px 0; }
+        .value-props { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin: 30px 0; }
         .value-prop { background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.1)); border: 1px solid var(--border-color); border-radius: 12px; padding: 25px; text-align: center; }
         .value-prop-icon { font-size: 2.5rem; margin-bottom: 15px; }
-        .value-prop h3 { font-size: 1.1rem; margin-bottom: 8px; }
-        .value-prop p { font-size: 0.85rem; color: var(--text-secondary); }
+        .value-prop h3 { font-size: 1rem; margin-bottom: 8px; }
+        .value-prop p { font-size: 0.8rem; color: var(--text-secondary); }
         
-        /* Sequence */
-        .sequence { background: var(--bg-primary); border-radius: 10px; padding: 25px; }
-        .sequence-row { display: flex; align-items: center; margin-bottom: 15px; }
-        .sequence-actor { width: 120px; text-align: center; font-weight: 600; font-size: 0.8rem; padding: 10px; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color); }
-        .sequence-line { flex: 1; height: 2px; background: var(--border-color); position: relative; margin: 0 10px; }
-        .sequence-msg { position: absolute; top: -25px; left: 50%; transform: translateX(-50%); background: var(--bg-secondary); padding: 4px 12px; border-radius: 4px; font-size: 0.75rem; white-space: nowrap; color: var(--accent-cyan); }
-        .sequence-arrow { position: absolute; right: -5px; top: -4px; border: solid var(--accent-blue); border-width: 0 2px 2px 0; padding: 4px; transform: rotate(-45deg); }
+        /* Highlight Box */
+        .highlight-box { background: linear-gradient(135deg, rgba(236,72,153,0.1), rgba(139,92,246,0.1)); border: 1px solid var(--accent-pink); border-radius: 12px; padding: 20px; margin: 20px 0; }
+        .highlight-box h4 { color: var(--accent-pink); margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+        .highlight-box p { font-size: 0.9rem; color: var(--text-secondary); }
+        
+        /* Stats */
+        .stats-row { display: flex; justify-content: center; gap: 40px; margin: 25px 0; flex-wrap: wrap; }
+        .stat { text-align: center; }
+        .stat-value { font-size: 2rem; font-weight: 800; color: var(--accent-cyan); }
+        .stat-label { font-size: 0.8rem; color: var(--text-secondary); }
         
         /* Footer */
         footer { text-align: center; padding: 30px; border-top: 1px solid var(--border-color); margin-top: 40px; color: var(--text-secondary); font-size: 0.85rem; }
+        
+        /* Skill Card */
+        .skill-card { background: linear-gradient(135deg, rgba(245,158,11,0.1), rgba(139,92,246,0.1)); border: 1px solid var(--accent-amber); border-radius: 10px; padding: 15px; margin: 10px 0; }
+        .skill-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .skill-card-title { font-weight: 600; color: var(--accent-amber); }
         
         @media (max-width: 768px) {
             .header h1 { font-size: 1.8rem; }
             .flow-container { min-width: 100%; }
             .flow-row { flex-direction: column; }
+            .tabs { gap: 4px; }
+            .tab { padding: 8px 12px; font-size: 0.75rem; }
         }
     </style>
 </head>
@@ -128,56 +145,69 @@
 <div class="container">
     <!-- Header -->
     <div class="header">
-        <div class="header-badge">Enterprise AI Platform</div>
-        <h1>No-Code/Low-Code AI Agent Workflow Builder</h1>
-        <div class="subtitle">Visual Drag-and-Drop MCP Automation Platform</div>
-        <p>Build intelligent AI agent workflows for Enterprise Wealth Management (BOFA) with visual drag-and-drop interface. Connect to databases, mainframes, and enterprise systems using Model Context Protocol (MCP) - no coding required.</p>
+        <div class="header-badge">Enterprise AI Platform v2.0</div>
+        <h1>No-Code AI Agent Workflow Builder</h1>
+        <div class="subtitle">Visual Drag-and-Drop MCP Automation with AI Compression & Skills</div>
+        <p>Build intelligent AI agent workflows for Enterprise Wealth Management (BOFA) with visual drag-and-drop interface. Features AI Context Blotting for optimal token usage, SKILL.md prompt engineering, and pre-built MCP connectors - no coding required.</p>
         <div class="header-features">
             <div class="header-feature"><span>✓</span> Drag-and-Drop Builder</div>
-            <div class="header-feature"><span>✓</span> MCP Integration</div>
-            <div class="header-feature"><span>✓</span> Natural Language Prompts</div>
+            <div class="header-feature"><span>✓</span> AI Context Blotting</div>
+            <div class="header-feature"><span>✓</span> SKILL.md Engineering</div>
+            <div class="header-feature"><span>✓</span> MCP Connectors</div>
+            <div class="header-feature"><span>✓</span> Prompt Templates</div>
             <div class="header-feature"><span>✓</span> Enterprise Security</div>
-            <div class="header-feature"><span>✓</span> Multi-Database Support</div>
         </div>
     </div>
 
     <!-- Tabs -->
     <div class="tabs">
-        <button class="tab active" onclick="showTab('overview')">Platform Overview</button>
+        <button class="tab active" onclick="showTab('overview')">Overview</button>
         <button class="tab" onclick="showTab('builder')">Workflow Builder</button>
+        <button class="tab" onclick="showTab('aiblotting')">AI Blotting</button>
+        <button class="tab" onclick="showTab('skills')">SKILL.md System</button>
+        <button class="tab" onclick="showTab('prompts')">Prompt Engineering</button>
         <button class="tab" onclick="showTab('domain')">Domain Architecture</button>
         <button class="tab" onclick="showTab('mcp')">MCP Connectors</button>
-        <button class="tab" onclick="showTab('cicd')">Deployment</button>
-        <button class="tab" onclick="showTab('poc')">POC Implementation</button>
-        <button class="tab" onclick="showTab('features')">Feature Roadmap</button>
-        <button class="tab" onclick="showTab('api')">Integration API</button>
+        <button class="tab" onclick="showTab('poc')">POC & Deployment</button>
+        <button class="tab" onclick="showTab('features')">Roadmap</button>
+        <button class="tab" onclick="showTab('api')">API</button>
     </div>
 
     <!-- OVERVIEW -->
     <div id="overview" class="section active">
         <h2 class="section-title">Platform Overview</h2>
-        <p class="section-desc">Enterprise-grade No-Code/Low-Code platform for building AI Agent workflows with MCP automation - designed for BOFA Wealth Management bookkeeping operations.</p>
+        <p class="section-desc">Enterprise-grade No-Code/Low-Code platform for building AI Agent workflows with intelligent context management, prompt engineering, and MCP automation.</p>
         
         <div class="value-props">
             <div class="value-prop">
                 <div class="value-prop-icon">🎨</div>
                 <h3>Visual Drag-and-Drop</h3>
-                <p>Build complex AI workflows visually without writing code. Simply drag nodes, connect them, and configure.</p>
+                <p>Build complex AI workflows visually. Drag nodes, connect them, configure - no code needed.</p>
             </div>
             <div class="value-prop">
-                <div class="value-prop-icon">🤖</div>
-                <h3>AI Agent Orchestration</h3>
-                <p>Orchestrate multiple AI agents that can reason, plan, and execute tasks across enterprise systems.</p>
+                <div class="value-prop-icon">🗜️</div>
+                <h3>AI Context Blotting</h3>
+                <p>Intelligent compression reduces token usage by 60-80% while preserving context quality.</p>
+            </div>
+            <div class="value-prop">
+                <div class="value-prop-icon">📋</div>
+                <h3>SKILL.md System</h3>
+                <p>Modular skill definitions that teach AI agents domain-specific capabilities.</p>
+            </div>
+            <div class="value-prop">
+                <div class="value-prop-icon">🎯</div>
+                <h3>Prompt Engineering</h3>
+                <p>Visual prompt builder with templates, variables, and A/B testing.</p>
             </div>
             <div class="value-prop">
                 <div class="value-prop-icon">🔌</div>
                 <h3>MCP Connectors</h3>
-                <p>Pre-built Model Context Protocol connectors for databases, mainframes, APIs, and enterprise apps.</p>
+                <p>Pre-built connectors for databases, mainframes, and enterprise apps.</p>
             </div>
             <div class="value-prop">
-                <div class="value-prop-icon">💬</div>
-                <h3>Natural Language</h3>
-                <p>Describe workflows in plain English - AI generates the workflow automatically.</p>
+                <div class="value-prop-icon">🤖</div>
+                <h3>Agent Orchestration</h3>
+                <p>Coordinate multiple AI agents that reason, plan, and execute tasks.</p>
             </div>
         </div>
 
@@ -187,69 +217,94 @@
                 <div class="flow-container">
                     <!-- Layer 1: User Interface -->
                     <div class="layer-box">
-                        <div class="layer-title">👤 User Interface Layer</div>
+                        <div class="layer-title">👤 No-Code Interface Layer</div>
                         <div class="layer-content">
                             <div class="flow-box highlight">
                                 <div class="flow-box-title">Visual Workflow Builder</div>
                                 <div class="flow-box-sub">Drag & Drop Canvas</div>
                             </div>
                             <div class="flow-box highlight">
-                                <div class="flow-box-title">NL Prompt Builder</div>
-                                <div class="flow-box-sub">Describe in English</div>
+                                <div class="flow-box-title">Prompt Studio</div>
+                                <div class="flow-box-sub">Template Engineering</div>
+                            </div>
+                            <div class="flow-box highlight">
+                                <div class="flow-box-title">Skill Editor</div>
+                                <div class="flow-box-sub">SKILL.md Designer</div>
                             </div>
                             <div class="flow-box">
                                 <div class="flow-box-title">Chat Interface</div>
                                 <div class="flow-box-sub">Slack / Teams / Web</div>
                             </div>
-                            <div class="flow-box">
-                                <div class="flow-box-title">Admin Dashboard</div>
-                                <div class="flow-box-sub">Monitor & Manage</div>
+                        </div>
+                    </div>
+                    
+                    <div class="flow-arrow-down">▼</div>
+                    
+                    <!-- Layer 2: AI Intelligence Layer -->
+                    <div class="layer-box">
+                        <div class="layer-title">🧠 AI Intelligence Layer</div>
+                        <div class="layer-content">
+                            <div class="flow-box ai">
+                                <div class="flow-box-title">Context Blotter</div>
+                                <div class="flow-box-sub">Token Compression</div>
+                            </div>
+                            <div class="flow-box ai">
+                                <div class="flow-box-title">Skill Loader</div>
+                                <div class="flow-box-sub">SKILL.md Injection</div>
+                            </div>
+                            <div class="flow-box ai">
+                                <div class="flow-box-title">Prompt Engine</div>
+                                <div class="flow-box-sub">Template Rendering</div>
+                            </div>
+                            <div class="flow-box ai">
+                                <div class="flow-box-title">LLM Router</div>
+                                <div class="flow-box-sub">Model Selection</div>
                             </div>
                         </div>
                     </div>
                     
                     <div class="flow-arrow-down">▼</div>
                     
-                    <!-- Layer 2: AI Agent Layer -->
+                    <!-- Layer 3: Orchestration -->
                     <div class="layer-box">
-                        <div class="layer-title">🤖 AI Agent & Orchestration Layer</div>
+                        <div class="layer-title">⚙️ Agent Orchestration Layer</div>
                         <div class="layer-content">
-                            <div class="flow-box highlight">
-                                <div class="flow-box-title">AI Agent Engine</div>
-                                <div class="flow-box-sub">LLM-Powered Reasoning</div>
-                            </div>
                             <div class="flow-box">
                                 <div class="flow-box-title">Workflow Engine</div>
                                 <div class="flow-box-sub">Temporal Orchestration</div>
                             </div>
                             <div class="flow-box">
-                                <div class="flow-box-title">Intent Classifier</div>
-                                <div class="flow-box-sub">NLP Processing</div>
+                                <div class="flow-box-title">Agent Coordinator</div>
+                                <div class="flow-box-sub">Multi-Agent Tasks</div>
                             </div>
                             <div class="flow-box">
                                 <div class="flow-box-title">State Manager</div>
-                                <div class="flow-box-sub">Checkpoints & Recovery</div>
+                                <div class="flow-box-sub">Checkpoints</div>
+                            </div>
+                            <div class="flow-box">
+                                <div class="flow-box-title">Memory Store</div>
+                                <div class="flow-box-sub">Conversation History</div>
                             </div>
                         </div>
                     </div>
                     
                     <div class="flow-arrow-down">▼</div>
                     
-                    <!-- Layer 3: MCP Layer -->
+                    <!-- Layer 4: MCP Layer -->
                     <div class="layer-box">
-                        <div class="layer-title">🔌 MCP Connector Layer (Model Context Protocol)</div>
+                        <div class="layer-title">🔌 MCP Connector Layer</div>
                         <div class="layer-content">
                             <div class="flow-box mcp">
                                 <div class="flow-box-title">Database MCP</div>
-                                <div class="flow-box-sub">DB2 / Oracle / SQL Server</div>
+                                <div class="flow-box-sub">DB2 / Oracle / SQL</div>
                             </div>
                             <div class="flow-box mcp">
                                 <div class="flow-box-title">Mainframe MCP</div>
                                 <div class="flow-box-sub">JCL / CICS / IMS</div>
                             </div>
                             <div class="flow-box mcp">
-                                <div class="flow-box-title">Unix/Linux MCP</div>
-                                <div class="flow-box-sub">SSH / File Ops</div>
+                                <div class="flow-box-title">Unix MCP</div>
+                                <div class="flow-box-sub">SSH / SFTP</div>
                             </div>
                             <div class="flow-box mcp">
                                 <div class="flow-box-title">App MCP</div>
@@ -257,31 +312,26 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <div class="flow-arrow-down">▼</div>
-                    
-                    <!-- Layer 4: Enterprise Systems -->
-                    <div class="layer-box">
-                        <div class="layer-title">🏢 Enterprise Systems (BOFA Wealth Management)</div>
-                        <div class="layer-content">
-                            <div class="flow-box data">
-                                <div class="flow-box-title">DB2</div>
-                            </div>
-                            <div class="flow-box data">
-                                <div class="flow-box-title">Oracle</div>
-                            </div>
-                            <div class="flow-box data">
-                                <div class="flow-box-title">Mainframe</div>
-                            </div>
-                            <div class="flow-box data">
-                                <div class="flow-box-title">SQL Server</div>
-                            </div>
-                            <div class="flow-box data">
-                                <div class="flow-box-title">SharePoint</div>
-                            </div>
-                        </div>
-                    </div>
                 </div>
+            </div>
+        </div>
+
+        <div class="stats-row">
+            <div class="stat">
+                <div class="stat-value">60-80%</div>
+                <div class="stat-label">Token Reduction</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">Zero</div>
+                <div class="stat-label">Code Required</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">50+</div>
+                <div class="stat-label">Pre-built Skills</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">15+</div>
+                <div class="stat-label">MCP Connectors</div>
             </div>
         </div>
     </div>
@@ -289,7 +339,7 @@
     <!-- WORKFLOW BUILDER -->
     <div id="builder" class="section">
         <h2 class="section-title">No-Code Workflow Builder</h2>
-        <p class="section-desc">Visual drag-and-drop interface for building AI agent workflows. Connect nodes, configure actions, and deploy - all without writing code.</p>
+        <p class="section-desc">Visual drag-and-drop interface for building AI agent workflows with integrated prompt engineering and skill management.</p>
         
         <div class="card">
             <div class="card-title">Drag-and-Drop Workflow Canvas</div>
@@ -301,19 +351,19 @@
                             <div class="flow-box-sub">Trigger</div>
                         </div>
                         <span class="flow-arrow">→</span>
-                        <div class="flow-box">
+                        <div class="flow-box ai">
+                            <div class="flow-box-title">🗜️ Context Blot</div>
+                            <div class="flow-box-sub">Compress history</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box skill">
+                            <div class="flow-box-title">📋 Load Skill</div>
+                            <div class="flow-box-sub">compliance.skill.md</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box ai">
                             <div class="flow-box-title">🎯 Intent Detection</div>
-                            <div class="flow-box-sub">AI classifies user query</div>
-                        </div>
-                        <span class="flow-arrow">→</span>
-                        <div class="flow-box">
-                            <div class="flow-box-title">📝 Entity Extraction</div>
-                            <div class="flow-box-sub">Extract parameters</div>
-                        </div>
-                        <span class="flow-arrow">→</span>
-                        <div class="flow-box mcp">
-                            <div class="flow-box-title">🔌 MCP: Database</div>
-                            <div class="flow-box-sub">Query Oracle/DB2</div>
+                            <div class="flow-box-sub">AI classifies query</div>
                         </div>
                     </div>
                     <div class="flow-arrow-down">▼</div>
@@ -324,18 +374,18 @@
                         </div>
                         <span class="flow-arrow">←</span>
                         <div class="flow-box">
-                            <div class="flow-box-title">💬 Response Builder</div>
-                            <div class="flow-box-sub">Format for Slack/Teams</div>
+                            <div class="flow-box-title">💬 Response</div>
+                            <div class="flow-box-sub">Format output</div>
                         </div>
                         <span class="flow-arrow">←</span>
-                        <div class="flow-box">
+                        <div class="flow-box ai">
                             <div class="flow-box-title">🤖 AI Summarize</div>
-                            <div class="flow-box-sub">Generate NL response</div>
+                            <div class="flow-box-sub">Generate response</div>
                         </div>
                         <span class="flow-arrow">←</span>
                         <div class="flow-box mcp">
-                            <div class="flow-box-title">🔌 MCP: Compliance</div>
-                            <div class="flow-box-sub">Check violations</div>
+                            <div class="flow-box-title">🔌 MCP Query</div>
+                            <div class="flow-box-sub">Execute on DB2</div>
                         </div>
                     </div>
                 </div>
@@ -346,31 +396,35 @@
             <div class="grid-card">
                 <h4><span>🎨</span> Visual Node Types</h4>
                 <ul>
-                    <li><strong>Trigger Nodes:</strong> Chat, Schedule, Webhook, Event</li>
+                    <li><strong>Trigger:</strong> Chat, Schedule, Webhook, Event</li>
                     <li><strong>AI Nodes:</strong> Intent, Extract, Summarize, Decide</li>
-                    <li><strong>MCP Nodes:</strong> Database, Unix, Mainframe, API</li>
-                    <li><strong>Logic Nodes:</strong> If/Else, Switch, Loop, Parallel</li>
-                    <li><strong>Output Nodes:</strong> Response, Email, File, Notify</li>
+                    <li><strong>Blotting:</strong> Compress, Expand, Summarize History</li>
+                    <li><strong>Skill:</strong> Load SKILL.md, Switch Context</li>
+                    <li><strong>MCP:</strong> Database, Unix, Mainframe, API</li>
+                    <li><strong>Logic:</strong> If/Else, Switch, Loop, Parallel</li>
+                    <li><strong>Prompt:</strong> Template, Variable, Chain</li>
                 </ul>
             </div>
             <div class="grid-card">
                 <h4><span>⚡</span> Builder Features</h4>
                 <ul>
                     <li><strong>Drag & Drop:</strong> Visual canvas with snap-to-grid</li>
-                    <li><strong>Property Panel:</strong> Configure each node visually</li>
+                    <li><strong>Property Panel:</strong> Configure nodes without code</li>
+                    <li><strong>Skill Browser:</strong> Browse and attach skills</li>
+                    <li><strong>Prompt Editor:</strong> Visual prompt template builder</li>
                     <li><strong>Test Mode:</strong> Run workflows in sandbox</li>
+                    <li><strong>Token Monitor:</strong> Real-time token usage display</li>
                     <li><strong>Version Control:</strong> Save, compare, rollback</li>
-                    <li><strong>Templates:</strong> Pre-built workflow templates</li>
                 </ul>
             </div>
             <div class="grid-card">
                 <h4><span>💬</span> Natural Language Mode</h4>
                 <ul>
-                    <li><strong>Describe:</strong> "Check compliance violations for account"</li>
-                    <li><strong>AI Generates:</strong> Complete workflow automatically</li>
+                    <li><strong>Describe:</strong> "Check compliance violations"</li>
+                    <li><strong>AI Generates:</strong> Complete workflow + skills</li>
+                    <li><strong>Auto-Optimize:</strong> Adds blotting nodes</li>
                     <li><strong>Review:</strong> Visual preview before deploy</li>
                     <li><strong>Customize:</strong> Drag nodes to modify</li>
-                    <li><strong>Deploy:</strong> One-click activation</li>
                 </ul>
             </div>
             <div class="grid-card">
@@ -380,9 +434,499 @@
                     <li><strong>Audit Trail:</strong> Complete action logging</li>
                     <li><strong>Approval Flows:</strong> Multi-level approvals</li>
                     <li><strong>Secrets:</strong> Vault integration</li>
-                    <li><strong>Compliance:</strong> SOX, GDPR ready</li>
+                    <li><strong>Cost Tracking:</strong> Token usage per workflow</li>
                 </ul>
             </div>
+        </div>
+    </div>
+
+    <!-- AI BLOTTING -->
+    <div id="aiblotting" class="section">
+        <h2 class="section-title">AI Context Blotting & Compression</h2>
+        <p class="section-desc">Intelligent context management that reduces token usage by 60-80% while preserving semantic meaning and conversation quality.</p>
+        
+        <div class="highlight-box">
+            <h4>🗜️ What is AI Blotting?</h4>
+            <p>AI Blotting is an intelligent compression technique that summarizes and condenses conversation history, documents, and context before sending to LLMs. It preserves critical information while dramatically reducing token costs and improving response times.</p>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Context Blotting Pipeline</div>
+            <div class="flow-diagram">
+                <div class="flow-container">
+                    <div class="flow-row">
+                        <div class="flow-box">
+                            <div class="flow-box-title">📝 Raw Context</div>
+                            <div class="flow-box-sub">50,000 tokens</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box ai">
+                            <div class="flow-box-title">🔍 Relevance Filter</div>
+                            <div class="flow-box-sub">Remove noise</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box ai">
+                            <div class="flow-box-title">📊 Semantic Chunking</div>
+                            <div class="flow-box-sub">Group by topic</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box ai">
+                            <div class="flow-box-title">🗜️ Compression</div>
+                            <div class="flow-box-sub">Summarize chunks</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box highlight">
+                            <div class="flow-box-title">✨ Blotted Context</div>
+                            <div class="flow-box-sub">8,000 tokens</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="grid-card">
+                <h4><span>🎯</span> Blotting Strategies</h4>
+                <ul>
+                    <li><strong>Conversation Blot:</strong> Summarize chat history into key points</li>
+                    <li><strong>Document Blot:</strong> Extract relevant sections from large docs</li>
+                    <li><strong>Query-Aware Blot:</strong> Keep context relevant to current query</li>
+                    <li><strong>Temporal Blot:</strong> Prioritize recent over old context</li>
+                    <li><strong>Entity Blot:</strong> Preserve named entities and relationships</li>
+                </ul>
+            </div>
+            <div class="grid-card">
+                <h4><span>⚙️</span> Compression Levels</h4>
+                <ul>
+                    <li><strong>Light (20%):</strong> Remove filler, keep structure</li>
+                    <li><strong>Medium (50%):</strong> Summarize paragraphs to sentences</li>
+                    <li><strong>Heavy (80%):</strong> Extract key facts only</li>
+                    <li><strong>Adaptive:</strong> Auto-adjust based on token budget</li>
+                    <li><strong>Selective:</strong> User-defined preservation rules</li>
+                </ul>
+            </div>
+            <div class="grid-card">
+                <h4><span>📈</span> Benefits</h4>
+                <ul>
+                    <li><strong>Cost Reduction:</strong> 60-80% fewer tokens = lower API costs</li>
+                    <li><strong>Faster Response:</strong> Less context = faster LLM processing</li>
+                    <li><strong>Longer Memory:</strong> Fit more history in context window</li>
+                    <li><strong>Better Focus:</strong> Remove noise, improve accuracy</li>
+                    <li><strong>Compliance:</strong> Control what data reaches LLM</li>
+                </ul>
+            </div>
+            <div class="grid-card">
+                <h4><span>🛠️</span> Configuration</h4>
+                <ul>
+                    <li><strong>Token Budget:</strong> Set max tokens per request</li>
+                    <li><strong>Preserve Rules:</strong> Always keep certain entities</li>
+                    <li><strong>Ignore Patterns:</strong> Skip specified content types</li>
+                    <li><strong>Priority Weights:</strong> Score context by importance</li>
+                    <li><strong>Cache Strategy:</strong> Reuse blotted summaries</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Blotting Node Configuration (Visual Builder)</div>
+            <pre class="code"><span class="c"># Context Blotting Node - Visual Configuration</span>
+
+<span class="p">node_type:</span> <span class="s">"context_blot"</span>
+<span class="p">name:</span> <span class="s">"Compress Conversation History"</span>
+
+<span class="p">input:</span>
+  <span class="p">source:</span> <span class="s">"conversation_history"</span>
+  <span class="p">max_messages:</span> <span class="n">100</span>
+  <span class="p">include_system:</span> <span class="k">false</span>
+
+<span class="p">blotting:</span>
+  <span class="p">strategy:</span> <span class="s">"query_aware"</span>           <span class="c"># Optimize for current query</span>
+  <span class="p">compression_level:</span> <span class="s">"adaptive"</span>     <span class="c"># Auto-adjust to budget</span>
+  <span class="p">target_tokens:</span> <span class="n">4000</span>              <span class="c"># Target output size</span>
+  <span class="p">preserve_recent:</span> <span class="n">5</span>               <span class="c"># Keep last 5 messages verbatim</span>
+
+<span class="p">preservation_rules:</span>
+  <span class="p">entities:</span>                         <span class="c"># Always preserve these</span>
+    - <span class="s">"account_numbers"</span>
+    - <span class="s">"trade_ids"</span>
+    - <span class="s">"violation_codes"</span>
+  <span class="p">keywords:</span>
+    - <span class="s">"compliance"</span>
+    - <span class="s">"violation"</span>
+    - <span class="s">"deadline"</span>
+
+<span class="p">output:</span>
+  <span class="p">format:</span> <span class="s">"structured"</span>
+  <span class="p">sections:</span>
+    - <span class="s">"summary"</span>                      <span class="c"># High-level summary</span>
+    - <span class="s">"key_facts"</span>                    <span class="c"># Extracted facts</span>
+    - <span class="s">"recent_context"</span>               <span class="c"># Recent messages</span>
+    - <span class="s">"entities"</span>                     <span class="c"># Preserved entities</span></pre>
+        </div>
+    </div>
+
+    <!-- SKILLS -->
+    <div id="skills" class="section">
+        <h2 class="section-title">SKILL.md System</h2>
+        <p class="section-desc">Modular skill definitions that teach AI agents domain-specific capabilities, workflows, and knowledge - all in markdown format.</p>
+        
+        <div class="highlight-box">
+            <h4>📋 What is SKILL.md?</h4>
+            <p>SKILL.md files are structured markdown documents that define AI agent capabilities. They include instructions, examples, constraints, and tool definitions that are injected into the agent's context when needed. Think of them as "instruction manuals" for AI agents.</p>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Skill Architecture</div>
+            <div class="flow-diagram">
+                <div class="flow-container">
+                    <div class="flow-row">
+                        <div class="flow-box skill">
+                            <div class="flow-box-title">📁 Skill Library</div>
+                            <div class="flow-box-sub">50+ SKILL.md files</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box">
+                            <div class="flow-box-title">🔍 Skill Selector</div>
+                            <div class="flow-box-sub">Match query to skill</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box ai">
+                            <div class="flow-box-title">📥 Skill Loader</div>
+                            <div class="flow-box-sub">Inject into context</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box highlight">
+                            <div class="flow-box-title">🤖 Enhanced Agent</div>
+                            <div class="flow-box-sub">Domain expert</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="grid-card">
+                <h4><span>📂</span> Skill Categories</h4>
+                <ul>
+                    <li><strong>/skills/compliance/</strong> - Violation checking, regulations</li>
+                    <li><strong>/skills/trading/</strong> - Trade ops, settlement, recon</li>
+                    <li><strong>/skills/pricing/</strong> - NAV, pricing history, validation</li>
+                    <li><strong>/skills/database/</strong> - DB2, Oracle, SQL queries</li>
+                    <li><strong>/skills/mainframe/</strong> - JCL, CICS, batch jobs</li>
+                    <li><strong>/skills/reporting/</strong> - Report generation, formatting</li>
+                </ul>
+            </div>
+            <div class="grid-card">
+                <h4><span>📄</span> SKILL.md Structure</h4>
+                <ul>
+                    <li><strong>Metadata:</strong> Name, version, category, triggers</li>
+                    <li><strong>Description:</strong> What this skill enables</li>
+                    <li><strong>Instructions:</strong> How the agent should behave</li>
+                    <li><strong>Examples:</strong> Input/output demonstrations</li>
+                    <li><strong>Tools:</strong> MCP actions available to use</li>
+                    <li><strong>Constraints:</strong> Limitations and guardrails</li>
+                </ul>
+            </div>
+            <div class="grid-card">
+                <h4><span>⚡</span> Skill Features</h4>
+                <ul>
+                    <li><strong>Auto-Load:</strong> Skills loaded based on query intent</li>
+                    <li><strong>Composition:</strong> Combine multiple skills</li>
+                    <li><strong>Inheritance:</strong> Skills can extend base skills</li>
+                    <li><strong>Versioning:</strong> Version control for skills</li>
+                    <li><strong>A/B Testing:</strong> Test skill variations</li>
+                </ul>
+            </div>
+            <div class="grid-card">
+                <h4><span>🛠️</span> Skill Editor</h4>
+                <ul>
+                    <li><strong>Visual Editor:</strong> Edit skills without code</li>
+                    <li><strong>Preview Mode:</strong> Test skill in sandbox</li>
+                    <li><strong>Import/Export:</strong> Share skills across teams</li>
+                    <li><strong>Templates:</strong> Start from templates</li>
+                    <li><strong>Validation:</strong> Check skill syntax</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Example: compliance-violations.skill.md</div>
+            <pre class="code"><span class="c"># SKILL.md - Compliance Violation Checker</span>
+<span class="c"># Location: /skills/compliance/violations.skill.md</span>
+
+<span class="p">---</span>
+<span class="p">name:</span> <span class="s">"Compliance Violation Checker"</span>
+<span class="p">version:</span> <span class="s">"2.1.0"</span>
+<span class="p">category:</span> <span class="s">"compliance"</span>
+<span class="p">triggers:</span>
+  - <span class="s">"violation"</span>
+  - <span class="s">"day trade"</span>
+  - <span class="s">"90 day"</span>
+  - <span class="s">"good faith"</span>
+  - <span class="s">"compliance check"</span>
+<span class="p">---</span>
+
+<span class="f">## Description</span>
+You are a compliance specialist for BOFA Wealth Management. Your role is to 
+check for trading violations including day trade violations, 90-day rule 
+violations, and good faith violations.
+
+<span class="f">## Instructions</span>
+1. When asked about violations, ALWAYS extract the account ID first
+2. Query the compliance database using the DB2 MCP
+3. Check for ALL violation types unless user specifies one
+4. Format results with severity levels (HIGH/MEDIUM/LOW)
+5. Include violation codes and remediation steps
+
+<span class="f">## Available Tools</span>
+<span class="p">```yaml</span>
+<span class="p">tools:</span>
+  - <span class="p">name:</span> <span class="s">"db2_compliance_query"</span>
+    <span class="p">mcp:</span> <span class="s">"db2-compliance"</span>
+    <span class="p">action:</span> <span class="s">"executeQuery"</span>
+    <span class="p">description:</span> <span class="s">"Query compliance violations from DB2"</span>
+    
+  - <span class="p">name:</span> <span class="s">"check_day_trade"</span>
+    <span class="p">mcp:</span> <span class="s">"db2-compliance"</span>
+    <span class="p">action:</span> <span class="s">"callProcedure"</span>
+    <span class="p">procedure:</span> <span class="s">"SP_CHECK_DAY_TRADE"</span>
+    
+  - <span class="p">name:</span> <span class="s">"check_90_day"</span>
+    <span class="p">mcp:</span> <span class="s">"db2-compliance"</span>
+    <span class="p">action:</span> <span class="s">"callProcedure"</span>
+    <span class="p">procedure:</span> <span class="s">"SP_CHECK_90_DAY_RULE"</span>
+<span class="p">```</span>
+
+<span class="f">## Examples</span>
+
+<span class="p">### Example 1: Check all violations</span>
+<span class="p">User:</span> <span class="s">"Check violations for account 12345"</span>
+<span class="p">Agent:</span> 
+1. Extract account_id: 12345
+2. Call check_day_trade(account_id=12345)
+3. Call check_90_day(account_id=12345)
+4. Format and return results
+
+<span class="p">### Example 2: Specific violation type</span>
+<span class="p">User:</span> <span class="s">"Any day trade violations today?"</span>
+<span class="p">Agent:</span>
+1. Extract date: today
+2. Call check_day_trade(date=today)
+3. Return day trade violations only
+
+<span class="f">## Constraints</span>
+- Never expose raw SQL queries to users
+- Always mask full account numbers in responses (show last 4 digits)
+- Escalate HIGH severity violations to compliance team
+- Response must include violation code for audit trail</pre>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Pre-built Skills Library</div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                <div class="skill-card">
+                    <div class="skill-card-header">
+                        <span class="skill-card-title">compliance-violations.skill.md</span>
+                        <span class="badge badge-green">Active</span>
+                    </div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary);">Day trade, 90-day rule, good faith violation checks</div>
+                </div>
+                <div class="skill-card">
+                    <div class="skill-card-header">
+                        <span class="skill-card-title">trading-status.skill.md</span>
+                        <span class="badge badge-green">Active</span>
+                    </div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary);">Trade lookup, settlement status, reconciliation</div>
+                </div>
+                <div class="skill-card">
+                    <div class="skill-card-header">
+                        <span class="skill-card-title">pricing-history.skill.md</span>
+                        <span class="badge badge-green">Active</span>
+                    </div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary);">NAV calculation, price history, validation</div>
+                </div>
+                <div class="skill-card">
+                    <div class="skill-card-header">
+                        <span class="skill-card-title">batch-monitoring.skill.md</span>
+                        <span class="badge badge-green">Active</span>
+                    </div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary);">JCL job status, batch failures, restarts</div>
+                </div>
+                <div class="skill-card">
+                    <div class="skill-card-header">
+                        <span class="skill-card-title">report-generator.skill.md</span>
+                        <span class="badge badge-blue">Phase 1</span>
+                    </div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary);">Generate compliance and trading reports</div>
+                </div>
+                <div class="skill-card">
+                    <div class="skill-card-header">
+                        <span class="skill-card-title">data-quality.skill.md</span>
+                        <span class="badge badge-blue">Phase 1</span>
+                    </div>
+                    <div style="font-size: 0.8rem; color: var(--text-secondary);">Data validation, anomaly detection</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PROMPT ENGINEERING -->
+    <div id="prompts" class="section">
+        <h2 class="section-title">Prompt Engineering Studio</h2>
+        <p class="section-desc">Visual prompt builder with templates, variables, versioning, and A/B testing - design optimal prompts without writing code.</p>
+        
+        <div class="card">
+            <div class="card-title">Prompt Engineering Pipeline</div>
+            <div class="flow-diagram">
+                <div class="flow-container">
+                    <div class="flow-row">
+                        <div class="flow-box">
+                            <div class="flow-box-title">📝 Template</div>
+                            <div class="flow-box-sub">Base prompt</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box skill">
+                            <div class="flow-box-title">📋 + Skill</div>
+                            <div class="flow-box-sub">Inject SKILL.md</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box ai">
+                            <div class="flow-box-title">🗜️ + Blotted</div>
+                            <div class="flow-box-sub">Add compressed ctx</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box">
+                            <div class="flow-box-title">🔤 + Variables</div>
+                            <div class="flow-box-sub">Replace placeholders</div>
+                        </div>
+                        <span class="flow-arrow">→</span>
+                        <div class="flow-box highlight">
+                            <div class="flow-box-title">✨ Final Prompt</div>
+                            <div class="flow-box-sub">Ready for LLM</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="grid-card">
+                <h4><span>📝</span> Template Features</h4>
+                <ul>
+                    <li><strong>Visual Editor:</strong> Rich text prompt editing</li>
+                    <li><strong>Variables:</strong> {{user_query}}, {{account_id}}</li>
+                    <li><strong>Conditionals:</strong> {% if has_violations %}</li>
+                    <li><strong>Loops:</strong> {% for violation in violations %}</li>
+                    <li><strong>Includes:</strong> {% include "header.prompt" %}</li>
+                </ul>
+            </div>
+            <div class="grid-card">
+                <h4><span>🧪</span> Testing & Optimization</h4>
+                <ul>
+                    <li><strong>Playground:</strong> Test prompts instantly</li>
+                    <li><strong>A/B Testing:</strong> Compare prompt versions</li>
+                    <li><strong>Metrics:</strong> Track accuracy, latency, cost</li>
+                    <li><strong>Auto-Optimize:</strong> AI suggests improvements</li>
+                    <li><strong>Regression:</strong> Catch prompt regressions</li>
+                </ul>
+            </div>
+            <div class="grid-card">
+                <h4><span>📊</span> Prompt Analytics</h4>
+                <ul>
+                    <li><strong>Token Usage:</strong> Track tokens per template</li>
+                    <li><strong>Success Rate:</strong> Measure output quality</li>
+                    <li><strong>Latency:</strong> Response time tracking</li>
+                    <li><strong>Cost:</strong> $ per prompt execution</li>
+                    <li><strong>Feedback:</strong> User satisfaction scores</li>
+                </ul>
+            </div>
+            <div class="grid-card">
+                <h4><span>🔐</span> Governance</h4>
+                <ul>
+                    <li><strong>Versioning:</strong> Full prompt history</li>
+                    <li><strong>Approvals:</strong> Review before deploy</li>
+                    <li><strong>Rollback:</strong> Instant revert to previous</li>
+                    <li><strong>Audit:</strong> Track all changes</li>
+                    <li><strong>Access Control:</strong> Team permissions</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Example: Compliance Check Prompt Template</div>
+            <pre class="code"><span class="c"># Prompt Template: compliance_check.prompt</span>
+<span class="c"># Version: 3.2.1 | Last Updated: 2024-01-15</span>
+
+<span class="f">{% include "system_header.prompt" %}</span>
+
+<span class="p">## Role</span>
+You are a compliance specialist for BOFA Wealth Management bookkeeping team.
+
+<span class="p">## Loaded Skill</span>
+<span class="f">{% include skill.content %}</span>
+
+<span class="p">## Compressed Context</span>
+<span class="f">{% if blotted_context %}</span>
+Previous conversation summary:
+<span class="f">{{ blotted_context.summary }}</span>
+
+Key entities mentioned:
+<span class="f">{% for entity in blotted_context.entities %}</span>
+- <span class="f">{{ entity.type }}</span>: <span class="f">{{ entity.value }}</span>
+<span class="f">{% endfor %}</span>
+<span class="f">{% endif %}</span>
+
+<span class="p">## Current Request</span>
+User (<span class="f">{{ user.role }}</span>): <span class="f">{{ user_query }}</span>
+
+<span class="f">{% if extracted_entities %}</span>
+<span class="p">## Extracted Information</span>
+<span class="f">{% for key, value in extracted_entities.items() %}</span>
+- <span class="f">{{ key }}</span>: <span class="f">{{ value }}</span>
+<span class="f">{% endfor %}</span>
+<span class="f">{% endif %}</span>
+
+<span class="p">## Instructions</span>
+1. Analyze the user's compliance-related query
+2. Use available MCP tools to fetch required data
+3. Check for violations as specified
+4. Format response with severity levels
+5. Include actionable recommendations
+
+<span class="p">## Response Format</span>
+<span class="f">{% if response_format == "card" %}</span>
+Return a structured response with:
+- title: Brief summary
+- severity: HIGH/MEDIUM/LOW  
+- violations: List of violations found
+- recommendations: Next steps
+<span class="f">{% else %}</span>
+Provide a conversational response suitable for chat.
+<span class="f">{% endif %}</span>
+
+<span class="p">## Constraints</span>
+- Never expose full account numbers
+- Always include violation codes
+- Escalate HIGH severity immediately
+- Maximum response: 500 words</pre>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Prompt Template Library</div>
+            <table>
+                <thead>
+                    <tr><th>Template</th><th>Category</th><th>Variables</th><th>Avg Tokens</th><th>Success Rate</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>compliance_check.prompt</td><td>Compliance</td><td>8</td><td>1,200</td><td>94.2%</td></tr>
+                    <tr><td>trade_lookup.prompt</td><td>Trading</td><td>5</td><td>850</td><td>96.1%</td></tr>
+                    <tr><td>pricing_query.prompt</td><td>Pricing</td><td>6</td><td>920</td><td>95.5%</td></tr>
+                    <tr><td>batch_status.prompt</td><td>Operations</td><td>4</td><td>680</td><td>97.8%</td></tr>
+                    <tr><td>report_generate.prompt</td><td>Reporting</td><td>12</td><td>1,450</td><td>91.3%</td></tr>
+                    <tr><td>intent_classify.prompt</td><td>Core</td><td>3</td><td>450</td><td>98.2%</td></tr>
+                    <tr><td>summarize_results.prompt</td><td>Core</td><td>4</td><td>380</td><td>97.1%</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
 
@@ -392,7 +936,7 @@
         <p class="section-desc">AI Agent workflows designed for Wealth Management bookkeeping operations across Pricing, Trading, and Compliance divisions.</p>
         
         <div class="card">
-            <div class="card-title">Domain Data Flow Architecture</div>
+            <div class="card-title">Domain Data Flow with AI Enhancement</div>
             <div class="flow-diagram">
                 <div class="flow-container">
                     <!-- Users -->
@@ -401,7 +945,7 @@
                         <div class="layer-content">
                             <div class="flow-box">
                                 <div class="flow-box-title">Tech Team</div>
-                                <div class="flow-box-sub">Infrastructure queries</div>
+                                <div class="flow-box-sub">Batch/infra queries</div>
                             </div>
                             <div class="flow-box">
                                 <div class="flow-box-title">Operations</div>
@@ -412,7 +956,7 @@
                                 <div class="flow-box-sub">Client queries</div>
                             </div>
                             <div class="flow-box">
-                                <div class="flow-box-title">Downstream Systems</div>
+                                <div class="flow-box-title">Downstream</div>
                                 <div class="flow-box-sub">API integrations</div>
                             </div>
                         </div>
@@ -420,21 +964,25 @@
                     
                     <div class="flow-arrow-down">▼</div>
                     
-                    <!-- AI Layer -->
-                    <div class="layer-box">
-                        <div class="layer-title">🤖 AI Agent Workflow Platform</div>
+                    <!-- AI Platform -->
+                    <div class="layer-box" style="border-color: var(--accent-pink);">
+                        <div class="layer-title" style="color: var(--accent-pink);">🤖 AI Agent Platform (No-Code)</div>
                         <div class="layer-content">
-                            <div class="flow-box highlight">
-                                <div class="flow-box-title">Chatbot Interface</div>
-                                <div class="flow-box-sub">Slack / Teams / Web</div>
+                            <div class="flow-box ai">
+                                <div class="flow-box-title">Context Blotter</div>
+                                <div class="flow-box-sub">Compress history</div>
+                            </div>
+                            <div class="flow-box skill">
+                                <div class="flow-box-title">Skill Loader</div>
+                                <div class="flow-box-sub">Domain expertise</div>
                             </div>
                             <div class="flow-box highlight">
                                 <div class="flow-box-title">Query Router</div>
-                                <div class="flow-box-sub">AI-powered classification</div>
+                                <div class="flow-box-sub">AI classification</div>
                             </div>
-                            <div class="flow-box highlight">
+                            <div class="flow-box">
                                 <div class="flow-box-title">Workflow Engine</div>
-                                <div class="flow-box-sub">Executes agent workflows</div>
+                                <div class="flow-box-sub">Execute flows</div>
                             </div>
                         </div>
                     </div>
@@ -446,52 +994,36 @@
                         <div class="layer-box" style="border-color: var(--accent-blue);">
                             <div class="layer-title" style="color: var(--accent-blue);">💰 Pricing Division</div>
                             <div style="font-size: 0.8rem; color: var(--text-secondary);">
-                                <p style="margin-bottom: 10px;"><strong>Functions:</strong></p>
-                                <ul style="margin-left: 15px; margin-bottom: 15px;">
-                                    <li>Real-time pricing data</li>
-                                    <li>NAV calculations</li>
-                                    <li>Price history queries</li>
-                                    <li>Pricing validation</li>
-                                </ul>
-                                <p><strong>Data Sources:</strong></p>
-                                <div style="display: flex; gap: 8px; margin-top: 8px;">
-                                    <span class="badge badge-blue">Oracle RT</span>
-                                    <span class="badge badge-purple">DB2 Historical</span>
+                                <div style="margin: 5px 0;">• Real-time pricing</div>
+                                <div style="margin: 5px 0;">• NAV calculations</div>
+                                <div style="margin: 5px 0;">• Price validation</div>
+                                <div style="margin-top: 10px; display: flex; gap: 5px; flex-wrap: wrap;">
+                                    <span class="badge badge-blue">Oracle</span>
+                                    <span class="badge badge-purple">DB2</span>
                                 </div>
                             </div>
                         </div>
                         <div class="layer-box" style="border-color: var(--accent-emerald);">
                             <div class="layer-title" style="color: var(--accent-emerald);">📈 Trading Division</div>
                             <div style="font-size: 0.8rem; color: var(--text-secondary);">
-                                <p style="margin-bottom: 10px;"><strong>Functions:</strong></p>
-                                <ul style="margin-left: 15px; margin-bottom: 15px;">
-                                    <li>Trade status lookup</li>
-                                    <li>Settlement tracking</li>
-                                    <li>Reconciliation</li>
-                                    <li>Trade search</li>
-                                </ul>
-                                <p><strong>Data Sources:</strong></p>
-                                <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
-                                    <span class="badge badge-blue">Oracle Books</span>
+                                <div style="margin: 5px 0;">• Trade status</div>
+                                <div style="margin: 5px 0;">• Settlement tracking</div>
+                                <div style="margin: 5px 0;">• Reconciliation</div>
+                                <div style="margin-top: 10px; display: flex; gap: 5px; flex-wrap: wrap;">
+                                    <span class="badge badge-blue">Oracle</span>
                                     <span class="badge badge-green">Mainframe</span>
-                                    <span class="badge badge-purple">CockroachDB</span>
                                 </div>
                             </div>
                         </div>
                         <div class="layer-box" style="border-color: var(--accent-rose);">
                             <div class="layer-title" style="color: var(--accent-rose);">⚖️ Compliance Division</div>
                             <div style="font-size: 0.8rem; color: var(--text-secondary);">
-                                <p style="margin-bottom: 10px;"><strong>Functions:</strong></p>
-                                <ul style="margin-left: 15px; margin-bottom: 15px;">
-                                    <li>Day trade violations</li>
-                                    <li>90-day rule checks</li>
-                                    <li>Good faith violations</li>
-                                    <li>Compliance reports</li>
-                                </ul>
-                                <p><strong>Data Sources:</strong></p>
-                                <div style="display: flex; gap: 8px; margin-top: 8px;">
+                                <div style="margin: 5px 0;">• Day trade violations</div>
+                                <div style="margin: 5px 0;">• 90-day rule checks</div>
+                                <div style="margin: 5px 0;">• Compliance reports</div>
+                                <div style="margin-top: 10px; display: flex; gap: 5px; flex-wrap: wrap;">
                                     <span class="badge badge-blue">SQL Server</span>
-                                    <span class="badge badge-purple">DB2 Activity</span>
+                                    <span class="badge badge-purple">DB2</span>
                                 </div>
                             </div>
                         </div>
@@ -502,54 +1034,45 @@
 
         <div class="card">
             <div class="card-title">Technology Stack</div>
-            <div class="flow-diagram">
-                <div class="flow-container">
-                    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; width: 100%;">
-                        <div class="layer-box">
-                            <div class="layer-title">☕ Java Stack</div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">
-                                <div style="margin: 5px 0;">• Spring Boot</div>
-                                <div style="margin: 5px 0;">• Kafka Consumers</div>
-                                <div style="margin: 5px 0;">• REST APIs</div>
-                                <div style="margin: 5px 0;">• Spring Batch</div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">🖥️ Mainframe</div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">
-                                <div style="margin: 5px 0;">• COBOL Batch</div>
-                                <div style="margin: 5px 0;">• JCL Scripts</div>
-                                <div style="margin: 5px 0;">• CICS Transactions</div>
-                                <div style="margin: 5px 0;">• IMS DB</div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">🔄 ETL Stack</div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">
-                                <div style="margin: 5px 0;">• Informatica</div>
-                                <div style="margin: 5px 0;">• Talend</div>
-                                <div style="margin: 5px 0;">• Kafka Streams</div>
-                                <div style="margin: 5px 0;">• Spark</div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">🗄️ Databases</div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">
-                                <div style="margin: 5px 0;">• DB2 Enterprise</div>
-                                <div style="margin: 5px 0;">• Oracle 19c RAC</div>
-                                <div style="margin: 5px 0;">• CockroachDB</div>
-                                <div style="margin: 5px 0;">• SQL Server 2019</div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">🔗 Integration</div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">
-                                <div style="margin: 5px 0;">• IBM MQ</div>
-                                <div style="margin: 5px 0;">• ESB</div>
-                                <div style="margin: 5px 0;">• API Gateway</div>
-                                <div style="margin: 5px 0;">• CDC</div>
-                            </div>
-                        </div>
+            <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px;">
+                <div class="layer-box">
+                    <div class="layer-title">☕ Java</div>
+                    <div style="font-size: 0.75rem; color: var(--text-secondary);">
+                        <div>• Spring Boot</div>
+                        <div>• Kafka</div>
+                        <div>• REST APIs</div>
+                    </div>
+                </div>
+                <div class="layer-box">
+                    <div class="layer-title">🖥️ Mainframe</div>
+                    <div style="font-size: 0.75rem; color: var(--text-secondary);">
+                        <div>• COBOL</div>
+                        <div>• JCL</div>
+                        <div>• CICS</div>
+                    </div>
+                </div>
+                <div class="layer-box">
+                    <div class="layer-title">🔄 ETL</div>
+                    <div style="font-size: 0.75rem; color: var(--text-secondary);">
+                        <div>• Informatica</div>
+                        <div>• Kafka Streams</div>
+                        <div>• Spark</div>
+                    </div>
+                </div>
+                <div class="layer-box">
+                    <div class="layer-title">🗄️ Databases</div>
+                    <div style="font-size: 0.75rem; color: var(--text-secondary);">
+                        <div>• DB2</div>
+                        <div>• Oracle RAC</div>
+                        <div>• SQL Server</div>
+                    </div>
+                </div>
+                <div class="layer-box">
+                    <div class="layer-title">🔗 Integration</div>
+                    <div style="font-size: 0.75rem; color: var(--text-secondary);">
+                        <div>• IBM MQ</div>
+                        <div>• API Gateway</div>
+                        <div>• CDC</div>
                     </div>
                 </div>
             </div>
@@ -558,8 +1081,8 @@
 
     <!-- MCP CONNECTORS -->
     <div id="mcp" class="section">
-        <h2 class="section-title">MCP Connectors (Model Context Protocol)</h2>
-        <p class="section-desc">Pre-built connectors that enable AI agents to interact with enterprise systems. Simply drag MCP nodes into your workflow - no coding required.</p>
+        <h2 class="section-title">MCP Connectors</h2>
+        <p class="section-desc">Pre-built Model Context Protocol connectors that enable AI agents to interact with enterprise systems via drag-and-drop.</p>
         
         <div class="card">
             <div class="card-title">MCP Architecture</div>
@@ -568,36 +1091,36 @@
                     <div class="flow-row">
                         <div class="flow-box highlight">
                             <div class="flow-box-title">AI Agent</div>
-                            <div class="flow-box-sub">Workflow Engine</div>
+                            <div class="flow-box-sub">With Skills</div>
                         </div>
                         <span class="flow-arrow">→</span>
                         <div class="flow-box">
                             <div class="flow-box-title">MCP Gateway</div>
-                            <div class="flow-box-sub">Router + Auth + Cache</div>
+                            <div class="flow-box-sub">Auth + Route</div>
                         </div>
                         <span class="flow-arrow">→</span>
                         <div class="flow-box">
                             <div class="flow-box-title">MCP Registry</div>
-                            <div class="flow-box-sub">Service Discovery</div>
+                            <div class="flow-box-sub">Discovery</div>
                         </div>
                     </div>
                     <div class="flow-arrow-down">▼</div>
-                    <div class="flow-row" style="justify-content: space-around;">
+                    <div class="flow-row">
                         <div class="flow-box mcp">
                             <div class="flow-box-title">Database MCP</div>
-                            <div class="flow-box-sub">DB2 / Oracle / SQL</div>
+                            <div class="flow-box-sub">DB2/Oracle/SQL</div>
                         </div>
                         <div class="flow-box mcp">
                             <div class="flow-box-title">Mainframe MCP</div>
-                            <div class="flow-box-sub">JCL / CICS / Datasets</div>
+                            <div class="flow-box-sub">JCL/CICS</div>
                         </div>
                         <div class="flow-box mcp">
                             <div class="flow-box-title">Unix MCP</div>
-                            <div class="flow-box-sub">SSH / SFTP / Logs</div>
+                            <div class="flow-box-sub">SSH/SFTP</div>
                         </div>
                         <div class="flow-box mcp">
                             <div class="flow-box-title">App MCP</div>
-                            <div class="flow-box-sub">Jira / SharePoint</div>
+                            <div class="flow-box-sub">Jira/SharePoint</div>
                         </div>
                     </div>
                 </div>
@@ -608,448 +1131,169 @@
             <div class="grid-card">
                 <h4><span>🗄️</span> Database MCP</h4>
                 <ul>
-                    <li><strong>DB2:</strong> Queries, stored procedures, bulk operations</li>
-                    <li><strong>Oracle:</strong> PL/SQL packages, RAC connections, AQ</li>
-                    <li><strong>CockroachDB:</strong> Distributed transactions, changefeeds</li>
-                    <li><strong>SQL Server:</strong> T-SQL, Always On, bulk copy</li>
-                    <li><strong>Actions:</strong> executeQuery, callProc, getSchema</li>
+                    <li><strong>DB2:</strong> Queries, stored procs, bulk ops</li>
+                    <li><strong>Oracle:</strong> PL/SQL, RAC, Advanced Queuing</li>
+                    <li><strong>SQL Server:</strong> T-SQL, Always On</li>
+                    <li><strong>CockroachDB:</strong> Distributed transactions</li>
                 </ul>
             </div>
             <div class="grid-card">
                 <h4><span>🖥️</span> Mainframe MCP</h4>
                 <ul>
-                    <li><strong>JCL:</strong> Submit jobs, monitor status, get output</li>
-                    <li><strong>CICS:</strong> Transaction execution, screen scraping</li>
-                    <li><strong>Datasets:</strong> Read/write, allocate, catalog queries</li>
-                    <li><strong>IMS:</strong> Database queries, transaction calls</li>
-                    <li><strong>Actions:</strong> submitJob, getStatus, extractData</li>
+                    <li><strong>JCL:</strong> Submit jobs, monitor status</li>
+                    <li><strong>CICS:</strong> Transaction execution</li>
+                    <li><strong>Datasets:</strong> Read/write operations</li>
+                    <li><strong>IMS:</strong> Database queries</li>
                 </ul>
             </div>
             <div class="grid-card">
-                <h4><span>🐧</span> Unix/Linux MCP</h4>
+                <h4><span>🐧</span> Unix MCP</h4>
                 <ul>
                     <li><strong>SSH:</strong> Remote command execution</li>
-                    <li><strong>SFTP:</strong> File upload/download, directory listing</li>
-                    <li><strong>Logs:</strong> Tail logs, grep patterns, archive</li>
-                    <li><strong>Cron:</strong> Schedule management, job triggers</li>
-                    <li><strong>Actions:</strong> runCommand, transferFile, tailLog</li>
+                    <li><strong>SFTP:</strong> File transfer operations</li>
+                    <li><strong>Logs:</strong> Tail, grep, archive</li>
+                    <li><strong>Cron:</strong> Job scheduling</li>
                 </ul>
             </div>
             <div class="grid-card">
                 <h4><span>📱</span> Application MCP</h4>
                 <ul>
-                    <li><strong>Jira:</strong> Create/update issues, JQL search, boards</li>
-                    <li><strong>SharePoint:</strong> Documents, lists, search, permissions</li>
-                    <li><strong>ServiceNow:</strong> Incidents, changes, CMDB queries</li>
-                    <li><strong>Slack/Teams:</strong> Messages, channels, file sharing</li>
-                    <li><strong>Actions:</strong> createItem, search, upload, notify</li>
+                    <li><strong>Jira:</strong> Issues, JQL, boards</li>
+                    <li><strong>SharePoint:</strong> Documents, lists</li>
+                    <li><strong>ServiceNow:</strong> Incidents, CMDB</li>
+                    <li><strong>Slack/Teams:</strong> Messaging</li>
                 </ul>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-title">MCP Security & Governance</div>
-            <div class="grid" style="margin-top: 0;">
-                <div class="grid-card">
-                    <h4><span>🔐</span> Authentication</h4>
-                    <ul>
-                        <li>Kerberos for mainframe/DB2</li>
-                        <li>OAuth2 for cloud apps</li>
-                        <li>API keys for internal services</li>
-                        <li>Certificate-based for Unix</li>
-                    </ul>
-                </div>
-                <div class="grid-card">
-                    <h4><span>🛡️</span> Authorization</h4>
-                    <ul>
-                        <li>Role-based access control (RBAC)</li>
-                        <li>Attribute-based policies (ABAC)</li>
-                        <li>Data masking for PII</li>
-                        <li>Row-level security</li>
-                    </ul>
-                </div>
-                <div class="grid-card">
-                    <h4><span>📋</span> Audit & Compliance</h4>
-                    <ul>
-                        <li>Full action logging</li>
-                        <li>Query audit trails</li>
-                        <li>Compliance reporting</li>
-                        <li>Data lineage tracking</li>
-                    </ul>
-                </div>
             </div>
         </div>
     </div>
 
-    <!-- DEPLOYMENT -->
-    <div id="cicd" class="section">
-        <h2 class="section-title">Deployment Architecture</h2>
-        <p class="section-desc">Enterprise-grade deployment on Kubernetes with CI/CD pipeline from Bitbucket.</p>
-        
-        <div class="card">
-            <div class="card-title">CI/CD Pipeline: Bitbucket to Kubernetes</div>
-            <div class="flow-diagram">
-                <div class="flow-container">
-                    <div class="flow-row">
-                        <div class="flow-box">
-                            <div class="flow-box-title">👨‍💻 Developer</div>
-                            <div class="flow-box-sub">Code + Push</div>
-                        </div>
-                        <span class="flow-arrow">→</span>
-                        <div class="flow-box">
-                            <div class="flow-box-title">📁 Bitbucket</div>
-                            <div class="flow-box-sub">Git Repository</div>
-                        </div>
-                        <span class="flow-arrow">→</span>
-                        <div class="flow-box highlight">
-                            <div class="flow-box-title">⚙️ Pipeline</div>
-                            <div class="flow-box-sub">Build + Test</div>
-                        </div>
-                        <span class="flow-arrow">→</span>
-                        <div class="flow-box">
-                            <div class="flow-box-title">📦 Registry</div>
-                            <div class="flow-box-sub">Harbor + Helm</div>
-                        </div>
-                        <span class="flow-arrow">→</span>
-                        <div class="flow-box mcp">
-                            <div class="flow-box-title">☸️ Kubernetes</div>
-                            <div class="flow-box-sub">Deploy + Scale</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="grid">
-            <div class="grid-card">
-                <h4><span>📁</span> Version Control</h4>
-                <ul>
-                    <li><strong>Branching:</strong> feature → develop → release → main</li>
-                    <li><strong>PR Reviews:</strong> Required approvals</li>
-                    <li><strong>Hotfix:</strong> Direct to main with backport</li>
-                </ul>
-            </div>
-            <div class="grid-card">
-                <h4><span>⚙️</span> Pipeline Stages</h4>
-                <ul>
-                    <li><strong>Build:</strong> Compile, lint, SonarQube</li>
-                    <li><strong>Test:</strong> Unit, integration, security scan</li>
-                    <li><strong>Package:</strong> Docker build, Helm package</li>
-                </ul>
-            </div>
-            <div class="grid-card">
-                <h4><span>🚀</span> Deployment</h4>
-                <ul>
-                    <li><strong>Dev:</strong> Auto-deploy on merge</li>
-                    <li><strong>Staging:</strong> Manual gate + E2E tests</li>
-                    <li><strong>Prod:</strong> Blue-green + canary</li>
-                </ul>
-            </div>
-            <div class="grid-card">
-                <h4><span>📊</span> Observability</h4>
-                <ul>
-                    <li><strong>Metrics:</strong> Prometheus + Grafana</li>
-                    <li><strong>Logging:</strong> ELK Stack</li>
-                    <li><strong>Tracing:</strong> Jaeger distributed tracing</li>
-                </ul>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-title">Kubernetes Architecture</div>
-            <div class="flow-diagram">
-                <div class="flow-container">
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; width: 100%;">
-                        <div class="layer-box">
-                            <div class="layer-title">Ingress</div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">
-                                <div style="margin: 5px 0;">• NGINX Ingress</div>
-                                <div style="margin: 5px 0;">• TLS Termination</div>
-                                <div style="margin: 5px 0;">• WAF</div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">Services</div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">
-                                <div style="margin: 5px 0;">• API Gateway</div>
-                                <div style="margin: 5px 0;">• Workflow Engine</div>
-                                <div style="margin: 5px 0;">• MCP Gateway</div>
-                                <div style="margin: 5px 0;">• Bot Connector</div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">Data</div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">
-                                <div style="margin: 5px 0;">• PostgreSQL</div>
-                                <div style="margin: 5px 0;">• Redis Cluster</div>
-                                <div style="margin: 5px 0;">• S3/MinIO</div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">Infrastructure</div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">
-                                <div style="margin: 5px 0;">• Vault (Secrets)</div>
-                                <div style="margin: 5px 0;">• Consul (Discovery)</div>
-                                <div style="margin: 5px 0;">• Kafka (Events)</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- POC -->
+    <!-- POC & DEPLOYMENT -->
     <div id="poc" class="section">
-        <h2 class="section-title">POC Implementation</h2>
-        <p class="section-desc">Proof of concept demonstrating no-code AI agent workflows for BOFA Wealth Management use cases.</p>
+        <h2 class="section-title">POC & Deployment</h2>
+        <p class="section-desc">Proof of concept implementation and enterprise deployment architecture.</p>
         
         <div class="card">
             <div class="card-title">POC Use Cases</div>
-            <div class="flow-diagram">
-                <div class="flow-container">
-                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; width: 100%;">
-                        <div class="layer-box">
-                            <div class="layer-title">Use Case 1: Batch Job Status (Tech Team)</div>
-                            <div style="padding: 10px;">
-                                <div style="margin-bottom: 15px; font-size: 0.85rem;">
-                                    <strong>Query:</strong> "What's the status of batch job PRICNG01?"
-                                </div>
-                                <div class="flow-row" style="justify-content: flex-start; gap: 10px;">
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">Slack</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">NLP</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box mcp" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">Mainframe MCP</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">Response</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">Use Case 2: Day Trade Violations (Operations)</div>
-                            <div style="padding: 10px;">
-                                <div style="margin-bottom: 15px; font-size: 0.85rem;">
-                                    <strong>Query:</strong> "Show me today's day trade violations"
-                                </div>
-                                <div class="flow-row" style="justify-content: flex-start; gap: 10px;">
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">Teams</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">NLP</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box mcp" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">DB2 + SQL MCP</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">Response</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">Use Case 3: Pricing History (FA Team)</div>
-                            <div style="padding: 10px;">
-                                <div style="margin-bottom: 15px; font-size: 0.85rem;">
-                                    <strong>Query:</strong> "Get pricing history for AAPL last 30 days"
-                                </div>
-                                <div class="flow-row" style="justify-content: flex-start; gap: 10px;">
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">Web Chat</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">NLP</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box mcp" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">Oracle MCP</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">Response</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">Use Case 4: Compliance Report (Downstream)</div>
-                            <div style="padding: 10px;">
-                                <div style="margin-bottom: 15px; font-size: 0.85rem;">
-                                    <strong>Query:</strong> "Generate compliance report for account X"
-                                </div>
-                                <div class="flow-row" style="justify-content: flex-start; gap: 10px;">
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">API</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">Workflow</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box mcp" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">Multi-DB MCP</div>
-                                    </div>
-                                    <span class="flow-arrow">→</span>
-                                    <div class="flow-box" style="min-width: 100px; padding: 10px;">
-                                        <div class="flow-box-title" style="font-size: 0.75rem;">SharePoint</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+                <div class="layer-box">
+                    <div class="layer-title">UC1: Batch Job Status</div>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 10px;">
+                        "What's the status of batch job PRICNG01?"
+                    </div>
+                    <div class="flow-row" style="justify-content: flex-start; gap: 8px;">
+                        <div class="flow-box" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Slack</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box ai" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Blot + Skill</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box mcp" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Mainframe</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Response</div>
+                    </div>
+                </div>
+                <div class="layer-box">
+                    <div class="layer-title">UC2: Compliance Violations</div>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 10px;">
+                        "Show me today's day trade violations"
+                    </div>
+                    <div class="flow-row" style="justify-content: flex-start; gap: 8px;">
+                        <div class="flow-box" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Teams</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box ai" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Blot + Skill</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box mcp" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">DB2 + SQL</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Response</div>
+                    </div>
+                </div>
+                <div class="layer-box">
+                    <div class="layer-title">UC3: Pricing History</div>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 10px;">
+                        "Get AAPL pricing history for last 30 days"
+                    </div>
+                    <div class="flow-row" style="justify-content: flex-start; gap: 8px;">
+                        <div class="flow-box" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Web</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box ai" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Blot + Skill</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box mcp" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Oracle</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Response</div>
+                    </div>
+                </div>
+                <div class="layer-box">
+                    <div class="layer-title">UC4: Compliance Report</div>
+                    <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 10px;">
+                        "Generate compliance report for account X"
+                    </div>
+                    <div class="flow-row" style="justify-content: flex-start; gap: 8px;">
+                        <div class="flow-box" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">API</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box ai" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Blot + Skill</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box mcp" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">Multi-DB</div>
+                        <span style="color: var(--accent-blue);">→</span>
+                        <div class="flow-box" style="min-width: 70px; padding: 8px; font-size: 0.7rem;">SharePoint</div>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="card">
-            <div class="card-title">POC Architecture - Docker Compose</div>
-            <div class="flow-diagram">
-                <div class="flow-container">
-                    <div style="display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 20px; width: 100%;">
-                        <div class="layer-box">
-                            <div class="layer-title">Frontend</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">
-                                <div style="margin: 8px 0; padding: 8px; background: var(--bg-primary); border-radius: 6px;">
-                                    <strong>React Web UI</strong><br/>
-                                    <span style="font-size: 0.7rem;">Workflow Builder Canvas</span>
-                                </div>
-                                <div style="margin: 8px 0; padding: 8px; background: var(--bg-primary); border-radius: 6px;">
-                                    <strong>Chat Widget</strong><br/>
-                                    <span style="font-size: 0.7rem;">WebSocket Interface</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">Docker Compose Services</div>
-                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; font-size: 0.75rem;">
-                                <div style="padding: 10px; background: var(--bg-primary); border-radius: 6px; text-align: center;">
-                                    <strong>API Service</strong><br/>
-                                    <span style="color: var(--accent-cyan);">:8080</span>
-                                </div>
-                                <div style="padding: 10px; background: var(--bg-primary); border-radius: 6px; text-align: center;">
-                                    <strong>Workflow Engine</strong><br/>
-                                    <span style="color: var(--accent-cyan);">:7233</span>
-                                </div>
-                                <div style="padding: 10px; background: var(--bg-primary); border-radius: 6px; text-align: center;">
-                                    <strong>Bot Service</strong><br/>
-                                    <span style="color: var(--accent-cyan);">:3000</span>
-                                </div>
-                                <div style="padding: 10px; background: rgba(16,185,129,0.2); border-radius: 6px; text-align: center;">
-                                    <strong>DB MCP</strong><br/>
-                                    <span style="color: var(--accent-emerald);">:9001</span>
-                                </div>
-                                <div style="padding: 10px; background: rgba(16,185,129,0.2); border-radius: 6px; text-align: center;">
-                                    <strong>Unix MCP</strong><br/>
-                                    <span style="color: var(--accent-emerald);">:9002</span>
-                                </div>
-                                <div style="padding: 10px; background: rgba(16,185,129,0.2); border-radius: 6px; text-align: center;">
-                                    <strong>Doc MCP</strong><br/>
-                                    <span style="color: var(--accent-emerald);">:9003</span>
-                                </div>
-                                <div style="padding: 10px; background: rgba(245,158,11,0.2); border-radius: 6px; text-align: center;">
-                                    <strong>PostgreSQL</strong><br/>
-                                    <span style="color: var(--accent-amber);">:5432</span>
-                                </div>
-                                <div style="padding: 10px; background: rgba(245,158,11,0.2); border-radius: 6px; text-align: center;">
-                                    <strong>Redis</strong><br/>
-                                    <span style="color: var(--accent-amber);">:6379</span>
-                                </div>
-                                <div style="padding: 10px; background: var(--bg-primary); border-radius: 6px; text-align: center;">
-                                    <strong>LLM Proxy</strong><br/>
-                                    <span style="color: var(--accent-cyan);">:8090</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="layer-box">
-                            <div class="layer-title">External</div>
-                            <div style="font-size: 0.8rem; color: var(--text-secondary);">
-                                <div style="margin: 8px 0; padding: 8px; background: var(--bg-primary); border-radius: 6px;">
-                                    <strong>GPU Server</strong><br/>
-                                    <span style="font-size: 0.7rem;">LLM /generate API</span>
-                                </div>
-                                <div style="margin: 8px 0; padding: 8px; background: var(--bg-primary); border-radius: 6px;">
-                                    <strong>Enterprise Systems</strong><br/>
-                                    <span style="font-size: 0.7rem;">DB2, Oracle, Mainframe</span>
-                                </div>
-                            </div>
-                        </div>
+            <div class="card-title">Docker Compose Architecture</div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                <div class="layer-box">
+                    <div class="layer-title">Core Services</div>
+                    <div style="font-size: 0.8rem;">
+                        <div style="padding: 8px; background: var(--bg-primary); border-radius: 6px; margin: 5px 0;">API Service <span style="color: var(--accent-cyan);">:8080</span></div>
+                        <div style="padding: 8px; background: var(--bg-primary); border-radius: 6px; margin: 5px 0;">Workflow Engine <span style="color: var(--accent-cyan);">:7233</span></div>
+                        <div style="padding: 8px; background: var(--bg-primary); border-radius: 6px; margin: 5px 0;">Bot Service <span style="color: var(--accent-cyan);">:3000</span></div>
+                        <div style="padding: 8px; background: rgba(236,72,153,0.2); border-radius: 6px; margin: 5px 0;">Blotting Service <span style="color: var(--accent-pink);">:8085</span></div>
+                    </div>
+                </div>
+                <div class="layer-box">
+                    <div class="layer-title">MCP Servers</div>
+                    <div style="font-size: 0.8rem;">
+                        <div style="padding: 8px; background: rgba(16,185,129,0.2); border-radius: 6px; margin: 5px 0;">DB MCP <span style="color: var(--accent-emerald);">:9001</span></div>
+                        <div style="padding: 8px; background: rgba(16,185,129,0.2); border-radius: 6px; margin: 5px 0;">Unix MCP <span style="color: var(--accent-emerald);">:9002</span></div>
+                        <div style="padding: 8px; background: rgba(16,185,129,0.2); border-radius: 6px; margin: 5px 0;">Doc MCP <span style="color: var(--accent-emerald);">:9003</span></div>
+                        <div style="padding: 8px; background: rgba(16,185,129,0.2); border-radius: 6px; margin: 5px 0;">Mainframe MCP <span style="color: var(--accent-emerald);">:9004</span></div>
+                    </div>
+                </div>
+                <div class="layer-box">
+                    <div class="layer-title">Data & External</div>
+                    <div style="font-size: 0.8rem;">
+                        <div style="padding: 8px; background: rgba(245,158,11,0.2); border-radius: 6px; margin: 5px 0;">PostgreSQL <span style="color: var(--accent-amber);">:5432</span></div>
+                        <div style="padding: 8px; background: rgba(245,158,11,0.2); border-radius: 6px; margin: 5px 0;">Redis <span style="color: var(--accent-amber);">:6379</span></div>
+                        <div style="padding: 8px; background: var(--bg-primary); border-radius: 6px; margin: 5px 0;">GPU Server (LLM)</div>
+                        <div style="padding: 8px; background: var(--bg-primary); border-radius: 6px; margin: 5px 0;">Enterprise DBs</div>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="card">
-            <div class="card-title">Sample Workflow Definition (YAML)</div>
-            <pre class="code"><span class="c"># Compliance Violation Check Workflow</span>
-<span class="c"># Created via No-Code Builder - Exported as YAML</span>
-
-<span class="p">id:</span> <span class="s">"wf-compliance-check"</span>
-<span class="p">name:</span> <span class="s">"Day Trade Violation Checker"</span>
-<span class="p">version:</span> <span class="s">"1.0.0"</span>
-<span class="p">created_by:</span> <span class="s">"Visual Builder"</span>
-
-<span class="p">trigger:</span>
-  <span class="p">type:</span> <span class="s">"chatbot"</span>
-  <span class="p">intent:</span> <span class="s">"check_violations"</span>
-  <span class="p">platforms:</span> [<span class="s">"slack"</span>, <span class="s">"teams"</span>, <span class="s">"web"</span>]
-  <span class="p">entities:</span>
-    - <span class="p">name:</span> <span class="s">"account_id"</span>
-      <span class="p">required:</span> <span class="k">true</span>
-    - <span class="p">name:</span> <span class="s">"date_range"</span>
-      <span class="p">default:</span> <span class="s">"today"</span>
-
-<span class="p">nodes:</span>
-  - <span class="p">id:</span> <span class="s">"start"</span>
-    <span class="p">type:</span> <span class="s">"trigger"</span>
-    <span class="p">next:</span> <span class="s">"get_account"</span>
-
-  - <span class="p">id:</span> <span class="s">"get_account"</span>
-    <span class="p">type:</span> <span class="s">"mcp_action"</span>
-    <span class="p">mcp:</span> <span class="s">"oracle-trading"</span>
-    <span class="p">action:</span> <span class="s">"executeQuery"</span>
-    <span class="p">params:</span>
-      <span class="p">sql:</span> <span class="s">"SELECT * FROM accounts WHERE id = :account_id"</span>
-    <span class="p">next:</span> [<span class="s">"check_day_trade"</span>, <span class="s">"check_90_day"</span>]
-
-  - <span class="p">id:</span> <span class="s">"check_day_trade"</span>
-    <span class="p">type:</span> <span class="s">"mcp_action"</span>
-    <span class="p">mcp:</span> <span class="s">"db2-compliance"</span>
-    <span class="p">action:</span> <span class="s">"callProcedure"</span>
-    <span class="p">params:</span>
-      <span class="p">procedure:</span> <span class="s">"SP_CHECK_DAY_TRADE"</span>
-    <span class="p">next:</span> <span class="s">"aggregate"</span>
-
-  - <span class="p">id:</span> <span class="s">"check_90_day"</span>
-    <span class="p">type:</span> <span class="s">"mcp_action"</span>
-    <span class="p">mcp:</span> <span class="s">"db2-compliance"</span>
-    <span class="p">action:</span> <span class="s">"callProcedure"</span>
-    <span class="p">params:</span>
-      <span class="p">procedure:</span> <span class="s">"SP_CHECK_90_DAY_RULE"</span>
-    <span class="p">next:</span> <span class="s">"aggregate"</span>
-
-  - <span class="p">id:</span> <span class="s">"aggregate"</span>
-    <span class="p">type:</span> <span class="s">"ai_node"</span>
-    <span class="p">action:</span> <span class="s">"summarize"</span>
-    <span class="p">prompt:</span> <span class="s">"Summarize compliance results with severity levels"</span>
-    <span class="p">next:</span> <span class="s">"respond"</span>
-
-  - <span class="p">id:</span> <span class="s">"respond"</span>
-    <span class="p">type:</span> <span class="s">"response"</span>
-    <span class="p">format:</span> <span class="s">"card"</span>
-    <span class="p">template:</span> <span class="s">"compliance_summary"</span></pre>
+            <div class="card-title">CI/CD Pipeline</div>
+            <div class="flow-row" style="justify-content: center; gap: 10px; padding: 20px;">
+                <div class="flow-box" style="min-width: 100px;">
+                    <div class="flow-box-title">Bitbucket</div>
+                    <div class="flow-box-sub">Git repo</div>
+                </div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-box highlight" style="min-width: 100px;">
+                    <div class="flow-box-title">Pipeline</div>
+                    <div class="flow-box-sub">Build + Test</div>
+                </div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-box" style="min-width: 100px;">
+                    <div class="flow-box-title">Harbor</div>
+                    <div class="flow-box-sub">Registry</div>
+                </div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-box mcp" style="min-width: 100px;">
+                    <div class="flow-box-title">Kubernetes</div>
+                    <div class="flow-box-sub">Deploy</div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1061,31 +1305,29 @@
         <div class="card">
             <table>
                 <thead>
-                    <tr><th>Module</th><th>Feature</th><th>Phase</th><th>Priority</th><th>Description</th></tr>
+                    <tr><th>Module</th><th>Feature</th><th>Phase</th><th>Priority</th></tr>
                 </thead>
                 <tbody>
-                    <tr><td rowspan="5"><strong>No-Code Builder</strong></td><td>Drag-and-Drop Canvas</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Visual workflow design interface</td></tr>
-                    <tr><td>Node Property Panel</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Configure nodes without code</td></tr>
-                    <tr><td>Natural Language Mode</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Describe workflow in English</td></tr>
-                    <tr><td>Template Library</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td><td>Pre-built workflow templates</td></tr>
-                    <tr><td>Version Control UI</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td><td>Visual diff and rollback</td></tr>
-                    <tr><td rowspan="4"><strong>AI Agent</strong></td><td>Intent Classification</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Understand user queries</td></tr>
-                    <tr><td>Entity Extraction</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Extract parameters from text</td></tr>
-                    <tr><td>Response Generation</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Natural language responses</td></tr>
-                    <tr><td>Multi-step Reasoning</td><td><span class="badge badge-purple">Phase 2</span></td><td>P2</td><td>Complex decision making</td></tr>
-                    <tr><td rowspan="4"><strong>MCP Connectors</strong></td><td>Database MCP (DB2/Oracle)</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Query, procedures, bulk ops</td></tr>
-                    <tr><td>Unix/Linux MCP</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>SSH commands, file transfer</td></tr>
-                    <tr><td>Mainframe MCP</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td><td>JCL, CICS, datasets</td></tr>
-                    <tr><td>App MCP (Jira/SharePoint)</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Enterprise app integration</td></tr>
-                    <tr><td rowspan="3"><strong>Bot Integration</strong></td><td>Slack Connector</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Slash commands, interactive</td></tr>
-                    <tr><td>MS Teams Connector</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td><td>Adaptive cards, bot framework</td></tr>
-                    <tr><td>Universal REST API</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Custom bot integration</td></tr>
-                    <tr><td rowspan="3"><strong>Security</strong></td><td>OAuth2/SSO</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td><td>Enterprise authentication</td></tr>
-                    <tr><td>RBAC</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td><td>Role-based access</td></tr>
-                    <tr><td>Audit Logging</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Complete audit trail</td></tr>
-                    <tr><td rowspan="3"><strong>Operations</strong></td><td>Execution Dashboard</td><td><span class="badge badge-green">POC</span></td><td>P0</td><td>Real-time monitoring</td></tr>
-                    <tr><td>Metrics & Alerts</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td><td>Prometheus/Grafana</td></tr>
-                    <tr><td>Log Aggregation</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td><td>Centralized logging</td></tr>
+                    <tr><td rowspan="4"><strong>No-Code Builder</strong></td><td>Drag-and-Drop Canvas</td><td><span class="badge badge-green">POC</span></td><td>P0</td></tr>
+                    <tr><td>Natural Language Mode</td><td><span class="badge badge-green">POC</span></td><td>P0</td></tr>
+                    <tr><td>Template Library</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td></tr>
+                    <tr><td>Version Control UI</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td></tr>
+                    <tr><td rowspan="4"><strong>AI Blotting</strong></td><td>Conversation Compression</td><td><span class="badge badge-green">POC</span></td><td>P0</td></tr>
+                    <tr><td>Query-Aware Blotting</td><td><span class="badge badge-green">POC</span></td><td>P0</td></tr>
+                    <tr><td>Document Blotting</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td></tr>
+                    <tr><td>Adaptive Compression</td><td><span class="badge badge-purple">Phase 2</span></td><td>P2</td></tr>
+                    <tr><td rowspan="4"><strong>SKILL.md System</strong></td><td>Skill Loader</td><td><span class="badge badge-green">POC</span></td><td>P0</td></tr>
+                    <tr><td>Visual Skill Editor</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td></tr>
+                    <tr><td>Skill Composition</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td></tr>
+                    <tr><td>Skill A/B Testing</td><td><span class="badge badge-purple">Phase 2</span></td><td>P2</td></tr>
+                    <tr><td rowspan="3"><strong>Prompt Engineering</strong></td><td>Template Engine</td><td><span class="badge badge-green">POC</span></td><td>P0</td></tr>
+                    <tr><td>Visual Prompt Builder</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td></tr>
+                    <tr><td>Prompt Analytics</td><td><span class="badge badge-purple">Phase 2</span></td><td>P2</td></tr>
+                    <tr><td rowspan="3"><strong>MCP Connectors</strong></td><td>DB2/Oracle/SQL MCP</td><td><span class="badge badge-green">POC</span></td><td>P0</td></tr>
+                    <tr><td>Unix/Mainframe MCP</td><td><span class="badge badge-green">POC</span></td><td>P0</td></tr>
+                    <tr><td>App MCP (Jira/SharePoint)</td><td><span class="badge badge-blue">Phase 1</span></td><td>P1</td></tr>
+                    <tr><td rowspan="2"><strong>Bot Integration</strong></td><td>Slack/Teams Connector</td><td><span class="badge badge-green">POC</span></td><td>P0</td></tr>
+                    <tr><td>Universal REST API</td><td><span class="badge badge-green">POC</span></td><td>P0</td></tr>
                 </tbody>
             </table>
         </div>
@@ -1098,120 +1340,53 @@
         
         <div class="card">
             <div class="card-title">Integration Flow</div>
-            <div class="flow-diagram">
-                <div class="flow-container">
-                    <div class="flow-row">
-                        <div class="flow-box">
-                            <div class="flow-box-title">👤 User</div>
-                            <div class="flow-box-sub">Asks question</div>
-                        </div>
-                        <span class="flow-arrow">→</span>
-                        <div class="flow-box">
-                            <div class="flow-box-title">🤖 Your Bot</div>
-                            <div class="flow-box-sub">Existing AI Bot</div>
-                        </div>
-                        <span class="flow-arrow">→</span>
-                        <div class="flow-box highlight">
-                            <div class="flow-box-title">🔗 Connector API</div>
-                            <div class="flow-box-sub">POST /trigger</div>
-                        </div>
-                        <span class="flow-arrow">→</span>
-                        <div class="flow-box">
-                            <div class="flow-box-title">⚙️ Workflow</div>
-                            <div class="flow-box-sub">Execute agents</div>
-                        </div>
-                        <span class="flow-arrow">→</span>
-                        <div class="flow-box mcp">
-                            <div class="flow-box-title">🔌 MCP</div>
-                            <div class="flow-box-sub">Enterprise data</div>
-                        </div>
-                    </div>
+            <div class="flow-row" style="justify-content: center; padding: 20px; gap: 10px;">
+                <div class="flow-box">
+                    <div class="flow-box-title">Your Bot</div>
+                </div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-box highlight">
+                    <div class="flow-box-title">Connector API</div>
+                </div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-box ai">
+                    <div class="flow-box-title">Blot + Skill</div>
+                </div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-box">
+                    <div class="flow-box-title">Workflow</div>
+                </div>
+                <span class="flow-arrow">→</span>
+                <div class="flow-box mcp">
+                    <div class="flow-box-title">MCP</div>
                 </div>
             </div>
         </div>
 
         <div class="card">
-            <div class="card-title">API Specification</div>
-            <pre class="code"><span class="c"># OpenAPI 3.0 Specification</span>
+            <div class="card-title">API Example</div>
+            <pre class="code"><span class="p">POST</span> <span class="s">/api/v1/connector/trigger</span>
 
-<span class="p">POST</span> <span class="s">/api/v1/connector/trigger</span>
-<span class="c"># Trigger a workflow from your bot</span>
-
-<span class="p">Request Body:</span>
 {
-  <span class="p">"source"</span>: <span class="s">"slack"</span> | <span class="s">"teams"</span> | <span class="s">"custom"</span>,
+  <span class="p">"source"</span>: <span class="s">"slack"</span>,
   <span class="p">"user_context"</span>: {
-    <span class="p">"user_id"</span>: <span class="s">"U123456"</span>,
-    <span class="p">"channel_id"</span>: <span class="s">"C789"</span>,
-    <span class="p">"roles"</span>: [<span class="s">"tech_team"</span>, <span class="s">"admin"</span>]
+    <span class="p">"user_id"</span>: <span class="s">"U123"</span>,
+    <span class="p">"roles"</span>: [<span class="s">"tech_team"</span>]
   },
   <span class="p">"payload"</span>: {
-    <span class="p">"message"</span>: <span class="s">"Check day trade violations for account 12345"</span>
+    <span class="p">"message"</span>: <span class="s">"Check violations for account 12345"</span>
+  },
+  <span class="p">"options"</span>: {
+    <span class="p">"blotting"</span>: {
+      <span class="p">"enabled"</span>: <span class="k">true</span>,
+      <span class="p">"strategy"</span>: <span class="s">"query_aware"</span>,
+      <span class="p">"target_tokens"</span>: <span class="n">4000</span>
+    },
+    <span class="p">"skill"</span>: <span class="s">"compliance-violations"</span>
   },
   <span class="p">"callback_url"</span>: <span class="s">"https://your-bot.com/callback"</span>,
   <span class="p">"async_mode"</span>: <span class="k">true</span>
-}
-
-<span class="p">Response (202 Accepted):</span>
-{
-  <span class="p">"execution_id"</span>: <span class="s">"exec-abc-123"</span>,
-  <span class="p">"status"</span>: <span class="s">"processing"</span>
-}
-
-<span class="p">Callback POST to your URL:</span>
-{
-  <span class="p">"execution_id"</span>: <span class="s">"exec-abc-123"</span>,
-  <span class="p">"status"</span>: <span class="s">"completed"</span>,
-  <span class="p">"result"</span>: {
-    <span class="p">"summary"</span>: <span class="s">"Found 3 day trade violations..."</span>,
-    <span class="p">"data"</span>: { ... }
-  }
 }</pre>
-        </div>
-
-        <div class="card">
-            <div class="card-title">Integration Code Example</div>
-            <pre class="code"><span class="c">// Integrate your existing bot with the Workflow Platform</span>
-
-<span class="k">const</span> triggerWorkflow = <span class="k">async</span> (userMessage, context) => {
-  <span class="k">const</span> response = <span class="k">await</span> fetch(<span class="s">'https://workflow-api.bofa.com/api/v1/connector/trigger'</span>, {
-    method: <span class="s">'POST'</span>,
-    headers: {
-      <span class="s">'Content-Type'</span>: <span class="s">'application/json'</span>,
-      <span class="s">'X-API-Key'</span>: process.env.WORKFLOW_API_KEY
-    },
-    body: JSON.stringify({
-      source: <span class="s">'custom'</span>,
-      user_context: {
-        user_id: context.userId,
-        channel_id: context.channelId,
-        roles: context.roles
-      },
-      payload: {
-        message: userMessage
-      },
-      callback_url: <span class="s">'https://your-bot.bofa.com/webhook/result'</span>,
-      async_mode: <span class="k">true</span>
-    })
-  });
-  
-  <span class="k">return</span> response.json();
-};
-
-<span class="c">// Handle async callback</span>
-app.post(<span class="s">'/webhook/result'</span>, (req, res) => {
-  <span class="k">const</span> { execution_id, status, result } = req.body;
-  
-  <span class="c">// Send result back to user via your bot platform</span>
-  sendToUser(result.channel_id, {
-    type: <span class="s">'card'</span>,
-    title: <span class="s">'Workflow Result'</span>,
-    body: result.summary,
-    data: result.data
-  });
-  
-  res.status(200).send(<span class="s">'OK'</span>);
-});</pre>
         </div>
     </div>
 
@@ -1219,19 +1394,15 @@ app.post(<span class="s">'/webhook/result'</span>, (req, res) => {
     <footer>
         <p><strong>Enterprise No-Code AI Agent Workflow Builder</strong></p>
         <p>BOFA Wealth Management | Pricing • Trading • Compliance</p>
-        <p style="margin-top: 10px; font-size: 0.8rem;">Built with MCP (Model Context Protocol) for Enterprise Integration</p>
+        <p style="margin-top: 10px; font-size: 0.8rem;">AI Blotting • SKILL.md • Prompt Engineering • MCP Automation</p>
     </footer>
 </div>
 
 <script>
     function showTab(tabId) {
-        // Hide all sections
         document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-        // Remove active from all tabs
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        // Show selected section
         document.getElementById(tabId).classList.add('active');
-        // Mark tab as active
         event.target.classList.add('active');
     }
 </script>
